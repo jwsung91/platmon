@@ -13,7 +13,7 @@ def make_handler(sampler, web=True):
             if self.path == "/api/stats":
                 stats = sampler.latest()
                 if stats is None:
-                    self.send_error(503, "no data collected yet")
+                    self.send_error(503, "no current data (not collected yet, or collection keeps failing)")
                     return
                 body, ctype = json.dumps(stats).encode(), "application/json"
             elif web and self.path in ("/", "/index.html"):

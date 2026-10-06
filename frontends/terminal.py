@@ -15,7 +15,8 @@ def start(sampler, cfg=None):
     def run():
         while True:
             stats = sampler.latest()
-            print("\033[H\033[J" + (render(stats) if stats else "waiting for data..."), flush=True)
+            text = render(stats) if stats else "no current data: not collected yet, or collection keeps failing (see stderr)"
+            print("\033[H\033[J" + text, flush=True)
             time.sleep(sampler.interval)
 
     t = threading.Thread(target=run, name="terminal", daemon=True)
