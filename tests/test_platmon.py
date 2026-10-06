@@ -14,7 +14,7 @@ def enabled(cfg):
 def test_defaults():
     cfg = load_config()
     assert enabled(cfg) == {"http"}
-    assert cfg["http"].getint("port") == 8080 and cfg["http"].getboolean("web")
+    assert cfg["http"].getint("port") == 9797 and cfg["http"].getboolean("web")
     assert cfg["core"].getfloat("interval") == 1.0
 
 

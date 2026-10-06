@@ -9,7 +9,7 @@ services:
     uts: host                   # host's hostname, the model name fallback on hosts without DMI / device tree
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "9797:9797"
     environment:
       PLATMON_DEVICE_TREE: /host/firmware/devicetree/base
       PLATMON_DISK: /host/root

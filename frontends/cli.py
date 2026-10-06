@@ -2,7 +2,7 @@
 """Remote terminal client for platmon: reads a host's /api/stats. Standalone; copy this file anywhere.
 render() is shared with the in-process terminal frontend.
 
-Usage: python3 frontends/cli.py [host[:port]] [interval_sec]   (default localhost:8080, 1s)
+Usage: python3 frontends/cli.py [host[:port]] [interval_sec]   (default localhost:9797, 1s)
 On the device itself, use the launcher instead: python3 platmon.py --frontends terminal
 """
 import json
@@ -52,8 +52,8 @@ def render(s):
 
 def main():
     args = sys.argv[1:]
-    host = args.pop(0) if args else "localhost:8080"
-    where = f"http://{host if ':' in host else host + ':8080'}/api/stats"
+    host = args.pop(0) if args else "localhost:9797"
+    where = f"http://{host if ':' in host else host + ':9797'}/api/stats"
 
     def fetch():
         with urllib.request.urlopen(where, timeout=5) as r:

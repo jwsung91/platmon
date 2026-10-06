@@ -13,10 +13,10 @@ COPY frontends ./frontends
 
 # everything platmon reads in /sys and /proc is world-readable; no root needed
 USER 65534:65534
-EXPOSE 8080
+EXPOSE 9797
 # /api/stats answers 503 while there is no current data, which marks the container unhealthy.
-# Keep [http] port at 8080 inside the container; change the published port instead.
+# Keep [http] port at 9797 inside the container; change the published port instead.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD ["python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/stats', timeout=4)"]
+  CMD ["python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9797/api/stats', timeout=4)"]
 ENTRYPOINT ["python3", "/opt/platmon/platmon.py"]
 CMD ["/opt/platmon/platmon.ini"]
