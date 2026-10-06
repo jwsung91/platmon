@@ -1,6 +1,7 @@
 import pytest
 
 from cli import render
+from collector import collect
 
 FULL = {
     "platform": "Jetson Orin", "model": "Test Board", "uptime": 90061, "power_mode": "MAXN_SUPER",
@@ -44,3 +45,11 @@ def test_render_bare_shows_basics():
 @pytest.mark.parametrize("absent", ["mode", "MHz", "GPU", "SWAP", "TEMP", "POWER", "FAN"])
 def test_render_bare_hides_missing(absent):
     assert absent not in render(BARE)
+
+
+def test_render_live_collect():
+    """The viewer accepts whatever the collector really returns on this host (CI runner, WSL, boards)."""
+    s = collect()
+    out = render(s)
+    assert s["platform"] in out
+    assert all(f"CPU{c['id']}" in out for c in s["cpu"])

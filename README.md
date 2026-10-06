@@ -21,7 +21,7 @@ Then from anywhere on the network:
 python3 cli.py <host>[:port] [interval]   # terminal viewer
 ```
 
-or open `http://<host>:8080` in a browser. Raw data: `http://<host>:8080/api/stats`.
+or open `http://<host>:8080` in a browser. On the device itself, `python3 cli.py --local` works without the server. Raw data: `http://<host>:8080/api/stats`.
 
 The API has no authentication. Run it on trusted networks only.
 
