@@ -1,5 +1,5 @@
-# Any Linux host:   docker compose up -d
-# Jetson:           docker compose -f compose.yaml -f compose.jetson.yaml up -d
+# Any Linux host:   docker compose up -d --build
+# Jetson:           docker compose -f compose.yaml -f compose.jetson.yaml up -d --build
 services:
   platmon:
     build: .

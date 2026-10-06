@@ -50,11 +50,13 @@ sudo systemctl daemon-reload && sudo systemctl enable --now platmon
 
 ### Docker
 
+No image is published: build it yourself on the device (see "Container image licensing" below).
+`up` builds the image `platmon:local` from this checkout the first time; add `--build` after a `git pull`.
 The container monitors the host, so it needs a few read-only host mounts (all set in `compose.yaml`):
 
 ```sh
-docker compose up -d                                          # any Linux host
-docker compose -f compose.yaml -f compose.jetson.yaml up -d   # Jetson: adds the nvpmodel power mode
+docker compose up -d --build                                          # any Linux host
+docker compose -f compose.yaml -f compose.jetson.yaml up -d --build   # Jetson: adds the nvpmodel power mode
 ```
 
 - `/sys/firmware` → board detection. Docker hides the device tree, so without this mount a Jetson
@@ -68,7 +70,21 @@ docker compose -f compose.yaml -f compose.jetson.yaml up -d   # Jetson: adds the
   `/api/stats` has no current data. The terminal frontend needs a TTY:
   `docker compose run --rm platmon --frontends terminal`.
 
-Only the Dockerfile ships here; no image is published.
+#### Container image licensing
+
+platmon itself is Apache-2.0 and uses only the Python standard library. The image it builds on,
+`python:3.13-slim`, is Debian-based and contains GPL/LGPL software (e.g. bash, coreutils, apt,
+glibc), as any Linux base image does. So:
+
+- This repository ships only the `Dockerfile` and compose files; it does **not** publish images.
+  Building and running the image on your own machine is not distribution.
+- If you push an image you built to a registry or hand it to others, you distribute those
+  components and take on their license obligations (offering the corresponding source, keeping
+  license notices). platmon stays Apache-2.0: it is only packaged alongside them, not linked into them.
+- The image deliberately uses a plain Python base, not an NVIDIA L4T one, so it bundles no NVIDIA
+  binaries; platmon reads `/proc` and `/sys` only.
+
+This is a summary of the project's policy, not legal advice.
 
 ## Test
 
