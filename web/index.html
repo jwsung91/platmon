@@ -48,7 +48,7 @@ function render(s) {
   const up = Math.floor(s.uptime);
   $('model').textContent = s.model;
   $('meta').textContent = `${s.platform} · ${s.power_mode ? 'mode ' + s.power_mode + ' · ' : ''}up ${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
-  $('cpu').innerHTML = s.cpu.map((c, i) => row('CPU' + i, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('');
+  $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('');
   const m = s.memory, d = s.disk, g = s.gpu;
   $('res').innerHTML =
     (g ? row('GPU', g.usage, `${g.usage.toFixed(1)}% ${(g.freq / 1e6).toFixed(0)}MHz`) : '') +

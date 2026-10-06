@@ -69,18 +69,36 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon"):
     return temps, power, fans
 
 
+def thermal_zones(root="/sys/class/thermal"):
+    """Zone temps, plus zone types as their hwmon twins name them (kernel turns "-" into "_")."""
+    temps, zone_types = {}, set()
+    for z in sorted(glob.glob(f"{root}/thermal_zone*"), key=lambda p: int(p.rsplit("e", 1)[1])):
+        zt = read(f"{z}/type", "")
+        zone_types.add(zt.replace("-", "_"))
+        t = read(f"{z}/temp")  # inactive zones (cv*) return ENODATA
+        if t:
+            key = zt.removesuffix("-thermal")
+            if key in temps:  # e.g. several acpitz zones
+                key += f" ({os.path.basename(z)})"
+            temps[key] = int(t) / 1000
+    return temps, zone_types
+
+
 def cpu_times():
+    """{cpu id: jiffies} for online cores; offline cores are absent from /proc/stat."""
     with open("/proc/stat") as f:
-        return [list(map(int, l.split()[1:])) for l in f if re.match(r"cpu\d", l)]
+        return {int(m.group(1)): list(map(int, l.split()[1:])) for l in f if (m := re.match(r"cpu(\d+)", l))}
 
 
 def cpu_percent(before, after):
-    """Busy % per core from two /proc/stat samples (idle + iowait count as idle)."""
-    out = []
-    for b, a in zip(before, after):
+    """Busy % per core id from two /proc/stat samples (idle + iowait count as idle).
+    Cores that went on/offline between the samples are left out."""
+    out = {}
+    for n in sorted(before.keys() & after.keys()):
+        b, a = before[n], after[n]
         total = sum(a) - sum(b)
         idle = (a[3] + a[4]) - (b[3] + b[4])
-        out.append(round(100 * (total - idle) / total, 1) if total else 0.0)
+        out[n] = round(100 * (total - idle) / total, 1) if total else 0.0
     return out
 
 
@@ -114,17 +132,10 @@ def collect():
     t0 = cpu_times()
     time.sleep(0.25)  # ponytail: per-request sampling, fine for a few viewers; add a background sampler if many
     cpu = cpu_percent(t0, cpu_times())
-    freqs = [read(f"/sys/devices/system/cpu/cpu{i}/cpufreq/scaling_cur_freq") for i in range(len(cpu))]
-    freqs = [int(f) * 1000 if f else None for f in freqs]
+    freqs = {n: read(f"/sys/devices/system/cpu/cpu{n}/cpufreq/scaling_cur_freq") for n in cpu}
 
-    temps, zone_types = {}, set()
-    for z in sorted(glob.glob("/sys/class/thermal/thermal_zone*"), key=lambda p: int(p.rsplit("e", 1)[1])):
-        zt = read(f"{z}/type")
-        zone_types.add(zt)
-        t = read(f"{z}/temp")  # inactive zones (cv*) return ENODATA
-        if t:
-            temps[zt.removesuffix("-thermal")] = int(t) / 1000
-    # chips like acpitz also show up as thermal zones; skip them to avoid duplicates
+    temps, zone_types = thermal_zones()
+    # zones (acpitz, cpu-thermal, ...) also show up as hwmon chips; skip them to avoid duplicates
     hw_temps, power, fans = hwmon_sensors(skip=zone_types)
     temps.update(hw_temps)
 
@@ -141,7 +152,7 @@ def collect():
         "uptime": float(read("/proc/uptime").split()[0]),
         "power_mode": power_mode_name(mode.removeprefix("pmode:").lstrip("0") or "0",
                                       read("/etc/nvpmodel.conf")) if mode else None,
-        "cpu": [{"usage": u, "freq": f} for u, f in zip(cpu, freqs)],
+        "cpu": [{"id": n, "usage": u, "freq": int(freqs[n]) * 1000 if freqs[n] else None} for n, u in cpu.items()],
         "gpu": {
             "usage": int(gpu_load) / 10,
             "freq": int(read("/sys/class/devfreq/17000000.gpu/cur_freq", 0)),

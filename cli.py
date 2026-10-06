@@ -25,9 +25,9 @@ def render(s):
         f"{s['platform']}   " + (f"mode {s['power_mode']}   " if s["power_mode"] else "") + f"up {up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}",
         "",
     ]
-    for i, c in enumerate(s["cpu"]):
+    for c in s["cpu"]:
         freq = f"  {c['freq'] / 1e6:4.0f} MHz" if c["freq"] else ""
-        lines.append(f"CPU{i:<3}{bar(c['usage'])} {c['usage']:5.1f}%{freq}")
+        lines.append(f"CPU{c['id']:<3}{bar(c['usage'])} {c['usage']:5.1f}%{freq}")
     g = s["gpu"]
     if g:
         lines.append(f"GPU   {bar(g['usage'])} {g['usage']:5.1f}%  {g['freq'] / 1e6:4.0f} MHz")
