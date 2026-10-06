@@ -37,7 +37,8 @@ sudo systemctl daemon-reload && sudo systemctl enable --now platmon
 ## Test
 
 ```sh
-python3 test_server.py && python3 test_cli.py
+pip install pytest   # test-only; runtime stays dependency-free
+pytest
 ```
 
 ## License
