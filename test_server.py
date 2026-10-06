@@ -1,12 +1,15 @@
 import pytest
 
-from server import cpu_percent, detect_platform, hwmon_sensors, power_mode_name
+from server import cpu_percent, detect_platform, hwmon_sensors, power_mode_name, thermal_zones
 
 
 @pytest.mark.parametrize("before, after, expected", [
     # user nice system idle iowait irq softirq steal
-    ([[100, 0, 100, 700, 100, 0, 0, 0]], [[150, 0, 150, 800, 100, 0, 0, 0]], [50.0]),
-    ([[1, 1, 1, 1, 1]], [[1, 1, 1, 1, 1]], [0.0]),  # no ticks elapsed
+    ({0: [100, 0, 100, 700, 100, 0, 0, 0]}, {0: [150, 0, 150, 800, 100, 0, 0, 0]}, {0: 50.0}),
+    ({0: [1, 1, 1, 1, 1]}, {0: [1, 1, 1, 1, 1]}, {0: 0.0}),  # no ticks elapsed
+    # cpu1 offline, cpu3 went offline between samples: ids kept, nothing mispaired
+    ({0: [0, 0, 0, 0, 0], 2: [0, 0, 0, 0, 0], 3: [0, 0, 0, 0, 0]},
+     {0: [10, 0, 0, 10, 0], 2: [0, 0, 0, 10, 0]}, {0: 50.0, 2: 0.0}),
 ])
 def test_cpu_percent(before, after, expected):
     assert cpu_percent(before, after) == expected
@@ -64,3 +67,15 @@ def test_hwmon_pc(tmp_path):
                      "nvme Composite (hwmon3)": 41.85}
     assert power == {"nct6775 power1": 12.5}
     assert fans == [{"name": "nct6775 fan2", "rpm": 950, "percent": 50}]
+
+
+def test_thermal_zones(tmp_path):
+    """Zone types reported as hwmon names ("-" -> "_"), duplicate zone types kept apart."""
+    for i, (zt, t) in enumerate([("cpu-thermal", 51200), ("acpitz", 27800), ("acpitz", 30000)]):
+        z = tmp_path / f"thermal_zone{i}"
+        z.mkdir()
+        (z / "type").write_text(zt)
+        (z / "temp").write_text(str(t))
+    temps, zone_types = thermal_zones(root=str(tmp_path))
+    assert temps == {"cpu": 51.2, "acpitz": 27.8, "acpitz (thermal_zone2)": 30.0}
+    assert zone_types == {"cpu_thermal", "acpitz"}

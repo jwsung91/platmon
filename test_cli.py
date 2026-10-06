@@ -4,7 +4,7 @@ from cli import render
 
 FULL = {
     "platform": "Jetson Orin", "model": "Test Board", "uptime": 90061, "power_mode": "MAXN_SUPER",
-    "cpu": [{"usage": 12.5, "freq": 1728000000}, {"usage": 0.0, "freq": 729600000}],
+    "cpu": [{"id": 0, "usage": 12.5, "freq": 1728000000}, {"id": 2, "usage": 0.0, "freq": 729600000}],
     "gpu": {"usage": 50.0, "freq": 306000000, "max_freq": 1020000000},
     "memory": {"total": 8 * 2**30, "used": 2 * 2**30, "swap_total": 4 * 2**30, "swap_used": 0},
     "disk": {"total": 100 * 2**30, "used": 25 * 2**30},
@@ -15,13 +15,14 @@ FULL = {
 
 # bare Linux host (e.g. WSL): no GPU, power mode, cpufreq, swap or sensors
 BARE = dict(FULL, platform="Linux", power_mode=None, gpu=None, temperature={}, power={}, fans=[],
-            cpu=[{"usage": 3.0, "freq": None}],
+            cpu=[{"id": 0, "usage": 3.0, "freq": None}],
             memory={"total": 8 * 2**30, "used": 2 * 2**30, "swap_total": 0, "swap_used": 0})
 
 
 @pytest.mark.parametrize("expected", [
     "Jetson Orin   mode MAXN_SUPER   up 1d 01:01",
     "12.5%  1728 MHz",
+    "CPU2  ",  # labelled by core id, not position (cpu1 offline)
     "50.0%   306 MHz",
     "RAM   █████··············· 2.0G/8.0G",
     "SWAP  ",
