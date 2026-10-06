@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """platmon HTTP server (Jetson, Raspberry Pi, PC, Linux). Serves JSON at /api/stats and the web viewer at /.
 
-Usage: python3 server.py [port]   (default 8080)
+Usage (from the repo/install root): python3 -m frontends.server [port]   (default 8080)
 """
 import json
 import os

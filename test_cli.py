@@ -1,6 +1,6 @@
 import pytest
 
-from cli import render
+from frontends.cli import render
 from collector import collect
 
 FULL = {
