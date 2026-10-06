@@ -1,0 +1,7 @@
+# only what the image copies
+*
+!platmon.py
+!platmon.ini
+!collector
+!frontends
+**/__pycache__

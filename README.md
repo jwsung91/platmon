@@ -48,6 +48,28 @@ sudo cp platmon.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now platmon
 ```
 
+### Docker
+
+The container monitors the host, so it needs a few read-only host mounts (all set in `compose.yaml`):
+
+```sh
+docker compose up -d                                          # any Linux host
+docker compose -f compose.yaml -f compose.jetson.yaml up -d   # Jetson: adds the nvpmodel power mode
+```
+
+- `/sys/firmware` → board detection. Docker hides the device tree, so without this mount a Jetson
+  shows up as "PC" and loses its GPU, power mode and fan data. The startup log line
+  `platmon: platform …` shows what was detected.
+- `/` (not recursive) → disk usage of the host's root filesystem. The host's `/proc`, `/sys` and
+  `/run` are not exposed through it.
+- `./platmon.ini` → config. Keep `[http] port = 8080` inside the container and change the
+  published port in `compose.yaml` instead (the health check uses 8080).
+- Runs as an unprivileged user, needs no NVIDIA container runtime, and is marked unhealthy while
+  `/api/stats` has no current data. The terminal frontend needs a TTY:
+  `docker compose run --rm platmon --frontends terminal`.
+
+Only the Dockerfile ships here; no image is published.
+
 ## Test
 
 ```sh

@@ -1,0 +1,27 @@
+# Any Linux host:   docker compose up -d
+# Jetson:           docker compose -f compose.yaml -f compose.jetson.yaml up -d
+services:
+  platmon:
+    build: .
+    image: platmon:local
+    init: true                  # forward docker stop's SIGTERM promptly
+    uts: host                   # host's hostname, the model name fallback on hosts without DMI / device tree
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PLATMON_DEVICE_TREE: /host/firmware/devicetree/base
+      PLATMON_DISK: /host/root
+    volumes:
+      # Docker hides /sys/firmware; the device tree there identifies Jetson / Raspberry Pi boards.
+      # Hosts without one (PCs) still have /sys/firmware, so this mount works everywhere.
+      - /sys/firmware:/host/firmware:ro
+      # The host's root filesystem only, for disk usage. Not recursive, so the host's
+      # /proc, /sys and /run (docker.sock) are not exposed through it.
+      - type: bind
+        source: /
+        target: /host/root
+        read_only: true
+        bind:
+          recursive: disabled
+      - ./platmon.ini:/opt/platmon/platmon.ini:ro
