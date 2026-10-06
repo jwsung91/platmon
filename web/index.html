@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>platmon</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --fg: #1d2127; --muted: #6b7280; --track: #e5e7eb; --bar: #2f7d5b; --warn: #c2410c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121417; --card: #1c1f24; --fg: #e6e8eb; --muted: #9aa1ab; --track: #2c3037; --bar: #4fb286; --warn: #f0883e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  header { margin-bottom: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .muted { color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  section { background: var(--card); border-radius: 8px; padding: 12px 14px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  .row { display: grid; grid-template-columns: 48px 1fr auto; gap: 8px; align-items: center; margin: 4px 0; font-variant-numeric: tabular-nums; }
+  .track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .fill { height: 100%; background: var(--bar); transition: width .3s; }
+  .fill.hot { background: var(--warn); }
+  .kv { display: flex; justify-content: space-between; margin: 3px 0; font-variant-numeric: tabular-nums; }
+  #err { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="model">platmon</h1>
+  <div class="muted" id="meta"></div>
+  <div id="err"></div>
+</header>
+<div class="grid">
+  <section><h2>CPU</h2><div id="cpu"></div></section>
+  <section><h2>GPU · Memory · Disk</h2><div id="res"></div></section>
+  <section><h2>Temperature</h2><div id="temp"></div></section>
+  <section><h2>Power · Fan</h2><div id="pwr"></div></section>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const gib = b => (b / 2 ** 30).toFixed(1) + 'G';
+const row = (label, pct, text) =>
+  `<div class="row"><span>${label}</span><div class="track"><div class="fill${pct > 85 ? ' hot' : ''}" style="width:${Math.min(pct, 100)}%"></div></div><span>${text}</span></div>`;
+const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
+
+function render(s) {
+  const up = Math.floor(s.uptime);
+  $('model').textContent = s.model;
+  $('meta').textContent = `${s.platform} · ${s.power_mode ? 'mode ' + s.power_mode + ' · ' : ''}up ${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
+  $('cpu').innerHTML = s.cpu.map((c, i) => row('CPU' + i, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('');
+  const m = s.memory, d = s.disk, g = s.gpu;
+  $('res').innerHTML =
+    (g ? row('GPU', g.usage, `${g.usage.toFixed(1)}% ${(g.freq / 1e6).toFixed(0)}MHz`) : '') +
+    row('RAM', 100 * m.used / m.total, `${gib(m.used)}/${gib(m.total)}`) +
+    (m.swap_total ? row('SWAP', 100 * m.swap_used / m.swap_total, `${gib(m.swap_used)}/${gib(m.swap_total)}`) : '') +
+    row('DISK', 100 * d.used / d.total, `${gib(d.used)}/${gib(d.total)}`);
+  $('temp').innerHTML = Object.entries(s.temperature).map(([k, v]) => kv(k, v.toFixed(1) + ' °C')).join('');
+  $('pwr').innerHTML = Object.entries(s.power).map(([k, v]) => kv(k, v.toFixed(2) + ' W')).join('') +
+    s.fans.map(f => kv('Fan ' + f.name, [f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · '))).join('');
+  document.querySelectorAll('section').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
+}
+
+async function tick() {
+  try {
+    const r = await fetch('api/stats');
+    render(await r.json());
+    $('err').textContent = '';
+  } catch (e) {
+    $('err').textContent = 'Connection lost: ' + e.message;
+  }
+  setTimeout(tick, 1000);
+}
+tick();
+</script>
+</body>
+</html>
