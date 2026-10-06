@@ -7,9 +7,10 @@ import pytest
 SCRIPTS = sorted((Path(__file__).parent.parent / "scripts").glob("*/*.sh"))
 
 
-def test_all_four_scripts_exist():
+def test_expected_scripts_exist():
     assert [f"{p.parent.name}/{p.name}" for p in SCRIPTS] == \
-           ["docker/start.sh", "docker/stop.sh", "systemd/start.sh", "systemd/stop.sh"]
+           ["docker/start.sh", "docker/stop.sh",
+            "systemd/install.sh", "systemd/start.sh", "systemd/stop.sh", "systemd/uninstall.sh"]
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: f"{p.parent.name}/{p.name}")

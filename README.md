@@ -40,18 +40,20 @@ tests/
 
 ### Run at boot
 
-Two ways, each with a start and a stop script. Both serve port 8080, so run one at a time; each start
-script refuses to run while the other way is active. Run a start script again after `git pull` to update.
+Two ways: systemd or Docker. Both serve port 8080, so use one at a time; the scripts refuse to start
+one way while the other is running (or, for systemd, still enabled at boot).
 
-**systemd** (asks for sudo):
+**systemd** (the scripts ask for sudo):
 
 ```sh
-scripts/systemd/start.sh               # install or update, enable at boot, start, check /api/stats
-scripts/systemd/stop.sh                # stop and disable
-scripts/systemd/stop.sh --uninstall    # also remove /opt/platmon and the unit
+scripts/systemd/install.sh              # install or update (after git pull), enable at boot, start
+scripts/systemd/start.sh                # start, or restart to apply config changes; checks /api/stats
+scripts/systemd/stop.sh                 # stop for now; still enabled, so it starts again at boot
+scripts/systemd/uninstall.sh            # stop, disable, remove /opt/platmon and the unit; keeps the config
+scripts/systemd/uninstall.sh --purge    # ... and remove /etc/platmon too
 ```
 
-`start.sh` copies the code to `/opt/platmon` and the unit to `/etc/systemd/system/`. It creates
+`install.sh` copies the code to `/opt/platmon` and the unit to `/etc/systemd/system/`. It creates
 `/etc/platmon/platmon.ini` from `platmon.ini` only if that file does not exist yet, so your edits are
 kept. It checks the config first and changes nothing if it is invalid. Logs: `journalctl -u platmon`.
 
