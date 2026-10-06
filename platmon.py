@@ -13,22 +13,48 @@ from frontends import server, terminal
 
 FRONTENDS = {"http": server.start, "terminal": terminal.start}  # name -> start(sampler, cfg section)
 
-DEFAULTS = {
-    "core": {"interval": "1.0"},
-    "http": {"enabled": "yes", "bind": "0.0.0.0", "port": "8080", "web": "yes"},
-    "terminal": {"enabled": "no"},
+DEFAULTS = {  # the type of each default is the type its config value must parse as
+    "core": {"interval": 1.0},
+    "http": {"enabled": True, "bind": "0.0.0.0", "port": 8080, "web": True},
+    "terminal": {"enabled": False},
 }
+RANGES = {("core", "interval"): (0.1, 3600), ("http", "port"): (1, 65535)}
+
+
+def check(cfg):
+    """Reject unknown sections and keys (typos), values of the wrong type and values out of range."""
+    unknown = set(cfg.sections()) - DEFAULTS.keys()
+    if unknown:
+        raise ValueError(f"unknown config section(s): {', '.join(sorted(unknown))}")
+    for section, options in DEFAULTS.items():
+        unknown = cfg[section].keys() - options.keys()
+        if unknown:
+            raise ValueError(f"[{section}] unknown key(s): {', '.join(sorted(unknown))}; "
+                             f"valid: {', '.join(options)}")
+        for key, default in options.items():
+            get = {bool: cfg[section].getboolean, int: cfg[section].getint,
+                   float: cfg[section].getfloat, str: cfg[section].get}[type(default)]
+            try:
+                value = get(key)
+            except ValueError:
+                raise ValueError(f"[{section}] {key} = {cfg[section][key]!r} is not a valid {type(default).__name__}")
+            if (section, key) in RANGES:
+                lo, hi = RANGES[section, key]
+                if not lo <= value <= hi:
+                    raise ValueError(f"[{section}] {key} = {value} is out of range ({lo} to {hi})")
 
 
 def load_config(path=None, frontends=None):
     """Defaults < config file < frontends (list of names; enables exactly those). Raises ValueError."""
-    cfg = configparser.ConfigParser()
-    cfg.read_dict(DEFAULTS)
-    if path and not cfg.read(path):
-        raise ValueError(f"cannot read config {path}")
-    unknown = set(cfg.sections()) - DEFAULTS.keys()
-    if unknown:
-        raise ValueError(f"unknown config section(s): {', '.join(sorted(unknown))}")
+    cfg = configparser.ConfigParser(interpolation=None)
+    cfg.read_dict({s: {k: ("yes" if v else "no") if isinstance(v, bool) else str(v) for k, v in o.items()}
+                   for s, o in DEFAULTS.items()})
+    try:
+        if path and not cfg.read(path):
+            raise ValueError(f"cannot read config {path}")
+    except configparser.Error as e:
+        raise ValueError(f"cannot parse config {path}: {e}")
+    check(cfg)
     if frontends is not None:
         unknown = set(frontends) - FRONTENDS.keys()
         if unknown:
