@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Terminal viewer for platmon. Reads the JSON API, so it runs anywhere; --local reads this host directly.
 
-Usage: python3 cli.py [host[:port]] [interval_sec]   (default localhost:8080, 1s)
-       python3 cli.py --local [interval_sec]         (no server needed; collector/ must sit next to cli.py)
+Usage: python3 -m frontends.cli [host[:port]] [interval_sec]   (default localhost:8080, 1s)
+       python3 -m frontends.cli --local [interval_sec]         (no server needed)
+Remote mode needs only this file: copied alone, `python3 cli.py <host>` works too.
 """
 import json
 import sys
