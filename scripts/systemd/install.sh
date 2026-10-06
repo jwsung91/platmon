@@ -14,7 +14,7 @@ prefix=/opt/platmon
 config=/etc/platmon/platmon.ini
 unit=/etc/systemd/system/platmon.service
 
-# both ways serve port 8080; use one at a time
+# both ways serve port 9797; use one at a time
 if command -v docker >/dev/null && [ -n "$(docker ps -q --filter label=com.docker.compose.project=platmon 2>/dev/null)" ]; then
     echo "platmon is running in Docker; stop it first: scripts/docker/stop.sh" >&2
     exit 1

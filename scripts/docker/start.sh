@@ -6,7 +6,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-# both ways serve port 8080; use one at a time. A systemd service that is only stopped but still
+# both ways serve port 9797; use one at a time. A systemd service that is only stopped but still
 # enabled would take the port back at the next boot, so it has to be removed (or disabled) first.
 if systemctl is-active --quiet platmon 2>/dev/null || systemctl is-enabled --quiet platmon 2>/dev/null; then
     echo "platmon is installed as a systemd service (running or enabled at boot); remove it first:" >&2
@@ -29,7 +29,7 @@ for _ in $(seq 30); do
     case $state in
         healthy)
             docker compose "${files[@]}" logs --no-log-prefix --tail 2
-            echo "platmon is up on port 8080 (restarts with Docker at boot)"
+            echo "platmon is up on port 9797 (restarts with Docker at boot)"
             exit 0 ;;
         unhealthy) break ;;
     esac

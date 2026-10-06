@@ -17,7 +17,7 @@ FRONTENDS = {"http": server.start, "terminal": terminal.start}  # name -> start(
 
 DEFAULTS = {  # the type of each default is the type its config value must parse as
     "core": {"interval": 1.0},
-    "http": {"enabled": True, "bind": "0.0.0.0", "port": 8080, "web": True},
+    "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
     "terminal": {"enabled": False},
 }
 RANGES = {("core", "interval"): (0.1, 3600), ("http", "port"): (1, 65535)}
