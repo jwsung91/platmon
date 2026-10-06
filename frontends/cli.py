@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Terminal viewer for platmon. Reads the JSON API, so it runs anywhere; --local reads this host directly.
+"""Remote terminal client for platmon: reads a host's /api/stats. Standalone; copy this file anywhere.
+render() is shared with the in-process terminal frontend.
 
-Usage: python3 -m frontends.cli [host[:port]] [interval_sec]   (default localhost:8080, 1s)
-       python3 -m frontends.cli --local [interval_sec]         (no server needed)
-Remote mode needs only this file: copied alone, `python3 cli.py <host>` works too.
+Usage: python3 frontends/cli.py [host[:port]] [interval_sec]   (default localhost:8080, 1s)
+On the device itself, use the launcher instead: python3 platmon.py --frontends terminal
 """
 import json
 import sys
@@ -52,18 +52,6 @@ def render(s):
 
 def main():
     args = sys.argv[1:]
-    if args[:1] == ["--local"]:  # ponytail: kept until the platmon.py launcher replaces it
-        # only local mode needs the collector, so remote use stays one file
-        from collector import collect
-        from collector.sampler import Sampler
-        from frontends import terminal
-
-        t = terminal.start(Sampler(collect, float(args[1]) if len(args) > 1 else 1.0).start())
-        try:
-            t and t.join()
-        except KeyboardInterrupt:
-            pass
-        return
     host = args.pop(0) if args else "localhost:8080"
     where = f"http://{host if ':' in host else host + ':8080'}/api/stats"
 
