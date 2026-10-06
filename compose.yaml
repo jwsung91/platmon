@@ -1,5 +1,6 @@
 # Any Linux host:   docker compose up -d --build
 # Jetson:           docker compose -f compose.yaml -f compose.jetson.yaml up -d --build
+name: platmon                   # fixed project name, so scripts/docker/stop.sh finds it from any clone
 services:
   platmon:
     build: .
