@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Terminal viewer for platmon. Reads only the JSON API, so it runs anywhere.
+"""Terminal viewer for platmon. Reads the JSON API, so it runs anywhere; --local reads this host directly.
 
 Usage: python3 cli.py [host[:port]] [interval_sec]   (default localhost:8080, 1s)
+       python3 cli.py --local [interval_sec]         (no server needed; collector/ must sit next to cli.py)
 """
 import json
 import sys
@@ -49,16 +50,24 @@ def render(s):
 
 
 def main():
-    host = sys.argv[1] if len(sys.argv) > 1 else "localhost:8080"
-    interval = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
-    url = f"http://{host if ':' in host else host + ':8080'}/api/stats"
+    args = sys.argv[1:]
+    if args[:1] == ["--local"]:
+        from collector import collect  # only local mode needs the collector, so remote use stays one file
+        fetch, where, args = collect, "local", args[1:]
+    else:
+        host = args.pop(0) if args else "localhost:8080"
+        where = f"http://{host if ':' in host else host + ':8080'}/api/stats"
+
+        def fetch():
+            with urllib.request.urlopen(where, timeout=5) as r:
+                return json.load(r)
+    interval = float(args[0]) if args else 1.0
     try:
         while True:
             try:
-                with urllib.request.urlopen(url, timeout=5) as r:
-                    out = render(json.load(r))
+                out = render(fetch())
             except OSError as e:
-                out = f"{url}: {e}"
+                out = f"{where}: {e}"
             print("\033[H\033[J" + out, flush=True)
             time.sleep(interval)
     except KeyboardInterrupt:
