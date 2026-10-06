@@ -1,5 +1,7 @@
 # platmon in a container. It monitors the host, so it needs the host mounts in compose.yaml
 # (plus compose.jetson.yaml on Jetson); see README "Docker".
+# Build it yourself; images are not published (the base image contains GPL/LGPL software,
+# see README "Container image licensing").
 # Plain Python image: platmon only reads /proc and /sys, so no NVIDIA runtime or L4T base is needed.
 FROM python:3.13-slim
 
