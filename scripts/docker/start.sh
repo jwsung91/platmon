@@ -6,9 +6,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-# both ways serve port 8080; run one at a time
-if systemctl is-active --quiet platmon 2>/dev/null; then
-    echo "platmon is running as a systemd service; stop it first: scripts/systemd/stop.sh" >&2
+# both ways serve port 8080; use one at a time. A systemd service that is only stopped but still
+# enabled would take the port back at the next boot, so it has to be removed (or disabled) first.
+if systemctl is-active --quiet platmon 2>/dev/null || systemctl is-enabled --quiet platmon 2>/dev/null; then
+    echo "platmon is installed as a systemd service (running or enabled at boot); remove it first:" >&2
+    echo "  scripts/systemd/uninstall.sh   (or keep it installed but off: sudo systemctl disable --now platmon)" >&2
     exit 1
 fi
 
