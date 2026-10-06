@@ -6,8 +6,10 @@ Without a config file the built-in defaults apply (see platmon.ini).
 """
 import argparse
 import configparser
+import signal
+import sys
 
-from collector import collect
+from collector import BOARD, PLATFORM, collect
 from collector.sampler import Sampler
 from frontends import server, terminal
 
@@ -74,6 +76,10 @@ def main(argv=None):
     except ValueError as e:
         p.error(str(e))
 
+    # exit cleanly on SIGTERM (systemd stop, docker stop); as PID 1 in a container Python would ignore it
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    # a container missing its device-tree mount shows up here as "PC"/"Linux" instead of the board
+    print(f"platmon: platform {PLATFORM}, board module {BOARD.__name__ if BOARD else 'none'}", flush=True)
     sampler = Sampler(collect, cfg["core"].getfloat("interval")).start()
     threads = [t for name, start in FRONTENDS.items()
                if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name]))]

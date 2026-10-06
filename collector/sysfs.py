@@ -3,6 +3,11 @@ import glob
 import os
 import re
 
+# Host paths a container cannot see at their usual place (Docker hides /sys/firmware and has its own /).
+# Point them at bind mounts there; see compose.yaml.
+DEVICE_TREE = os.environ.get("PLATMON_DEVICE_TREE", "/proc/device-tree")
+DISK = os.environ.get("PLATMON_DISK", "/")
+
 
 def read(path, default=None):
     try:

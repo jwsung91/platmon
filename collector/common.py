@@ -8,7 +8,7 @@ import re
 import shutil
 import time
 
-from .sysfs import hwmon_chips, numbered, read, read_int
+from .sysfs import DEVICE_TREE, DISK, hwmon_chips, numbered, read, read_int
 
 
 def hwmon_sensors(skip=(), root="/sys/class/hwmon"):
@@ -103,11 +103,11 @@ def collect():
     temps.update(hw_temps)
 
     mem = meminfo()
-    disk = shutil.disk_usage("/")
+    disk = shutil.disk_usage(DISK)
 
     return {
         "time": time.time(),
-        "model": (read("/proc/device-tree/model") or read("/sys/class/dmi/id/product_name")
+        "model": (read(f"{DEVICE_TREE}/model") or read("/sys/class/dmi/id/product_name")
                   or os.uname().nodename).rstrip("\0"),
         "uptime": float(read("/proc/uptime").split()[0]),
         "power_mode": None,
