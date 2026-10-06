@@ -1,2 +1,11 @@
 __pycache__/
 .pytest_cache/
+
+# agent-rules: CLAUDE.md and .claude/skills/ are tracked; other agents' copies stay local
+/AGENTS.md
+/.agent-rules/bases/
+/.agents/skills/investigate-bug/
+/.agents/skills/review-change/
+/.agents/skills/validate-change/
+/.agents/skills/prepare-commit/
+/GEMINI.md
