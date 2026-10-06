@@ -28,8 +28,8 @@ The API has no authentication. Run it on trusted networks only.
 ### Run at boot (systemd)
 
 ```sh
-sudo mkdir -p /opt/platmon/web
-sudo cp server.py /opt/platmon/ && sudo cp web/index.html /opt/platmon/web/
+sudo mkdir -p /opt/platmon
+sudo cp -r server.py collector web /opt/platmon/
 sudo cp platmon.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now platmon
 ```

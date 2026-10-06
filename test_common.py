@@ -1,6 +1,7 @@
 import pytest
 
-from server import cpu_percent, detect_platform, hwmon_sensors, power_mode_name, thermal_zones
+from collector import detect, jetson
+from collector.common import cpu_percent, hwmon_sensors, thermal_zones
 
 
 @pytest.mark.parametrize("before, after, expected", [
@@ -15,20 +16,14 @@ def test_cpu_percent(before, after, expected):
     assert cpu_percent(before, after) == expected
 
 
-@pytest.mark.parametrize("mode_id, expected", [("2", "MAXN_SUPER"), ("9", "9")])
-def test_power_mode_name(mode_id, expected):
-    conf = "< POWER_MODEL ID=0 NAME=15W >\n< POWER_MODEL ID=2 NAME=MAXN_SUPER >"
-    assert power_mode_name(mode_id, conf) == expected
-
-
 @pytest.mark.parametrize("compatible, has_dmi, expected", [
-    ("nvidia,p3767-0005\0nvidia,tegra234", False, "Jetson Orin"),
-    ("raspberrypi,5-model-b\0brcm,bcm2712", False, "Raspberry Pi"),
-    ("", True, "PC"),
-    ("rockchip,rk3588", False, "Linux"),
+    ("nvidia,p3767-0005\0nvidia,tegra234", False, ("Jetson Orin", jetson)),
+    ("raspberrypi,5-model-b\0brcm,bcm2712", False, ("Raspberry Pi", None)),
+    ("", True, ("PC", None)),
+    ("rockchip,rk3588", False, ("Linux", None)),
 ])
-def test_detect_platform(compatible, has_dmi, expected):
-    assert detect_platform(compatible, has_dmi) == expected
+def test_detect(compatible, has_dmi, expected):
+    assert detect(compatible, has_dmi) == expected
 
 
 def fake_hwmon(root, chips):
@@ -40,8 +35,8 @@ def fake_hwmon(root, chips):
     return str(root)
 
 
-def test_hwmon_jetson(tmp_path):
-    """Fan split across pwmfan/pwm_tach, ina3221 rails, unlabeled sum channel ignored."""
+def test_hwmon_rails_and_pwm_only_fan(tmp_path):
+    """ina3221 rails, unlabeled sum channel ignored, pwm-fan without tach, non-standard rpm left to boards."""
     temps, power, fans = hwmon_sensors(root=fake_hwmon(tmp_path, [
         {"name": "pwmfan", "pwm1": 76},
         {"name": "ina3221", "in1_label": "VDD_IN", "in1_input": 5000, "curr1_input": 1200,
@@ -50,8 +45,7 @@ def test_hwmon_jetson(tmp_path):
     ]))
     assert temps == {}
     assert power == {"VDD_IN": 6.0}
-    assert fans == [{"name": "pwmfan", "rpm": None, "percent": 30},
-                    {"name": "pwm_tach", "rpm": 1636, "percent": None}]
+    assert fans == [{"name": "pwmfan", "rpm": None, "percent": 30}]
 
 
 def test_hwmon_pc(tmp_path):
