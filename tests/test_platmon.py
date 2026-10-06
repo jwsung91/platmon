@@ -39,12 +39,24 @@ def test_frontends_flag_enables_exactly_those(tmp_path):
 
 
 @pytest.mark.parametrize("ini, frontends, error", [
-    ("[htpp]\nport = 1\n", None, "unknown config section"),  # typo must not be silently ignored
+    ("[htpp]\nport = 1\n", None, "unknown config section"),  # typos must not be silently ignored
+    ("[http]\nprot = 9000\n", None, r"\[http\] unknown key\(s\): prot"),
     ("", ["web"], "unknown frontend"),
+    # bad values end in one clear error, not a traceback from deep inside a frontend
+    ("[http]\nport = abc\n", None, r"port = 'abc' is not a valid int"),
+    ("[http]\nenabled = maybe\n", None, "is not a valid bool"),
+    ("[http]\nport = 70000\n", None, "out of range"),
+    ("[core]\ninterval = 0\n", None, "out of range"),  # 0 would make the terminal redraw in a busy loop
+    ("[core]\ninterval = -1\n", None, "out of range"),
+    ("port = 1\n", None, "cannot parse config"),  # no section header
+    ("[http]\nbind = 10%\n", ["http"], None),  # % is literal, not interpolation
 ])
-def test_rejects_unknown(tmp_path, ini, frontends, error):
+def test_rejects_bad_config(tmp_path, ini, frontends, error):
     path = tmp_path / "p.ini"
     path.write_text(ini)
+    if error is None:
+        load_config(str(path), frontends)
+        return
     with pytest.raises(ValueError, match=error):
         load_config(str(path), frontends)
 
