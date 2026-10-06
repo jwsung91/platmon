@@ -37,7 +37,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now platmon
 ## Test
 
 ```sh
-python3 test_server.py
+python3 test_server.py && python3 test_cli.py
 ```
 
 ## License
