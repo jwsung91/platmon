@@ -3,8 +3,7 @@ Description=platmon platform monitor
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/platmon
-ExecStart=/usr/bin/python3 -m frontends.server 8080
+ExecStart=/usr/bin/python3 /opt/platmon/platmon.py /etc/platmon/platmon.ini
 DynamicUser=yes
 ProtectSystem=strict
 ProtectHome=yes

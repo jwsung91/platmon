@@ -1,7 +1,4 @@
-"""HTTP frontend: JSON at /api/stats and, when web is enabled, the web viewer at /.
-
-Usage (from the repo/install root): python3 -m frontends.server [port]   (default 8080)
-"""
+"""HTTP frontend: JSON at /api/stats and, when web is enabled, the web viewer at /. Started by platmon.py."""
 import json
 import os
 import threading
@@ -40,22 +37,7 @@ def make_handler(sampler, web=True):
 def start(sampler, cfg):
     """cfg: the [http] config section (bind, port, web)."""
     httpd = ThreadingHTTPServer((cfg.get("bind"), cfg.getint("port")), make_handler(sampler, cfg.getboolean("web")))
-    print(f"platmon http on {cfg.get('bind')}:{cfg.getint('port')}")
+    print(f"platmon http on {cfg.get('bind')}:{cfg.getint('port')}", flush=True)
     t = threading.Thread(target=httpd.serve_forever, name="http", daemon=True)
     t.start()
     return t
-
-
-if __name__ == "__main__":  # ponytail: kept until the platmon.py launcher replaces it
-    import configparser
-    import sys
-
-    from collector import collect
-    from collector.sampler import Sampler
-
-    cfg = configparser.ConfigParser()
-    cfg["http"] = {"bind": "0.0.0.0", "port": sys.argv[1] if len(sys.argv) > 1 else "8080", "web": "yes"}
-    try:
-        start(Sampler(collect).start(), cfg["http"]).join()
-    except KeyboardInterrupt:
-        pass
