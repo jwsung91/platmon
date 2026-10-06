@@ -52,16 +52,24 @@ def render(s):
 
 def main():
     args = sys.argv[1:]
-    if args[:1] == ["--local"]:
-        from collector import collect  # only local mode needs the collector, so remote use stays one file
-        fetch, where, args = collect, "local", args[1:]
-    else:
-        host = args.pop(0) if args else "localhost:8080"
-        where = f"http://{host if ':' in host else host + ':8080'}/api/stats"
+    if args[:1] == ["--local"]:  # ponytail: kept until the platmon.py launcher replaces it
+        # only local mode needs the collector, so remote use stays one file
+        from collector import collect
+        from collector.sampler import Sampler
+        from frontends import terminal
 
-        def fetch():
-            with urllib.request.urlopen(where, timeout=5) as r:
-                return json.load(r)
+        t = terminal.start(Sampler(collect, float(args[1]) if len(args) > 1 else 1.0).start())
+        try:
+            t and t.join()
+        except KeyboardInterrupt:
+            pass
+        return
+    host = args.pop(0) if args else "localhost:8080"
+    where = f"http://{host if ':' in host else host + ':8080'}/api/stats"
+
+    def fetch():
+        with urllib.request.urlopen(where, timeout=5) as r:
+            return json.load(r)
     interval = float(args[0]) if args else 1.0
     try:
         while True:
