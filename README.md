@@ -38,15 +38,22 @@ frontends/   server.py (HTTP + web/), terminal.py, cli.py (remote client)
 tests/
 ```
 
-### Run at boot (systemd)
+### Run at boot
+
+Two ways, each with a start and a stop script. Both serve port 8080, so run one at a time; each start
+script refuses to run while the other way is active. Run a start script again after `git pull` to update.
+
+**systemd** (asks for sudo):
 
 ```sh
-sudo mkdir -p /opt/platmon /etc/platmon
-sudo cp -r platmon.py collector frontends /opt/platmon/
-sudo cp platmon.ini /etc/platmon/
-sudo cp platmon.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now platmon
+scripts/systemd/start.sh               # install or update, enable at boot, start, check /api/stats
+scripts/systemd/stop.sh                # stop and disable
+scripts/systemd/stop.sh --uninstall    # also remove /opt/platmon and the unit
 ```
+
+`start.sh` copies the code to `/opt/platmon` and the unit to `/etc/systemd/system/`. It creates
+`/etc/platmon/platmon.ini` from `platmon.ini` only if that file does not exist yet, so your edits are
+kept. It checks the config first and changes nothing if it is invalid. Logs: `journalctl -u platmon`.
 
 ### Docker
 
@@ -55,9 +62,11 @@ No image is published: build it yourself on the device (see "Container image lic
 The container monitors the host, so it needs a few read-only host mounts (all set in `compose.yaml`):
 
 ```sh
-docker compose up -d --build                                          # any Linux host
-docker compose -f compose.yaml -f compose.jetson.yaml up -d --build   # Jetson: adds the nvpmodel power mode
+scripts/docker/start.sh    # build and start; on Jetson adds compose.jetson.yaml (nvpmodel power mode); waits until healthy
+scripts/docker/stop.sh     # stop and remove the container (the image stays)
 ```
+
+Without the scripts: `docker compose up -d --build` (Jetson: `docker compose -f compose.yaml -f compose.jetson.yaml up -d --build`).
 
 - `/sys/firmware` → board detection. Docker hides the device tree, so without this mount a Jetson
   shows up as "PC" and loses its GPU, power mode and fan data. The startup log line
