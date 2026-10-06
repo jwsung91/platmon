@@ -73,3 +73,25 @@ def test_thermal_zones(tmp_path):
     temps, zone_types = thermal_zones(root=str(tmp_path))
     assert temps == {"cpu": 51.2, "acpitz": 27.8, "acpitz (thermal_zone2)": 30.0}
     assert zone_types == {"cpu_thermal", "acpitz"}
+
+
+def test_host_paths_from_env(tmp_path):
+    """Containers point PLATMON_DEVICE_TREE / PLATMON_DISK at bind mounts of the host's paths."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    dt = tmp_path / "dt"
+    dt.mkdir()
+    (dt / "compatible").write_bytes(b"nvidia,p3767-0005\0nvidia,tegra234\0")
+    (dt / "model").write_bytes(b"Test Board\0")
+    code = ("import collector, json, shutil; s = collector.collect(); "
+            "print(json.dumps([collector.PLATFORM, s['model'], s['disk']['total'], shutil.disk_usage(%r).total]))"
+            % str(tmp_path))
+    env = dict(os.environ, PLATMON_DEVICE_TREE=str(dt), PLATMON_DISK=str(tmp_path))
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True,
+                         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    platform, model, disk_total, expected_total = json.loads(out.stdout)
+    assert (platform, model) == ("Jetson Orin", "Test Board")
+    assert disk_total == expected_total

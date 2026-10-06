@@ -64,3 +64,28 @@ def test_rejects_bad_config(tmp_path, ini, frontends, error):
 def test_missing_file():
     with pytest.raises(ValueError, match="cannot read"):
         load_config("/nonexistent/platmon.ini")
+
+
+def test_sigterm_exits_promptly(tmp_path):
+    """docker/systemd stop sends SIGTERM; platmon must exit right away with status 0."""
+    import os
+    import signal
+    import socket
+    import subprocess
+    import sys
+    import time
+
+    with socket.socket() as s:  # a free port for the http frontend
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    ini = tmp_path / "p.ini"
+    ini.write_text(f"[http]\nbind = 127.0.0.1\nport = {port}\n")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    p = subprocess.Popen([sys.executable, os.path.join(root, "platmon.py"), str(ini)],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    assert "platmon: platform" in p.stdout.readline()  # started, startup line logged
+    time.sleep(0.3)
+    p.send_signal(signal.SIGTERM)
+    t0 = time.monotonic()
+    assert p.wait(timeout=5) == 0
+    assert time.monotonic() - t0 < 2

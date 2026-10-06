@@ -6,7 +6,7 @@ if any, fills its own optional fields through extend(stats). Viewers never branc
 import os
 
 from . import common, jetson
-from .sysfs import read
+from .sysfs import DEVICE_TREE, read
 
 BOARDS = (  # (device-tree compatible match, display name, board module or None)
     ("nvidia,tegra234", "Jetson Orin", jetson),
@@ -17,14 +17,14 @@ BOARDS = (  # (device-tree compatible match, display name, board module or None)
 
 
 def detect(compatible, has_dmi):
-    """compatible: /proc/device-tree/compatible (NUL-separated), empty on x86."""
+    """compatible: <device tree>/compatible (NUL-separated), empty on x86."""
     for key, name, module in BOARDS:
         if key in compatible:
             return name, module
     return ("PC" if has_dmi else "Linux"), None
 
 
-PLATFORM, BOARD = detect(read("/proc/device-tree/compatible", ""), os.path.isdir("/sys/class/dmi/id"))
+PLATFORM, BOARD = detect(read(f"{DEVICE_TREE}/compatible", ""), os.path.isdir("/sys/class/dmi/id"))
 
 
 def collect():
