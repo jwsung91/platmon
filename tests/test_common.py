@@ -11,6 +11,10 @@ from collector.common import cpu_percent, hwmon_sensors, os_release, thermal_zon
     # cpu1 offline, cpu3 went offline between samples: ids kept, nothing mispaired
     ({0: [0, 0, 0, 0, 0], 2: [0, 0, 0, 0, 0], 3: [0, 0, 0, 0, 0]},
      {0: [10, 0, 0, 10, 0], 2: [0, 0, 0, 10, 0]}, {0: 50.0, 2: 0.0}),
+    # VM host: guest (and guest_nice) time is already included in user (and nice); not counted twice
+    #  user nice system idle iowait irq softirq steal guest guest_nice
+    ({0: [0] * 10}, {0: [50, 0, 0, 50, 0, 0, 0, 0, 50, 0]}, {0: 50.0}),
+    ({0: [0] * 10}, {0: [0, 50, 0, 50, 0, 0, 0, 0, 0, 50]}, {0: 50.0}),
 ])
 def test_cpu_percent(before, after, expected):
     assert cpu_percent(before, after) == expected
@@ -113,3 +117,22 @@ def test_host_paths_from_env(tmp_path):
 ])
 def test_os_release(text, expected):
     assert os_release(text) == expected
+
+
+def test_hwmon_same_names_kept_apart(tmp_path):
+    """Two chips reporting the same power sensor or rail name: both values stay (first keeps the plain name)."""
+    temps, power, fans = hwmon_sensors(root=fake_hwmon(tmp_path, [
+        {"name": "ina219", "power1_input": 1000000},
+        {"name": "ina219", "power1_input": 2000000},
+        {"name": "ina3221", "in1_label": "VDD_IN", "in1_input": 5000, "curr1_input": 1000},
+        {"name": "ina3221", "in1_label": "VDD_IN", "in1_input": 5000, "curr1_input": 2000},
+    ]))
+    assert power == {"ina219 power1": 1.0, "ina219 power1 (hwmon1)": 2.0,
+                     "VDD_IN": 5.0, "VDD_IN (hwmon3)": 10.0}
+
+
+def test_hwmon_unreadable_fan_is_none_not_zero(tmp_path):
+    """A fan whose speed cannot be read is unknown (None), not stopped (0)."""
+    root = fake_hwmon(tmp_path, [{"name": "nct6775", "fan1_label": "CPU fan"}])
+    (tmp_path / "hwmon0" / "fan1_input").mkdir()  # exists, but reading it fails
+    assert hwmon_sensors(root=root)[2] == [{"name": "CPU fan", "rpm": None, "percent": None}]

@@ -47,7 +47,8 @@ def render(s):
         lines.append(f"CPU{c['id']:<3}{bar(c['usage'])} {c['usage']:5.1f}%{freq}")
     g = s["gpu"]
     if g:
-        lines.append(f"GPU   {bar(g['usage'])} {g['usage']:5.1f}%  {g['freq'] / 1e6:4.0f} MHz")
+        freq = f"  {g['freq'] / 1e6:4.0f} MHz" if g.get("freq") else ""  # None: clock not readable
+        lines.append(f"GPU   {bar(g['usage'])} {g['usage']:5.1f}%{freq}")
     m = s["memory"]
     lines.append(f"RAM   {bar(100 * m['used'] / m['total'])} {gib(m['used'])}/{gib(m['total'])}")
     if m["swap_total"]:
@@ -61,7 +62,7 @@ def render(s):
         lines.append("POWER " + "  ".join(f"{k} {v:.2f}W" for k, v in s["power"].items()))
     for f in s["fans"]:
         vals = [f"{f['rpm']} rpm" if f["rpm"] is not None else "", f"{f['percent']}%" if f["percent"] is not None else ""]
-        lines.append(f"FAN   {f['name']}  " + "  ".join(v for v in vals if v))
+        lines.append(f"FAN   {f['name']}  " + ("  ".join(v for v in vals if v) or "n/a"))  # n/a: unreadable
     return "\n".join(lines)
 
 

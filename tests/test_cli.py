@@ -107,3 +107,11 @@ def test_no_current_data_is_explained():
     finally:
         httpd.shutdown()
     assert r.returncode == 1 and "answered 503" in r.stderr and "no current data" in r.stderr
+
+
+def test_render_unreadable_gpu_clock_and_fan():
+    """None means "could not read": no 0 MHz / 0 rpm, and no crash."""
+    out = render(dict(FULL, gpu={"usage": 50.0, "freq": None, "max_freq": None},
+                      fans=[{"name": "CPU fan", "rpm": None, "percent": None}]))
+    assert "GPU   " in out and "50.0%" in out and "MHz" not in out.split("GPU")[1].split("\n")[0]
+    assert "FAN   CPU fan  n/a" in out

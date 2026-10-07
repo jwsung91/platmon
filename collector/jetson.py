@@ -1,16 +1,27 @@
 """Jetson-only data: GPU load and clock, nvpmodel power mode, pwm_tach fan speed, L4T release."""
+import glob
 import re
 
 from .sysfs import host_path, hwmon_chips, read, read_int
 
 
+# GPU devfreq device names per BSP (NVIDIA L4T docs): Orin R36 17000000.gpu (verified on an Orin Nano),
+# Orin R35 17000000.ga10b, Xavier 17000000.gv11b, TX2 17000000.gp10b, Nano 57000000.gpu.
+GPU_DEVFREQ = ("*.gpu", "*.ga10b", "*.gv11b", "*.gp10b", "*.gm20b")
+# load (per-mille) sits in the GPU device directory; gpu.0 links to it where devfreq is not found
+GPU_LOAD = ("devices/platform/gpu.0/load", "devices/gpu.0/load")
+
+
 def gpu(root="/sys"):
-    load = read(f"{root}/devices/platform/gpu.0/load")  # per-mille
-    if not load:
+    """GPU load and clocks. freq/max_freq are None (not 0) when the clock cannot be read."""
+    devfreq = next((p for pattern in GPU_DEVFREQ for p in sorted(glob.glob(f"{root}/class/devfreq/{pattern}"))), None)
+    loads = ([f"{devfreq}/device/load"] if devfreq else []) + [f"{root}/{p}" for p in GPU_LOAD]
+    load = next((v for v in map(read_int, loads) if v is not None), None)
+    if load is None:
         return None
-    devfreq = f"{root}/class/devfreq/17000000.gpu"  # Orin; unverified on Xavier
-    return {"usage": int(load) / 10, "freq": read_int(f"{devfreq}/cur_freq", 0),
-            "max_freq": read_int(f"{devfreq}/max_freq", 0)}
+    return {"usage": load / 10,
+            "freq": read_int(f"{devfreq}/cur_freq") if devfreq else None,
+            "max_freq": read_int(f"{devfreq}/max_freq") if devfreq else None}
 
 
 def power_mode(status, conf_text):

@@ -11,6 +11,11 @@ import time
 from .sysfs import DEVICE_TREE, HOST_ROOT, host_path, hwmon_chips, numbered, read, read_int
 
 
+def unique_key(table, key, d):
+    """key, or "key (hwmonN)" when another chip already reported the same name (two nvme drives, two ina219s)."""
+    return f"{key} ({os.path.basename(d)})" if key in table else key
+
+
 def hwmon_sensors(skip=(), root="/sys/class/hwmon"):
     """Temps, power and fans from every hwmon chip. skip: chip names already read elsewhere."""
     temps, power, fans = {}, {}, []
@@ -24,23 +29,21 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon"):
         for n in numbered(d, "temp*_input"):
             t = read(f"{d}/temp{n}_input")
             if t:
-                key = f"{chip} {read(f'{d}/temp{n}_label') or f'temp{n}'}"
-                if key in temps:  # e.g. two nvme drives both report "Composite"
-                    key += f" ({os.path.basename(d)})"
+                key = unique_key(temps, f"{chip} {read(f'{d}/temp{n}_label') or f'temp{n}'}", d)
                 temps[key] = int(t) / 1000  # m°C
         for n in numbered(d, "power*_input"):
             p = read(f"{d}/power{n}_input")
             if p:
-                power[label("power", n)] = round(int(p) / 1e6, 2)  # µW
+                power[unique_key(power, label("power", n), d)] = round(int(p) / 1e6, 2)  # µW
         for n in numbered(d, "curr*_input"):  # ina3221-style rails; label required, unlabeled channels are sums
             mv, ma, lbl = read(f"{d}/in{n}_input"), read(f"{d}/curr{n}_input"), read(f"{d}/in{n}_label")
             if mv and ma and lbl:
-                power[lbl] = round(int(mv) * int(ma) / 1e6, 2)  # mV*mA -> W
+                power[unique_key(power, lbl, d)] = round(int(mv) * int(ma) / 1e6, 2)  # mV*mA -> W
 
         fan_idx = numbered(d, "fan*_input")
         for n in fan_idx:
             pwm = read(f"{d}/pwm{n}")
-            fans.append({"name": label("fan", n), "rpm": read_int(f"{d}/fan{n}_input", 0),
+            fans.append({"name": label("fan", n), "rpm": read_int(f"{d}/fan{n}_input"),  # None if unreadable, not 0
                          "percent": round(int(pwm) * 100 / 255) if pwm else None})
         pwm = read(f"{d}/pwm1")
         if not fan_idx and pwm:  # pwm-fan without a tachometer
@@ -71,10 +74,12 @@ def cpu_times():
 
 def cpu_percent(before, after):
     """Busy % per core id from two /proc/stat samples (idle + iowait count as idle).
-    Cores that went on/offline between the samples are left out."""
+    Cores that went on/offline between the samples are left out.
+    Only user..steal (the first 8 fields) make up the total: guest and guest_nice are already counted
+    in user and nice, so adding them again overstates the load on hosts running virtual machines."""
     out = {}
     for n in sorted(before.keys() & after.keys()):
-        b, a = before[n], after[n]
+        b, a = before[n][:8], after[n][:8]
         total = sum(a) - sum(b)
         idle = (a[3] + a[4]) - (b[3] + b[4])
         out[n] = round(100 * (total - idle) / total, 1) if total else 0.0

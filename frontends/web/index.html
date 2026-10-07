@@ -57,13 +57,13 @@ function render(s) {
   $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('');
   const m = s.memory, d = s.disk, g = s.gpu;
   $('res').innerHTML =
-    (g ? row('GPU', g.usage, `${g.usage.toFixed(1)}% ${(g.freq / 1e6).toFixed(0)}MHz`) : '') +
+    (g ? row('GPU', g.usage, g.usage.toFixed(1) + '%' + (g.freq ? ` ${(g.freq / 1e6).toFixed(0)}MHz` : '')) : '') +
     row('RAM', 100 * m.used / m.total, `${gib(m.used)}/${gib(m.total)}`) +
     (m.swap_total ? row('SWAP', 100 * m.swap_used / m.swap_total, `${gib(m.swap_used)}/${gib(m.swap_total)}`) : '') +
     row('DISK', 100 * d.used / d.total, `${gib(d.used)}/${gib(d.total)}`);
   $('temp').innerHTML = Object.entries(s.temperature).map(([k, v]) => kv(k, v.toFixed(1) + ' °C')).join('');
   $('pwr').innerHTML = Object.entries(s.power).map(([k, v]) => kv(k, v.toFixed(2) + ' W')).join('') +
-    s.fans.map(f => kv('Fan ' + f.name, [f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · '))).join('');
+    s.fans.map(f => kv('Fan ' + f.name, ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
   document.querySelectorAll('section').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
 }
 
