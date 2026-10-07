@@ -71,7 +71,10 @@ scripts/docker/start.sh    # build and start; on Jetson adds compose.jetson.yaml
 scripts/docker/stop.sh     # stop and remove the container (the image stays)
 ```
 
-Without the scripts: `docker compose up -d --build` (Jetson: `docker compose -f compose.yaml -f compose.jetson.yaml up -d --build`).
+Without the scripts: `BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose up -d --build` (Jetson: add
+`-f compose.yaml -f compose.jetson.yaml`). The variable keeps the image id stable when nothing changed;
+without it some Docker versions give every build a new id, and the running container's image can be
+deleted out from under it.
 
 - `/sys/firmware` → board detection. Docker hides the device tree, so without this mount a Jetson
   shows up as "PC" and loses its GPU, power mode and fan data. The startup log line
