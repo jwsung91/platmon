@@ -28,6 +28,7 @@ def test_install_cli_user(tmp_path):
 
     out = subprocess.run([script, "--user"], env=env, capture_output=True, text=True, check=True).stdout
     assert f"installed {target}" in out
+    assert "is not in this shell's PATH. A new login shell often has it" in out  # temp HOME is not on PATH
     assert os.access(target, os.X_OK) and "# platmon-cli:" in target.read_text()
     help_text = subprocess.run([str(target), "--help"], capture_output=True, text=True, check=True).stdout
     assert help_text.startswith("usage: platmon")

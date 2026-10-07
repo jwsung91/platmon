@@ -42,5 +42,7 @@ install -m 755 "$src" "$target"
 echo "installed $target"
 case ":$PATH:" in
     *":$dir:"*) ;;
-    *) echo "note: $dir is not in PATH; add it, or run $target" ;;
+    *)  # e.g. a non-login ssh command; Ubuntu's ~/.profile and many zsh setups add ~/.local/bin in login shells
+        echo "note: $dir is not in this shell's PATH. A new login shell often has it; if 'platmon' is still"
+        echo "      not found there, add $dir to PATH or run $target" ;;
 esac
