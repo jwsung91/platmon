@@ -50,6 +50,15 @@ def cpu_note(s):
     return "CPU sampling: " + "; ".join(f"{' '.join(ids)} {why}" for why, ids in groups.items())
 
 
+def collection_note(s):
+    """Optional groups that could not read everything ("Collection: temperature partial, gpu error");
+    empty when all read fine or are just absent (no GPU, no fans), and for servers without collectors."""
+    collectors = s.get("collectors")
+    bad = [f"{name} {c['state']}" for name, c in (collectors.items() if isinstance(collectors, dict) else ())
+           if name != "core" and isinstance(c, dict) and c.get("state") in ("partial", "error")]
+    return "Collection: " + ", ".join(bad) if bad else ""
+
+
 def render(s):
     up = int(s["uptime"])
     system = system_line(s.get("system"))
@@ -57,6 +66,7 @@ def render(s):
         f"{s['model']}",
         f"{s['platform']}   " + (f"mode {s['power_mode']}   " if s["power_mode"] else "") + f"up {up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}",
         *([system] if system else []),
+        *([note] if (note := collection_note(s)) else []),
         "",
     ]
     for c in s["cpu"]:

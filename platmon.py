@@ -95,7 +95,8 @@ def main(argv=None):
     # CPU usage over the time since the previous reading; a longer break is not averaged over. This limit
     # matches the Sampler's default stale_after, but it is a CPU window rule, not snapshot freshness.
     cpu = CpuCounters(clock[0], max_gap=max(3 * interval, 5.0))
-    sampler = Sampler(functools.partial(collect, cpu), interval, clock=clock).start()
+    # {} keeps what was logged about unreadable optional sensors, so a lasting failure is logged once
+    sampler = Sampler(functools.partial(collect, cpu, {}), interval, clock=clock).start()
     threads = [t for name, start in FRONTENDS.items()
                if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name]))]
     if not threads:

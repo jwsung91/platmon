@@ -173,3 +173,22 @@ def test_polling_does_not_collect():
         assert [p["sample"]["sequence"] for p in polls] == [1, 1, 1] and all(plain(p) == FULL for p in polls)
     finally:
         httpd.shutdown()
+
+
+def test_partial_snapshot_is_served_and_degraded():
+    """A snapshot with an unreadable optional group is current: 200 on /api/stats and /text, and /api/status
+    says degraded while ready."""
+    from test_cli import FULL
+    partial = dict(FULL, collectors={"temperature": {"state": "partial", "reason": "some_unreadable",
+                                                     "issues": [{"target": "hwmon0.temp2", "reason": "invalid_data"}],
+                                                     "issues_truncated": 0}})
+    httpd, base = serve(partial)
+    try:
+        code, _, body = get(base + "/api/stats")
+        assert code == 200 and json.loads(body)["collectors"]["temperature"]["state"] == "partial"
+        code, _, body = get(base + "/text")
+        assert code == 200 and "Collection: temperature partial" in body.decode()
+        status = json.loads(get(base + "/api/status")[2])
+        assert (status["state"], status["ready"]) == ("degraded", True)
+    finally:
+        httpd.shutdown()

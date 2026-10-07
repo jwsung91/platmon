@@ -28,7 +28,8 @@ def test_every_step_ran(steps):
                            "tab_return_checking", "tab_return_verified",
                            "tab_return_while_requesting", "old_answer_ignored", "tab_return_rechecked",
                            "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout",
-                           "cpu_warmup", "cpu_partial", "cpu_odd_reason"]
+                           "cpu_warmup", "cpu_partial", "cpu_odd_reason",
+                           "collection_bad", "collection_bad_then_down", "collection_ok", "collection_odd"]
     for s in steps.values():
         if s["step"] != "cpu_warmup":  # no CPU rows before the second reading, by design
             assert s["shows_data"], s     # the last good values stay on screen
@@ -115,3 +116,12 @@ def test_cpu_sampling_note(steps):
     assert "<img" not in steps["cpu_odd_reason"]["cpu"]  # server strings are escaped
     assert steps["cpu_odd_reason"]["cpu"].endswith("CPU sampling: CPU4 &#60;img src=x&#62;</div>")
     assert "CPU sampling" not in steps["ok"]["cpu"]  # legacy servers: no note
+
+
+def test_collection_note(steps):
+    """Read failures of optional groups are named; absent ones are not; set as text, so nothing is injected."""
+    assert steps["collection_bad"]["coll"] == "Collection: temperature partial, gpu error, <b>x</b> error"
+    assert steps["collection_bad"]["err"] == ""
+    assert steps["collection_bad_then_down"]["coll"] == steps["collection_bad"]["coll"]  # belongs to the last good data
+    assert steps["collection_ok"]["coll"] == "" and steps["collection_odd"]["coll"] == ""
+    assert steps["ok"]["coll"] == ""  # legacy servers: no note

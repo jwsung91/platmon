@@ -8,7 +8,8 @@ import re
 import shutil
 import time
 
-from .sysfs import DEVICE_TREE, HOST_ROOT, host_path, hwmon_chips, numbered, read, read_int
+from . import sysfs
+from .sysfs import DEVICE_TREE, HOST_ROOT, guard, host_path, hwmon_chips, numbered, read
 
 
 def unique_key(table, key, d):
@@ -16,53 +17,76 @@ def unique_key(table, key, d):
     return f"{key} ({os.path.basename(d)})" if key in table else key
 
 
-def hwmon_sensors(skip=(), root="/sys/class/hwmon"):
-    """Temps, power and fans from every hwmon chip. skip: chip names already read elsewhere."""
+def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
+    """Temps, power and fans from every hwmon chip, in one pass. skip: chip names already read elsewhere.
+    groups: the temperature/power/fans sysfs.Group to note unreadable channels in; a channel that cannot be
+    read is left out (a fan's unreadable rpm or pwm is None), the others are kept."""
+    g = groups or sysfs.groups("temperature", "power", "fans")
+    temp_g, power_g, fan_g = g["temperature"], g["power"], g["fans"]
     temps, power, fans = {}, {}, []
-    for d, chip in hwmon_chips(root):
-        if chip in skip:
-            continue
+    for grp in (temp_g, power_g, fan_g):
+        grp.listdir(root)
+    with guard(temp_g, power_g, fan_g):
+        for d, chip in hwmon_chips(root):
+            if chip in skip:
+                continue
+            dev = os.path.basename(d)
 
-        def label(kind, n):
-            return read(f"{d}/{kind}{n}_label") or f"{chip} {kind}{n}"
+            def label(kind, n):
+                return read(f"{d}/{kind}{n}_label") or f"{chip} {kind}{n}"
 
-        for n in numbered(d, "temp*_input"):
-            t = read(f"{d}/temp{n}_input")
-            if t:
-                key = unique_key(temps, f"{chip} {read(f'{d}/temp{n}_label') or f'temp{n}'}", d)
-                temps[key] = int(t) / 1000  # m°C
-        for n in numbered(d, "power*_input"):
-            p = read(f"{d}/power{n}_input")
-            if p:
-                power[unique_key(power, label("power", n), d)] = round(int(p) / 1e6, 2)  # µW
-        for n in numbered(d, "curr*_input"):  # ina3221-style rails; label required, unlabeled channels are sums
-            mv, ma, lbl = read(f"{d}/in{n}_input"), read(f"{d}/curr{n}_input"), read(f"{d}/in{n}_label")
-            if mv and ma and lbl:
-                power[unique_key(power, lbl, d)] = round(int(mv) * int(ma) / 1e6, 2)  # mV*mA -> W
+            for n in numbered(d, "temp*_input"):
+                path = f"{d}/temp{n}_input"
+                t = temp_g.read(path, f"{dev}.temp{n}", found=path)
+                if t is not None:
+                    key = unique_key(temps, f"{chip} {read(f'{d}/temp{n}_label') or f'temp{n}'}", d)
+                    temps[key] = temp_g.got(t / 1000)  # m°C
+            for n in numbered(d, "power*_input"):
+                path = f"{d}/power{n}_input"
+                p = power_g.read(path, f"{dev}.power{n}", found=path)
+                if p is not None:
+                    power[unique_key(power, label("power", n), d)] = power_g.got(round(p / 1e6, 2))  # µW
+            for n in numbered(d, "curr*_input"):  # ina3221-style rails; label required, unlabeled channels are sums
+                lbl = read(f"{d}/in{n}_label")
+                if not lbl:
+                    continue
+                path = f"{d}/curr{n}_input"
+                ma = power_g.read(path, f"{dev}.curr{n}", found=path)
+                mv = power_g.read(f"{d}/in{n}_input", f"{dev}.in{n}", found=d)
+                if ma is not None and mv is not None:
+                    power[unique_key(power, lbl, d)] = power_g.got(round(mv * ma / 1e6, 2))  # mV*mA -> W
 
-        fan_idx = numbered(d, "fan*_input")
-        for n in fan_idx:
-            pwm = read(f"{d}/pwm{n}")
-            fans.append({"name": label("fan", n), "rpm": read_int(f"{d}/fan{n}_input"),  # None if unreadable, not 0
-                         "percent": round(int(pwm) * 100 / 255) if pwm else None})
-        pwm = read(f"{d}/pwm1")
-        if not fan_idx and pwm:  # pwm-fan without a tachometer
-            fans.append({"name": chip, "rpm": None, "percent": round(int(pwm) * 100 / 255)})
+            def percent(n, found):
+                pwm = fan_g.read(f"{d}/pwm{n}", f"{dev}.pwm{n}", found=found)
+                return None if pwm is None else fan_g.got(round(pwm * 100 / 255))
+
+            fan_idx = numbered(d, "fan*_input")
+            for n in fan_idx:
+                path = f"{d}/fan{n}_input"
+                rpm = fan_g.read(path, f"{dev}.fan{n}", found=path)  # None if unreadable, not 0
+                fans.append({"name": label("fan", n), "rpm": None if rpm is None else fan_g.got(rpm),
+                             "percent": percent(n, d)})
+            if not fan_idx and os.path.exists(f"{d}/pwm1"):  # pwm-fan without a tachometer
+                fans.append({"name": chip, "rpm": None, "percent": percent(1, f"{d}/pwm1")})
     return temps, power, fans
 
 
-def thermal_zones(root="/sys/class/thermal"):
-    """Zone temps, plus zone types as their hwmon twins name them (kernel turns "-" into "_")."""
+def thermal_zones(root="/sys/class/thermal", group=None):
+    """Zone temps, plus zone types as their hwmon twins name them (kernel turns "-" into "_").
+    group: the temperature sysfs.Group; inactive zones (ENODATA) count as no_data, not as errors."""
+    g = group or sysfs.Group("temperature")
     temps, zone_types = {}, set()
-    for z in sorted(glob.glob(f"{root}/thermal_zone*"), key=lambda p: int(p.rsplit("e", 1)[1])):
-        zt = read(f"{z}/type", "")
-        zone_types.add(zt.replace("-", "_"))
-        t = read(f"{z}/temp")  # inactive zones (cv*) return ENODATA
-        if t:
-            key = zt.removesuffix("-thermal")
-            if key in temps:  # e.g. several acpitz zones
-                key += f" ({os.path.basename(z)})"
-            temps[key] = int(t) / 1000
+    g.listdir(root)
+    with guard(g):
+        for z in sorted(glob.glob(f"{root}/thermal_zone*"), key=lambda p: int(p.rsplit("e", 1)[1])):
+            zt = read(f"{z}/type", "")
+            zone_types.add(zt.replace("-", "_"))
+            t = g.read(f"{z}/temp", os.path.basename(z), found=z)
+            if t is not None:
+                key = zt.removesuffix("-thermal")
+                if key in temps:  # e.g. several acpitz zones
+                    key += f" ({os.path.basename(z)})"
+                temps[key] = g.got(t / 1000)
     return temps, zone_types
 
 
@@ -171,20 +195,33 @@ def system_info():
             "kernel": u.release, "arch": u.machine, "hostname": u.nodename}
 
 
-def collect(cpu=None):
+def collect(cpu=None, groups=None):
     """Fields every host has. gpu and power_mode stay None unless a board module fills them.
     cpu: the service's CpuCounters. Without one (a one-off call) the CPU usage comes from two readings
-    250 ms apart with a baseline of its own."""
+    250 ms apart with a baseline of its own.
+    groups: sysfs.Group per optional group, for collectors; without them this call reports its own.
+    CPU counters, memory, disk and identity are required: their failures raise. The optional parts
+    (CPU clocks, temperatures, power, fans) note what they could not read and the rest is kept."""
+    own = groups is None
+    if own:
+        groups = sysfs.groups("cpu_frequency", "temperature", "power", "fans")
     if cpu is None:
         cpu = CpuCounters(mode="oneshot")
         cpu.sample()
         time.sleep(0.25)
     usage, sampling = cpu.sample()
-    freqs = {n: read_int(f"/sys/devices/system/cpu/cpu{n}/cpufreq/scaling_cur_freq") for n in usage}
 
-    temps, zone_types = thermal_zones()
+    freq_g, freqs = groups["cpu_frequency"], {}
+    if not usage:  # e.g. the service's first reading: no CPU rows to read clocks for (see cpu_sampling)
+        freq_g.note("cpu", "no_data")
+    with guard(freq_g):
+        for n in usage:
+            f = freq_g.read(f"/sys/devices/system/cpu/cpu{n}/cpufreq/scaling_cur_freq", f"cpu{n}")
+            freqs[n] = None if f is None else freq_g.got(f * 1000)  # kHz
+
+    temps, zone_types = thermal_zones(group=groups["temperature"])
     # zones (acpitz, cpu-thermal, ...) also show up as hwmon chips; skip them to avoid duplicates
-    hw_temps, power, fans = hwmon_sensors(skip=zone_types)
+    hw_temps, power, fans = hwmon_sensors(skip=zone_types, groups=groups)
     temps.update(hw_temps)
 
     mem = meminfo()
@@ -197,7 +234,7 @@ def collect(cpu=None):
         "system": system_info(),
         "uptime": float(read("/proc/uptime").split()[0]),
         "power_mode": None,
-        "cpu": [{"id": n, "usage": u, "freq": freqs[n] * 1000 if freqs[n] else None} for n, u in usage.items()],
+        "cpu": [{"id": n, "usage": u, "freq": freqs.get(n)} for n, u in usage.items()],
         "cpu_sampling": sampling,  # cores missing from cpu, and why
         "gpu": None,
         "memory": {"total": mem["MemTotal"], "used": mem["MemTotal"] - mem["MemAvailable"],
@@ -206,4 +243,5 @@ def collect(cpu=None):
         "temperature": temps,
         "power": power,
         "fans": fans,
+        **({"collectors": sysfs.summarize(groups)} if own else {}),
     }

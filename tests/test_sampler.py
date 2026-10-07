@@ -472,3 +472,94 @@ def test_broken_cpu_reading_fails_the_collection(tmp_path, monkeypatch):
     assert stats["cpu_sampling"]["unavailable"] == [{"id": 0, "reason": "warmup"}]
     stats = attempt()[0]
     assert stats["sample"]["sequence"] == 4 and stats["cpu_sampling"]["window_ms"] == 1000.0
+
+
+# optional collector groups: kept as collect() returned them; partial/error make a fresh snapshot "degraded"
+
+def group(state, reason=None, issues=()):
+    return {"state": state, "reason": reason, "issues": list(issues), "issues_truncated": 0}
+
+
+def test_optional_collectors_are_kept_and_core_is_the_samplers():
+    c = Clock()
+    returned = [{"v": 1, "collectors": {"core": group("error", "made_up"), "temperature": group(
+        "partial", "some_unreadable", [{"target": "hwmon0.temp2", "reason": "invalid_data"}]),
+        "gpu": group("unavailable", "unsupported_platform")}}]
+    s = fake(lambda: returned[0], c)
+    s._attempt()
+    stats, status = s.read()
+    assert list(stats["collectors"]) == ["core", "temperature", "gpu"]
+    assert stats["collectors"]["core"] == {"state": "ok", "reason": None}  # collect() cannot override core
+    assert stats["collectors"]["temperature"]["issues"] == [{"target": "hwmon0.temp2", "reason": "invalid_data"}]
+    assert (status["state"], status["ready"]) == ("degraded", True)
+    assert status["last_attempt"]["state"] == "ok" and status["last_attempt"]["consecutive_failures"] == 0
+    assert s.latest() == {"v": 1, "collectors": {k: v for k, v in returned[0]["collectors"].items() if k != "core"}}
+    # the same sample polled again is the same, and changing what was returned changes nothing
+    stats["collectors"]["temperature"]["state"] = "changed"
+    returned[0]["collectors"]["temperature"]["state"] = "changed"
+    c.advance(1)
+    again = s.read()[0]
+    assert again["collectors"]["temperature"]["state"] == "partial" and again["sample"]["sequence"] == 1
+    # recovered in the next collection: a new sample, ready again
+    returned[0] = {"v": 2, "collectors": {"temperature": group("ok"), "gpu": group("unavailable", "not_detected")}}
+    s._attempt()
+    stats, status = s.read()
+    assert stats["sample"]["sequence"] == 2 and status["state"] == "ready"
+
+
+@pytest.mark.parametrize("collectors, expected", [
+    ({"fans": group("unavailable", "not_detected"), "gpu": group("unavailable", "unsupported_platform")}, "ready"),
+    ({"gpu": group("error", "io_error")}, "degraded"),
+    ("not a dict", "ready"),                       # anything else from a generic callable is ignored
+    ({"odd": "not a dict", "x": {"state": 5}}, "ready"),
+])
+def test_status_from_optional_collectors(collectors, expected):
+    c = Clock()
+    s = fake(lambda: {"v": 1, "collectors": collectors}, c)
+    s._attempt()
+    stats, status = s.read()
+    assert status["state"] == expected and stats["collectors"]["core"]["state"] == "ok"
+
+
+def test_all_optional_failing_still_publishes_then_required_failure_keeps_last_good(tmp_path, monkeypatch):
+    """Every optional sensor unreadable: a current snapshot (200), ready but degraded, last attempt ok.
+    Then memory (required) fails: collection_failed, and the last good snapshot stays with its collectors."""
+    import errno
+    import functools
+
+    import collector
+    from collector import common, sysfs
+    from test_common import Proc, fail_reads, fake_hwmon, idle_busy
+
+    root = fake_hwmon(tmp_path, [{"name": "chip", "temp1_input": 1, "power1_input": 1, "fan1_input": 1}])
+    monkeypatch.setattr(common, "hwmon_chips", lambda r: [(f"{root}/hwmon0", "chip")])
+    monkeypatch.setattr(common, "thermal_zones", lambda group=None: ({}, set()))
+    freq = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
+    fail_reads(monkeypatch, {f"{root}/hwmon0/{f}": errno.EIO for f in ("temp1_input", "power1_input", "fan1_input")}
+               | {freq: errno.EACCES})
+    c = Clock()
+    p = Proc(monkeypatch)
+    s = fake(functools.partial(collector.collect, CpuCounters(lambda: c.ns, max_gap=5.0)), c)
+    for busy in (0, 10):
+        c.advance(1)
+        p.readings.append({0: idle_busy(busy, busy)})
+        s._attempt()
+    stats, status = s.read()
+    assert stats is not None and stats["cpu"] == [{"id": 0, "usage": 50.0, "freq": None}]
+    assert {k: v["state"] for k, v in stats["collectors"].items()} == {
+        "core": "ok", "cpu_frequency": "error", "gpu": "unavailable", "temperature": "error", "power": "error",
+        "fans": "error", "power_mode": "unavailable", "board_info": "unavailable"}
+    assert stats["fans"] == [{"name": "chip fan1", "rpm": None, "percent": None}]
+    assert (status["state"], status["ready"], status["last_attempt"]["state"]) == ("degraded", True, "ok")
+    assert str(tmp_path) not in json.dumps(stats["collectors"])
+
+    def no_memory():
+        raise OSError("meminfo")
+    monkeypatch.setattr(common, "meminfo", no_memory)
+    c.advance(1)
+    p.readings.append({0: idle_busy(20, 20)})
+    s._attempt()
+    again, status = s.read()
+    assert status["last_attempt"]["reason"] == "collection_failed" and status["state"] == "degraded"
+    assert again["sample"]["sequence"] == stats["sample"]["sequence"]
+    assert again["collectors"] == stats["collectors"]  # the last good snapshot as it was

@@ -58,3 +58,93 @@ def make(root, files):
 def test_gpu_across_bsps(tmp_path, files, expected):
     make(tmp_path, files)
     assert jetson.gpu(str(tmp_path)) == expected
+
+
+# what each Jetson part could not read is noted in its group; one part failing does not stop the others
+
+import errno
+
+from collector import sysfs
+from test_common import fail_reads
+
+
+def test_gpu_load_fallback_hides_failed_candidates(tmp_path):
+    """The devfreq device's load is unreadable but gpu.0's is: the value counts, the failed candidate does not."""
+    make(tmp_path, {"class/devfreq/17000000.gpu/device/load": "garbage", "class/devfreq/17000000.gpu/cur_freq": 306000000,
+                    "class/devfreq/17000000.gpu/max_freq": 1020000000, "devices/platform/gpu.0/load": 500})
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) == {"usage": 50.0, "freq": 306000000, "max_freq": 1020000000}
+    assert g.status() == {"state": "ok", "reason": None, "issues": [], "issues_truncated": 0}
+
+
+def test_gpu_clock_failure_keeps_usage(tmp_path, monkeypatch):
+    make(tmp_path, {"class/devfreq/17000000.gpu/device/load": 250, "class/devfreq/17000000.gpu/cur_freq": 1,
+                    "class/devfreq/17000000.gpu/max_freq": 1020000000})
+    fail_reads(monkeypatch, {str(tmp_path / "class/devfreq/17000000.gpu/cur_freq"): errno.EIO})
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) == {"usage": 25.0, "freq": None, "max_freq": 1020000000}
+    assert g.status()["state"] == "partial" and g.status()["issues"] == [{"target": "cur_freq", "reason": "io_error"}]
+
+
+def test_gpu_without_load(tmp_path):
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) is None  # nothing there: gpu null, unavailable, not an error
+    assert (g.status()["state"], g.status()["reason"]) == ("unavailable", "not_exposed")
+    make(tmp_path, {"devices/platform/gpu.0/load": ""})
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) is None
+    assert g.status()["state"] == "error" and g.status()["issues"] == [{"target": "load", "reason": "invalid_data"}]
+
+
+def extend_with(monkeypatch, tmp_path, status=None, release=None):
+    """jetson.extend() with the nvpmodel status and L4T release files faked and a fixed GPU."""
+    import io
+    real = open
+    files = {"/var/lib/nvpmodel/status": status, "/etc/nvpmodel.conf": "< POWER_MODEL ID=2 NAME=MAXN_SUPER >",
+             sysfs.host_path("/etc/nv_tegra_release"): release}
+
+    def fake(path, *args, **kw):
+        if path in files:
+            if files[path] is None:
+                raise FileNotFoundError(path)
+            return io.StringIO(files[path])
+        return real(path, *args, **kw)
+    monkeypatch.setattr(sysfs, "open", fake, raising=False)
+    monkeypatch.setattr(jetson, "read", lambda path, default=None: files.get(path, default))
+
+    def fake_gpu(group):
+        return {"usage": group.got(50.0), "freq": None, "max_freq": None}
+    monkeypatch.setattr(jetson, "gpu", lambda group=None: fake_gpu(group))
+    monkeypatch.setattr(jetson, "tach_fans", lambda group=None: [])
+    stats, g = {"fans": [], "system": {}}, sysfs.groups("gpu", "fans", "power_mode", "board_info")
+    jetson.extend(stats, g)
+    return stats, {n: x.status() for n, x in g.items()}
+
+
+def test_extend_power_mode_and_l4t(monkeypatch, tmp_path):
+    stats, st = extend_with(monkeypatch, tmp_path, "pmode:0002\n", "# R36 (release), REVISION: 5.2, GCID: 1")
+    assert stats == {"fans": [], "system": {"l4t": "R36.5.2"}, "power_mode": "MAXN_SUPER",
+                     "gpu": {"usage": 50.0, "freq": None, "max_freq": None}}
+    assert st["power_mode"]["state"] == st["board_info"]["state"] == st["gpu"]["state"] == "ok"
+
+
+def test_extend_bad_power_mode_and_l4t_do_not_stop_the_rest(monkeypatch, tmp_path):
+    stats, st = extend_with(monkeypatch, tmp_path, "garbage", "not a release line")
+    assert stats["power_mode"] is None and "l4t" not in stats["system"] and stats["gpu"]["usage"] == 50.0
+    assert st["power_mode"]["issues"] == [{"target": "status", "reason": "invalid_data"}]
+    assert st["board_info"]["issues"] == [{"target": "l4t", "reason": "invalid_data"}]
+    assert st["gpu"]["state"] == "ok"
+
+
+def test_extend_without_nvpmodel(monkeypatch, tmp_path):
+    """No nvpmodel mount (e.g. a container started without compose.jetson.yaml): absent, not an error."""
+    stats, st = extend_with(monkeypatch, tmp_path, None, None)
+    assert stats["power_mode"] is None and st["power_mode"]["state"] == st["board_info"]["state"] == "unavailable"
+
+
+def test_tach_fan_unreadable_rpm(tmp_path):
+    root = fake_hwmon(tmp_path, [{"name": "pwm_tach", "rpm": "x"}, {"name": "other_tach", "rpm": 0}])
+    g = sysfs.Group("fans")
+    assert jetson.tach_fans(root, g) == [{"name": "pwm_tach", "rpm": None, "percent": None},
+                                         {"name": "other_tach", "rpm": 0, "percent": None}]
+    assert g.status()["state"] == "partial"

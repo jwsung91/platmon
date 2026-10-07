@@ -25,7 +25,7 @@
   .fill { height: 100%; background: var(--bar); transition: width .3s; }
   .fill.hot { background: var(--warn); }
   .kv { display: flex; justify-content: space-between; margin: 3px 0; font-variant-numeric: tabular-nums; }
-  #err { color: var(--warn); }
+  #err, #coll { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -38,6 +38,7 @@
   <div class="muted" id="meta"></div>
   <div class="muted" id="sys"></div>
   <div class="muted" id="age"></div>
+  <div id="coll"></div>
   <div id="err"></div>
 </header>
 <div class="grid">
@@ -70,11 +71,20 @@ function cpuNote(s) {
     : whys.map(why => groups[why].join(' ') + ' ' + why).join('; '));
 }
 
+// optional groups that could not read everything, as in cli.py; nothing for absent sensors or older servers
+function collectionNote(s) {
+  const c = s.collectors && typeof s.collectors === 'object' ? s.collectors : {};
+  const bad = Object.entries(c).filter(([name, v]) => name !== 'core' && v && (v.state === 'partial' || v.state === 'error'))
+    .map(([name, v]) => name + ' ' + v.state);
+  return bad.length ? 'Collection: ' + bad.join(', ') : '';
+}
+
 function render(s) {
   const up = Math.floor(s.uptime);
   $('model').textContent = s.model;
   $('meta').textContent = `${s.platform} · ${s.power_mode ? 'mode ' + s.power_mode + ' · ' : ''}up ${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
   $('sys').textContent = systemLine(s.system);
+  $('coll').textContent = collectionNote(s);
   const note = cpuNote(s);
   $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('') +
     (note ? `<div class="muted">${esc(note)}</div>` : '');
