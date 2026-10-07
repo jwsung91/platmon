@@ -19,8 +19,13 @@ if [ -e /var/lib/nvpmodel/status ] && [ -e /etc/nvpmodel.conf ]; then
     files+=(-f compose.jetson.yaml)
     echo "Jetson: adding compose.jetson.yaml"
 fi
+# Build without the default provenance attestation: it records the build time and git commit, so identical
+# content got a new image id on every build, the tag moved off the running container's image and that image
+# was deleted. compose.yaml says provenance: false as well, but not every compose version passes it on.
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
 # remember the container before "up" to report what compose did. It recreates the container when the
-# rebuilt image or the config differs; some setups (e.g. Docker Desktop) get a new image id on every build.
+# rebuilt image or the config differs.
 before=$(docker compose "${files[@]}" ps -aq platmon)
 was_running=false
 if [ -n "$before" ]; then
