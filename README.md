@@ -1,7 +1,7 @@
 # platmon
 
 Lightweight platform monitor for Jetson, Raspberry Pi, PCs and other Linux hosts.
-One collector core runs on the device; the frontends enabled in its config (HTTP API + web page, terminal) show what it collects.
+One collector core runs on the device as a background service with an HTTP API; a terminal client and a web page show what it collects.
 
 - No dependencies: Python 3.9+ standard library only
 - Reads `/proc` and `/sys` directly (CPU, GPU on Jetson, memory, disk, temperatures, power rails, fans)
@@ -14,12 +14,9 @@ On the device:
 
 ```sh
 python3 platmon.py [platmon.ini]             # defaults: HTTP API + web page on :9797
-python3 platmon.py --frontends terminal      # draw in this terminal, no server
-python3 platmon.py --frontends http,terminal
 ```
 
-`platmon.ini` lists every option with its default (collection interval, HTTP bind/port, web page on/off,
-which frontends run). `--frontends` overrides the `enabled` settings.
+`platmon.ini` lists every option with its default (collection interval, HTTP bind/port, web page on/off).
 
 From anywhere on the network, open `http://<host>:9797` in a browser, or use the remote terminal client
 (`frontends/cli.py` needs nothing else, copy it anywhere):
@@ -33,9 +30,9 @@ Raw data: `http://<host>:9797/api/stats`. The API has no authentication. Run it 
 ### Layout
 
 ```
-platmon.py   launcher: config -> one collector core -> enabled frontends
+platmon.py   server: config -> one collector core -> HTTP API and web page
 collector/   core: collect() (common.py for any Linux, jetson.py for Jetson) and the background Sampler
-frontends/   server.py (HTTP + web/), terminal.py, cli.py (remote client)
+frontends/   server.py (HTTP + web/), cli.py (terminal client)
 tests/
 ```
 
@@ -85,8 +82,7 @@ deleted out from under it.
 - `./platmon.ini` → config. Keep `[http] port = 9797` inside the container and change the
   published port in `compose.yaml` instead (the health check uses 9797).
 - Runs as an unprivileged user, needs no NVIDIA container runtime, and is marked unhealthy while
-  `/api/stats` has no current data. The terminal frontend needs a TTY:
-  `docker compose run --rm platmon --frontends terminal`.
+  `/api/stats` has no current data.
 
 #### Container image licensing
 

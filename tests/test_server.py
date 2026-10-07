@@ -6,7 +6,6 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from frontends import terminal
 from frontends.server import make_handler
 
 
@@ -55,7 +54,3 @@ def test_no_snapshot_yet_is_503():
         assert status(base + "/api/stats")[0] == 503
     finally:
         httpd.shutdown()
-
-
-def test_terminal_skipped_without_tty():
-    assert terminal.start(FakeSampler({})) is None  # pytest captures stdout, so it is not a TTY
