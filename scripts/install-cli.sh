@@ -4,7 +4,8 @@
 #   scripts/install-cli.sh                    /usr/local/bin/platmon (asks for sudo)
 #   scripts/install-cli.sh --user             ~/.local/bin/platmon (no sudo)
 #   scripts/install-cli.sh --uninstall [--user]
-# scripts/systemd/install.sh runs this too. Run it again after a git pull to update the command.
+# The service scripts run this too (systemd/install.sh: /usr/local/bin, docker/start.sh: --user), so on a
+# device the command comes with the service; run it yourself on a PC that only watches devices.
 set -euo pipefail
 
 usage() { echo "usage: $0 [--user] [--uninstall]" >&2; exit 2; }
