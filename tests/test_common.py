@@ -346,18 +346,36 @@ def test_oneshot_does_not_touch_the_service_baseline(monkeypatch):
     assert p.sample(c, 1, {0: idle_busy(10, 10)})[0] == {0: 50.0}  # still its own baseline, not the one-shot's
 
 
-def test_direct_collect_is_a_oneshot_reading():
-    """collect() without counters, on this host: two real readings 250 ms apart, nothing kept. Which CPUs
-    have a usage depends on the host (exact values and reasons are tested with fixtures above)."""
-    import collector
-    s = collector.collect()
+def check_oneshot(s):
+    """What a one-off reading must look like on any host: every CPU read is either measured or listed with
+    a one-shot reason, once; there may be none measured (e.g. a single CPU whose iowait went down)."""
     sampling = s["cpu_sampling"]
-    assert sampling["mode"] == "oneshot" and sampling["window_ms"] >= 250
+    assert sampling["mode"] == "oneshot"
     measured = [c["id"] for c in s["cpu"]]
     missing = [u["id"] for u in sampling["unavailable"]]
-    assert measured and len(set(measured + missing)) == len(measured) + len(missing)  # each CPU in one list
+    assert measured or missing
+    assert len(set(measured + missing)) == len(measured) + len(missing)  # each CPU in one list
     assert all(0 <= c["usage"] <= 100 for c in s["cpu"])
     assert {u["reason"] for u in sampling["unavailable"]} <= {"warmup", "counter_regressed", "no_ticks"}
+
+
+def test_direct_collect_is_a_oneshot_reading():
+    """collect() without counters, on this host: two real readings 250 ms apart, nothing kept. Which CPUs
+    have a usage depends on the host (exact values and reasons are tested with fixtures)."""
+    import collector
+    s = collector.collect()
+    assert s["cpu_sampling"]["window_ms"] >= 250
+    check_oneshot(s)
+
+
+def test_oneshot_single_cpu_iowait_drop(monkeypatch):
+    """A one-CPU host whose iowait went down between the two readings: no usage at all, not a made-up 0 %."""
+    p = Proc(monkeypatch)
+    monkeypatch.setattr(common.time, "sleep", lambda seconds: None)
+    p.readings += [{0: [10, 0, 0, 100, 50, 0, 0, 0]}, {0: [20, 0, 0, 110, 40, 0, 0, 0]}]
+    s = common.collect()
+    assert s["cpu"] == [] and s["cpu_sampling"]["unavailable"] == [{"id": 0, "reason": "counter_regressed"}]
+    check_oneshot(s)
 
 
 def test_oneshot_reports_unusable_cpus(monkeypatch):
@@ -371,3 +389,4 @@ def test_oneshot_reports_unusable_cpus(monkeypatch):
     assert [(c["id"], c["usage"]) for c in s["cpu"]] == [(0, 50.0)]
     assert s["cpu_sampling"]["mode"] == "oneshot" and s["cpu_sampling"]["unavailable"] == [
         {"id": 1, "reason": "counter_regressed"}, {"id": 2, "reason": "warmup"}]
+    check_oneshot(s)
