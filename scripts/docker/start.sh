@@ -19,17 +19,36 @@ if [ -e /var/lib/nvpmodel/status ] && [ -e /etc/nvpmodel.conf ]; then
     files+=(-f compose.jetson.yaml)
     echo "Jetson: adding compose.jetson.yaml"
 fi
+# remember the container before "up" to report what compose did. It recreates the container when the
+# rebuilt image or the config differs; some setups (e.g. Docker Desktop) get a new image id on every build.
+before=$(docker compose "${files[@]}" ps -aq platmon)
+was_running=false
+if [ -n "$before" ]; then
+    was_running=$(docker inspect -f '{{.State.Running}}' "$before")
+fi
+
 docker compose "${files[@]}" up -d --build
 
-echo "waiting for the health check..."
 container=$(docker compose "${files[@]}" ps -q platmon)
+if [ -z "$before" ]; then
+    change="started: new container"
+elif [ "$container" != "$before" ]; then
+    change="updated: container recreated with the rebuilt image or changed config"
+elif [ "$was_running" = true ]; then
+    change="unchanged: running container kept (same image and config)"
+else
+    change="started: existing container was stopped"
+fi
+echo "$change"
+
+echo "waiting for the health check..."
 state=starting
 for _ in $(seq 30); do
     state=$(docker inspect -f '{{.State.Health.Status}}' "$container")
     case $state in
         healthy)
             docker compose "${files[@]}" logs --no-log-prefix --tail 2
-            echo "platmon is up on port 9797 (restarts with Docker at boot)"
+            echo "platmon is up on port 9797 (restarts with Docker at boot) - $change"
             exit 0 ;;
         unhealthy) break ;;
     esac
