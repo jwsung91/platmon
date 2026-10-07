@@ -4,7 +4,7 @@ import os
 import re
 
 from . import sysfs
-from .sysfs import entries, guard, host_path, hwmon_chips, read
+from .sysfs import entries, guard, host_path, hwmon_chips
 
 
 # GPU devfreq device names per BSP (NVIDIA L4T docs): Orin R36 17000000.gpu (verified on an Orin Nano),
@@ -18,16 +18,17 @@ def gpu(root="/sys", group=None):
     """GPU load and clocks. freq/max_freq are None (not 0) when the clock cannot be read.
     The load comes from the first candidate that reads; the others' failures only count if none does."""
     g = group or sysfs.Group("gpu")
-    tried = sysfs.Group("gpu")  # failures on the way, reported only if no load is found
-    devices = entries(f"{root}/class/devfreq", tried)
+    # a devfreq listing failure also hides the clocks, so it is reported even when another path gives the load
+    listing = sysfs.Group("gpu")
+    devices = entries(f"{root}/class/devfreq", listing)
+    g.merge(listing)
+    tried = sysfs.Group("gpu")  # load candidates that failed: reported only if none gives the load
     devfreq = next((f"{root}/class/devfreq/{n}" for pattern in GPU_DEVFREQ for n in devices
                     if fnmatch.fnmatchcase(n, pattern)), None)
     loads = ([f"{devfreq}/device/load"] if devfreq else []) + [f"{root}/{p}" for p in GPU_LOAD]
     load = next((v for v in (tried.read(p, "load") for p in loads) if v is not None), None)
     if load is None:
-        for issue, detail in zip(tried.issues, tried.details):
-            g.note(issue["target"], issue["reason"], detail)
-        g.reasons |= tried.reasons
+        g.merge(tried)
         return None
 
     def clock(name):
@@ -89,7 +90,8 @@ def extend(stats, groups=None):
     with guard(g["power_mode"]):
         status = g["power_mode"].read("/var/lib/nvpmodel/status", "status", parse=pmode)
         if status is not None:
-            stats["power_mode"] = g["power_mode"].got(power_mode(status, read("/etc/nvpmodel.conf")))
+            conf = g["power_mode"].read("/etc/nvpmodel.conf", "conf", parse=str)  # names the mode; else its id
+            stats["power_mode"] = g["power_mode"].got(power_mode(status, conf))
     with guard(g["gpu"]):
         stats["gpu"] = gpu(group=g["gpu"])
     stats["fans"] += tach_fans(group=g["fans"])

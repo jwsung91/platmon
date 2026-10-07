@@ -31,20 +31,21 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
             # one listing per chip for all its channels; if it cannot be listed, this chip is left out
             names = entries(d, temp_g, power_g, fan_g, listed=True)
 
-            def label(kind, n):
-                return read(f"{d}/{kind}{n}_label") or f"{chip} {kind}{n}"
+            def label(group, kind, n, default):
+                """A display label; unreadable or absent, the default name is used (a read failure is noted)."""
+                return group.read(f"{d}/{kind}{n}_label", f"{dev}.{kind}{n}_label", parse=str, found=d) or default
 
             for n in numbered(names, "temp", "_input"):
                 path = f"{d}/temp{n}_input"
                 t = temp_g.read(path, f"{dev}.temp{n}", found=path)
                 if t is not None:
-                    key = unique_key(temps, f"{chip} {read(f'{d}/temp{n}_label') or f'temp{n}'}", d)
+                    key = unique_key(temps, f"{chip} {label(temp_g, 'temp', n, f'temp{n}')}", d)
                     temps[key] = temp_g.got(t / 1000)  # m°C
             for n in numbered(names, "power", "_input"):
                 path = f"{d}/power{n}_input"
                 p = power_g.read(path, f"{dev}.power{n}", found=path)
                 if p is not None:
-                    power[unique_key(power, label("power", n), d)] = power_g.got(round(p / 1e6, 2))  # µW
+                    power[unique_key(power, label(power_g, "power", n, f"{chip} power{n}"), d)] = power_g.got(round(p / 1e6, 2))  # µW
             for n in numbered(names, "curr", "_input"):  # ina3221-style rails; label required, unlabeled are sums
                 lbl = power_g.read(f"{d}/in{n}_label", f"{dev}.in{n}_label", parse=str, found=d)
                 if not lbl:  # no label (a sum channel), or noted if it could not be read
@@ -63,7 +64,7 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
             for n in fan_idx:
                 path = f"{d}/fan{n}_input"
                 rpm = fan_g.read(path, f"{dev}.fan{n}", found=path)  # None if unreadable, not 0
-                fans.append({"name": label("fan", n), "rpm": None if rpm is None else fan_g.got(rpm),
+                fans.append({"name": label(fan_g, "fan", n, f"{chip} fan{n}"), "rpm": None if rpm is None else fan_g.got(rpm),
                              "percent": percent(n, d)})
             if not fan_idx and "pwm1" in names:  # pwm-fan without a tachometer
                 fans.append({"name": chip, "rpm": None, "percent": percent(1, f"{d}/pwm1")})
@@ -78,7 +79,8 @@ def thermal_zones(root="/sys/class/thermal", group=None):
     with guard(g):
         zones = sorted(numbered(entries(root, g), "thermal_zone", ""))
         for z in (f"{root}/thermal_zone{n}" for n in zones):
-            zt = read(f"{z}/type", "")
+            # the zone's name; unreadable, the zone is named after its directory (a read failure is noted)
+            zt = g.read(f"{z}/type", f"{os.path.basename(z)}.type", parse=str, found=z) or os.path.basename(z)
             zone_types.add(zt.replace("-", "_"))
             t = g.read(f"{z}/temp", os.path.basename(z), found=z)
             if t is not None:

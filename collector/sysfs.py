@@ -53,8 +53,17 @@ def numbered(names, prefix, suffix):
 
 
 def hwmon_chips(root="/sys/class/hwmon", *groups):
-    """(dir, chip name) for every hwmon device; a class directory that cannot be listed is noted in groups."""
-    return [(f"{root}/{n}", read(f"{root}/{n}/name", "")) for n in entries(root, *groups) if re.fullmatch(r"hwmon\d+", n)]
+    """(dir, chip name) for every hwmon device. A class directory that cannot be listed, or a name that cannot
+    be read, is noted in groups; such a chip is named after its directory (hwmon2) and still read."""
+    chips = []
+    for n in entries(root, *groups):
+        if re.fullmatch(r"hwmon\d+", n):
+            d = f"{root}/{n}"
+            name = Group("name")
+            chips.append((d, name.read(f"{d}/name", f"{n}.name", parse=str, found=d) or n))
+            for g in groups:
+                g.merge(name)
+    return chips
 
 
 # Diagnostics of optional metrics (collectors.<group> in /api/stats). Reasons in PROBLEMS are read failures,
@@ -91,6 +100,17 @@ class Group:
             else:
                 self.truncated += 1
         return None
+
+    def merge(self, other):
+        """Takes over what another Group noted (e.g. one shared read, or candidates that all failed)."""
+        self.reasons |= other.reasons
+        for issue, detail in zip(other.issues, other.details):
+            if len(self.issues) < MAX_ISSUES:
+                self.issues.append(issue)
+                self.details.append(detail)
+            else:
+                self.truncated += 1
+        self.truncated += other.truncated
 
     def got(self, value):
         """Counts a value the group reports."""

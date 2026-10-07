@@ -678,3 +678,49 @@ def test_unreadable_rail_label_is_reported(tmp_path, monkeypatch):
     g = sysfs.groups("temperature", "power", "fans")
     assert hwmon_sensors(root=root, groups=g)[1] == {"VDD_IN": 5.0, "VDD_SOC": 2.0}
     assert g["power"].status()["state"] == "ok"
+
+
+# PR #24 re-review: names and display labels that do not decode
+
+TWO_CHIPS = [{"name": "a", "temp1_input": 40000, "temp1_label": "Package", "power1_input": 1000000,
+              "power1_label": "VIN", "fan1_input": 900, "fan1_label": "CPU fan", "pwm1": 255},
+             {"name": "b", "temp1_input": 50000, "power1_input": 2000000, "fan1_input": 800, "pwm1": 0}]
+CHIP_B = ({"b temp1": 50.0}, {"b power1": 2.0}, [{"name": "b fan1", "rpm": 800, "percent": 0}])
+
+
+@pytest.mark.parametrize("file, kept, groups_with_issue", [
+    # the chip name is used for every key: hwmon0's values are kept under its directory name
+    ("name", ({"hwmon0 Package": 40.0}, {"VIN": 1.0}, [{"name": "CPU fan", "rpm": 900, "percent": 100}]),
+     {"temperature", "power", "fans"}),
+    ("temp1_label", ({"a temp1": 40.0}, {"VIN": 1.0}, [{"name": "CPU fan", "rpm": 900, "percent": 100}]), {"temperature"}),
+    ("power1_label", ({"a Package": 40.0}, {"a power1": 1.0}, [{"name": "CPU fan", "rpm": 900, "percent": 100}]), {"power"}),
+    ("fan1_label", ({"a Package": 40.0}, {"VIN": 1.0}, [{"name": "a fan1", "rpm": 900, "percent": 100}]), {"fans"}),
+])
+def test_undecodable_name_or_label_keeps_the_values(tmp_path, file, kept, groups_with_issue):
+    root = fake_hwmon(tmp_path, TWO_CHIPS)
+    good = (tmp_path / "hwmon0" / file).read_bytes()
+    (tmp_path / "hwmon0" / file).write_bytes(b"\xff\n")
+    g = sysfs.groups("temperature", "power", "fans")
+    temps, power, fans = hwmon_sensors(root=root, groups=g)
+    assert (temps, power, fans) == ({**kept[0], **CHIP_B[0]}, {**kept[1], **CHIP_B[1]}, kept[2] + CHIP_B[2])
+    for name, grp in g.items():
+        st = grp.status()
+        if name in groups_with_issue:
+            assert st["state"] == "partial" and st["issues"] == [{"target": f"hwmon0.{file}", "reason": "invalid_data"}]
+        else:
+            assert st["state"] == "ok"
+    (tmp_path / "hwmon0" / file).write_bytes(good)  # readable again in the next collection
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g) == hwmon_sensors(root=root) and len(hwmon_sensors(root=root)[0]) == 2
+    assert {x.status()["state"] for x in g.values()} == {"ok"}
+
+
+def test_undecodable_zone_type_keeps_the_zones(tmp_path):
+    for i, (zt, t) in enumerate([("cpu-thermal", 51200), ("gpu-thermal", 52000)]):
+        (tmp_path / f"thermal_zone{i}").mkdir()
+        (tmp_path / f"thermal_zone{i}" / "type").write_text(zt)
+        (tmp_path / f"thermal_zone{i}" / "temp").write_text(str(t))
+    (tmp_path / "thermal_zone0" / "type").write_bytes(b"\xff\n")
+    g = sysfs.Group("temperature")
+    assert thermal_zones(root=str(tmp_path), group=g)[0] == {"thermal_zone0": 51.2, "gpu": 52.0}
+    assert g.status()["issues"] == [{"target": "thermal_zone0.type", "reason": "invalid_data"}]

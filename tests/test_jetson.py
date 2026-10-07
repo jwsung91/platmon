@@ -96,21 +96,22 @@ def test_gpu_without_load(tmp_path):
     assert g.status()["state"] == "error" and g.status()["issues"] == [{"target": "load", "reason": "invalid_data"}]
 
 
-def extend_with(monkeypatch, tmp_path, status=None, release=None):
+def extend_with(monkeypatch, tmp_path, status=None, release=None, conf="< POWER_MODEL ID=2 NAME=MAXN_SUPER >"):
     """jetson.extend() with the nvpmodel status and L4T release files faked and a fixed GPU."""
     import io
     real = open
-    files = {"/var/lib/nvpmodel/status": status, "/etc/nvpmodel.conf": "< POWER_MODEL ID=2 NAME=MAXN_SUPER >",
+    files = {"/var/lib/nvpmodel/status": status, "/etc/nvpmodel.conf": conf,
              sysfs.host_path("/etc/nv_tegra_release"): release}
 
     def fake(path, *args, **kw):
         if path in files:
             if files[path] is None:
                 raise FileNotFoundError(path)
+            if isinstance(files[path], bytes):  # as open() would fail on bytes that are not UTF-8
+                files[path].decode()
             return io.StringIO(files[path])
         return real(path, *args, **kw)
     monkeypatch.setattr(sysfs, "open", fake, raising=False)
-    monkeypatch.setattr(jetson, "read", lambda path, default=None: files.get(path, default))
 
     def fake_gpu(group):
         return {"usage": group.got(50.0), "freq": None, "max_freq": None}
@@ -166,3 +167,45 @@ def test_gpu_unlistable_devfreq_without_fallback(tmp_path, monkeypatch):
     g = sysfs.Group("gpu")
     assert jetson.gpu(str(tmp_path), g) is None
     assert (g.status()["state"], g.status()["reason"]) == ("error", "permission_denied")  # not "not_exposed"
+
+
+# PR #24 re-review: a load found through another path does not explain missing clocks
+
+GPU_FILES = {"class/devfreq/17000000.gpu/cur_freq": 306000000, "class/devfreq/17000000.gpu/max_freq": 1020000000,
+             "devices/platform/gpu.0/load": 500}
+
+
+def test_gpu_matrix_a_failed_load_candidate_hidden(tmp_path):
+    make(tmp_path, {**GPU_FILES, "class/devfreq/17000000.gpu/device/load": "bad"})
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) == {"usage": 50.0, "freq": 306000000, "max_freq": 1020000000}
+    assert g.status() == {"state": "ok", "reason": None, "issues": [], "issues_truncated": 0}
+
+
+@pytest.mark.parametrize("code, reason", [(errno.EACCES, "permission_denied"), (errno.EIO, "io_error")])
+def test_gpu_matrix_b_unlistable_devfreq_with_load(tmp_path, monkeypatch, code, reason):
+    from test_common import deny_listing
+    make(tmp_path, GPU_FILES)
+    deny_listing(monkeypatch, tmp_path / "class/devfreq", code)
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) == {"usage": 50.0, "freq": None, "max_freq": None}
+    assert g.status() == {"state": "partial", "reason": "some_unreadable", "issues_truncated": 0,
+                          "issues": [{"target": "devfreq", "reason": reason}]}
+    monkeypatch.undo()  # listing works again
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) == {"usage": 50.0, "freq": 306000000, "max_freq": 1020000000}
+    assert g.status()["state"] == "ok"
+
+
+def test_gpu_matrix_c_no_devfreq_is_not_a_warning(tmp_path):
+    make(tmp_path, {"devices/platform/gpu.0/load": 500})
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) == {"usage": 50.0, "freq": None, "max_freq": None}
+    assert g.status()["state"] == "ok"
+
+
+def test_extend_undecodable_nvpmodel_conf_keeps_the_mode_id(monkeypatch, tmp_path):
+    stats, st = extend_with(monkeypatch, tmp_path, "pmode:0002\n", None, conf=b"\xff\n")
+    assert stats["power_mode"] == "2" and stats["gpu"]["usage"] == 50.0  # the id instead of the name
+    assert st["power_mode"]["state"] == "partial"
+    assert st["power_mode"]["issues"] == [{"target": "conf", "reason": "invalid_data"}]
