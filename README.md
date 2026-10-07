@@ -20,10 +20,11 @@ platmon 192.168.55.53 2          # update every 2 s
 platmon --once                   # one snapshot without clearing the screen (scripts, ssh, logs)
 ```
 
-If the service is not running, `platmon` says so and how to start it. Install the command with
-`scripts/install-cli.sh` (or `--user` for `~/.local/bin`, no sudo); `scripts/systemd/install.sh` installs
-it for you. It is one standard-library Python file (`frontends/cli.py`), so it also works on a PC that
-only watches a device.
+If the service is not running, `platmon` says so and how to start it. On the device the command comes
+with the service: `scripts/systemd/install.sh` puts it in `/usr/local/bin`, `scripts/docker/start.sh` in
+`~/.local/bin` (no sudo), and both update it when run again. On a PC that only watches devices, install
+just the command with `scripts/install-cli.sh` (or `--user`, no sudo); it is one standard-library Python
+file (`frontends/cli.py`).
 
 In a browser: `http://<host>:9797`. Without Python, from any machine with curl (Windows and macOS too):
 `watch -n1 curl -s <host>:9797/text` shows the same screen as `platmon`. Raw data: `http://<host>:9797/api/stats`. The API has no
@@ -75,7 +76,8 @@ scripts/docker/start.sh    # build and start; on Jetson adds compose.jetson.yaml
 scripts/docker/stop.sh     # stop and remove the container (the image stays)
 ```
 
-Look at it with `platmon` after installing the command once: `scripts/install-cli.sh`.
+`start.sh` also installs the `platmon` command in `~/.local/bin`; `stop.sh` leaves it, since it can watch other devices too
+(`scripts/install-cli.sh --user --uninstall` removes it).
 
 Without the scripts: `BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose up -d --build` (Jetson: add
 `-f compose.yaml -f compose.jetson.yaml`). The variable keeps the image id stable when nothing changed;

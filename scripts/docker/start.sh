@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the platmon image from this checkout and run it with Docker Compose; on Jetson the nvpmodel
-# mounts (compose.jetson.yaml) are added automatically. Run it again after a git pull to update.
+# mounts (compose.jetson.yaml) are added automatically. Also installs or updates the `platmon` command in
+# ~/.local/bin (no sudo). Run it again after a git pull to update both.
 #   scripts/docker/start.sh
 set -euo pipefail
 
@@ -46,6 +47,9 @@ else
 fi
 echo "$change"
 
+# the `platmon` command to look at it, same version as the server; a failure here must not stop the start
+scripts/install-cli.sh --user || echo "the platmon command was not installed (see above)" >&2
+
 echo "waiting for the health check..."
 state=starting
 for _ in $(seq 30); do
@@ -53,8 +57,7 @@ for _ in $(seq 30); do
     case $state in
         healthy)
             docker compose "${files[@]}" logs --no-log-prefix --tail 2
-            echo "platmon is up on port 9797 (restarts with Docker at boot) - $change"
-            command -v platmon >/dev/null || echo "to look at it from a shell: scripts/install-cli.sh, then platmon"
+            echo "platmon is up on port 9797 (restarts with Docker at boot) - $change; look at it with: platmon"
             exit 0 ;;
         unhealthy) break ;;
     esac
