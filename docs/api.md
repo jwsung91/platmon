@@ -149,16 +149,17 @@ stays listed with `rpm` or `percent` `null`; a CPU's `freq` and the GPU's `freq`
 | `unavailable` | no value, and nothing failed: not there, not supported, no data now | the most specific absence |
 
 Read failures, most serious first: `internal_error` (an unexpected exception in that group's code),
-`permission_denied` (EACCES/EPERM), `io_error` (any other read error), `disappeared` (listed in this
-collection, gone when read), `invalid_data` (empty or not a number). Absences, most specific first:
+`permission_denied` (EACCES/EPERM), `io_error` (any other read or listing error), `disappeared` (listed in
+this collection, gone when read), `invalid_data` (empty, not text, or not a number). A directory that
+cannot be listed (a sensor class or one chip) is a failure, not "nothing found"; the other chips are kept. Absences, most specific first:
 `no_data` (there, but no current value, e.g. ENODATA from an inactive thermal zone, or no CPU rows to read
 clocks for during warmup), `not_exposed` (the device does not provide that attribute), `not_detected`
 (nothing of the kind found), `unsupported_platform` (no provider on this board, e.g. the GPU off Jetson).
 A group with nothing to try is `unavailable`, never `ok`.
 
 `issues` lists the failures only, at most 32 per group (`issues_truncated` counts the rest), as a target
-(a channel such as `hwmon2.temp1` or a field such as `cur_freq`, up to 64 characters; not a stable sensor
-id) and a reason. Paths, file contents and exception text are not in the API; the service log has them,
+(a channel such as `hwmon2.temp1`, a directory such as `hwmon0`, or a field such as `cur_freq`, up to 64
+characters; not a stable sensor id) and a reason. Paths, file contents and exception text are not in the API; the service log has them,
 written when a group's problems change rather than on every collection. Where one value has several
 sources (the Jetson GPU load), the first that reads is used and the others' failures are not reported.
 
@@ -166,9 +167,12 @@ A snapshot with a `partial` or `error` group is still current: `/api/stats` and 
 `/api/status` says `degraded` with `ready: true`, and `last_attempt` is `ok` with 0 consecutive failures,
 because the collection itself succeeded. `unavailable` groups alone do not make it `degraded`.
 
-Limits: this handles reads that fail or return bad data. A read that blocks in the kernel is not cancelled
-(nothing in Python can); the collection then runs long and is dropped as `collection_too_slow`, while
-`/api/status` keeps answering. Stable sensor ids and per-sensor reading times are not part of this.
+Limits: this handles reads that fail or return bad data. platmon does not cancel a read that blocks.
+Only when the collection returns is its duration checked: if it took longer than `stale_after`, it is
+dropped as `collection_too_slow`. While a read stays blocked, the collection is still running
+(`collecting_for_ms` grows, `last_attempt` is unchanged) and the last snapshot just becomes stale.
+`/api/status` keeps answering in that state, which does not mean the collection is making progress.
+Stable sensor ids and per-sensor reading times are not part of this.
 
 When there is no current snapshot (none yet, or collection keeps failing), the answer is 503:
 
