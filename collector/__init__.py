@@ -27,8 +27,9 @@ def detect(compatible, has_dmi):
 PLATFORM, BOARD = detect(read(f"{DEVICE_TREE}/compatible", ""), os.path.isdir("/sys/class/dmi/id"))
 
 
-def collect():
-    stats = {"platform": PLATFORM, **common.collect()}
+def collect(cpu=None):
+    """cpu: a common.CpuCounters kept between calls (the service); None for a one-off reading."""
+    stats = {"platform": PLATFORM, **common.collect(cpu)}
     if BOARD:
         BOARD.extend(stats)
     return stats

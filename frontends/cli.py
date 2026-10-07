@@ -34,6 +34,22 @@ def system_line(system):
     return " · ".join(SYSTEM_LABELS.get(k, f"{k} ") + str(v) for k, v in (system or {}).items() if v)
 
 
+CPU_REASONS = {"warmup": "warming up", "counter_regressed": "counter went backwards", "no_ticks": "no ticks counted",
+               "invalid_interval": "invalid interval", "gap": "restarting after a gap"}  # others: the code itself
+
+
+def cpu_note(s):
+    """Why CPU rows are missing (the service compares readings, so the first has none); empty if none are."""
+    groups = {}
+    for u in (s.get("cpu_sampling") or {}).get("unavailable") or []:
+        groups.setdefault(CPU_REASONS.get(u["reason"], u["reason"]), []).append(f"CPU{u['id']}")
+    if not groups:
+        return ""
+    if not s["cpu"] and len(groups) == 1:  # every core, one reason
+        return f"CPU sampling: {next(iter(groups))}"
+    return "CPU sampling: " + "; ".join(f"{' '.join(ids)} {why}" for why, ids in groups.items())
+
+
 def render(s):
     up = int(s["uptime"])
     system = system_line(s.get("system"))
@@ -46,6 +62,9 @@ def render(s):
     for c in s["cpu"]:
         freq = f"  {c['freq'] / 1e6:4.0f} MHz" if c["freq"] else ""
         lines.append(f"CPU{c['id']:<3}{bar(c['usage'])} {c['usage']:5.1f}%{freq}")
+    note = cpu_note(s)
+    if note:
+        lines.append(note)
     g = s["gpu"]
     if g:
         freq = f"  {g['freq'] / 1e6:4.0f} MHz" if g.get("freq") else ""  # None: clock not readable

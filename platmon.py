@@ -8,11 +8,13 @@ Without a config file the built-in defaults apply (see platmon.ini).
 """
 import argparse
 import configparser
+import functools
 import signal
 import sys
 
 from collector import BOARD, PLATFORM, collect
-from collector.sampler import Sampler
+from collector.common import CpuCounters
+from collector.sampler import Sampler, pick_clock
 from frontends import server
 
 FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outputs that run inside the core
@@ -88,7 +90,12 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     # a container missing its device-tree mount shows up here as "PC"/"Linux" instead of the board
     print(f"platmon: platform {PLATFORM}, board module {BOARD.__name__ if BOARD else 'none'}", flush=True)
-    sampler = Sampler(collect, cfg["core"].getfloat("interval")).start()
+    interval = cfg["core"].getfloat("interval")
+    clock = pick_clock()
+    # CPU usage over the time since the previous reading; a longer break is not averaged over. This limit
+    # matches the Sampler's default stale_after, but it is a CPU window rule, not snapshot freshness.
+    cpu = CpuCounters(clock[0], max_gap=max(3 * interval, 5.0))
+    sampler = Sampler(functools.partial(collect, cpu), interval, clock=clock).start()
     threads = [t for name, start in FRONTENDS.items()
                if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name]))]
     if not threads:

@@ -42,7 +42,7 @@ const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resol
 const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
-  age_timers: intervals.length, fetches,
+  age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -92,4 +92,10 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
   fire(0); await settle(); report('tab_return_check_503');
   answers.push(hang);
   tabReturns(); now += 5000; fire(5000); await settle(); report('tab_return_check_timeout');
+
+  // the service compares CPU readings: its first sample has none, and some cores can be missing later
+  const sampling = unavailable => ({mode: 'interval', window_ms: unavailable.length ? null : 1000, unavailable});
+  await next(ok({...meta('c', 1, 100), cpu: [], cpu_sampling: sampling([{id: 0, reason: 'warmup'}, {id: 1, reason: 'warmup'}])}), 'cpu_warmup');
+  await next(ok({...meta('c', 2, 100), cpu_sampling: sampling([{id: 2, reason: 'warmup'}, {id: 3, reason: 'counter_regressed'}])}), 'cpu_partial');
+  await next(ok({...meta('c', 3, 100), cpu_sampling: sampling([{id: 4, reason: '<img src=x>'}])}), 'cpu_odd_reason');
 })();

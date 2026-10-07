@@ -27,9 +27,11 @@ def test_every_step_ran(steps):
                            "bad_metadata", "new_instance", "new_sequence",
                            "tab_return_checking", "tab_return_verified",
                            "tab_return_while_requesting", "old_answer_ignored", "tab_return_rechecked",
-                           "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout"]
+                           "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout",
+                           "cpu_warmup", "cpu_partial", "cpu_odd_reason"]
     for s in steps.values():
-        assert s["shows_data"], s     # the last good values stay on screen
+        if s["step"] != "cpu_warmup":  # no CPU rows before the second reading, by design
+            assert s["shows_data"], s     # the last good values stay on screen
         assert s["age_timers"] == 1, s  # one age display timer, never more
         # exactly one next update, whatever happened; none while a request runs (it schedules the next)
         assert s["refresh_scheduled"] == (0 if s["step"] in IN_REQUEST else 1), s
@@ -101,3 +103,15 @@ def test_failed_check_after_tab_return_stays_not_current(steps):
     assert failed["err"].startswith("No current data") and failed["age"].startswith("Last good: sample #601")
     timeout = steps["tab_return_check_timeout"]
     assert timeout["err"] == "No answer within 5 s" and timeout["age"].endswith("(not current)")
+
+
+def test_cpu_sampling_note(steps):
+    """Missing CPU rows are explained as CPU sampling state, not as an error, and never drawn as 0 %."""
+    w = steps["cpu_warmup"]
+    assert w["err"] == "" and w["cpu"] == '<div class="muted">CPU sampling: warming up</div>'
+    p = steps["cpu_partial"]
+    assert "CPU0" in p["cpu"] and "CPU2" not in p["cpu"].split("CPU sampling")[0]
+    assert p["cpu"].endswith('<div class="muted">CPU sampling: CPU2 warming up; CPU3 counter went backwards</div>')
+    assert "<img" not in steps["cpu_odd_reason"]["cpu"]  # server strings are escaped
+    assert steps["cpu_odd_reason"]["cpu"].endswith("CPU sampling: CPU4 &#60;img src=x&#62;</div>")
+    assert "CPU sampling" not in steps["ok"]["cpu"]  # legacy servers: no note
