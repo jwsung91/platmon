@@ -1,5 +1,10 @@
 # platmon
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="frontends/web/assets/brand/platmon-logo-dark.svg">
+  <img src="frontends/web/assets/brand/platmon-logo-light.svg" alt="platmon" width="440">
+</picture>
+
 Lightweight platform monitor for Jetson, Raspberry Pi, PCs and other Linux hosts.
 One collector core runs on the device as a background service with an HTTP API; a terminal client and a web page show what it collects.
 
@@ -122,3 +127,5 @@ pytest
 ## License
 
 Apache-2.0
+
+[Brand assets and colors](frontends/web/assets/brand/README.md)

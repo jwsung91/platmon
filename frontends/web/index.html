@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>platmon</title>
+<link rel="icon" type="image/svg+xml" href="assets/brand/favicon.svg">
 <style>
   :root { --bg: #f6f7f9; --card: #fff; --fg: #1d2127; --muted: #6b7280; --track: #e5e7eb; --bar: #2f7d5b; --warn: #c2410c; }
   @media (prefers-color-scheme: dark) {
@@ -12,6 +13,8 @@
   * { box-sizing: border-box; }
   body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
   header { margin-bottom: 16px; }
+  .brand { display: block; margin-bottom: 12px; }
+  .brand img { display: block; width: 220px; max-width: 100%; height: auto; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .muted { color: var(--muted); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
@@ -27,7 +30,11 @@
 </head>
 <body>
 <header>
-  <h1 id="model">platmon</h1>
+  <picture class="brand">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/platmon-logo-dark.svg">
+    <img src="assets/brand/platmon-logo-light.svg" alt="platmon" width="220" height="63">
+  </picture>
+  <h1 id="model">Platform status</h1>
   <div class="muted" id="meta"></div>
   <div class="muted" id="sys"></div>
   <div class="muted" id="age"></div>

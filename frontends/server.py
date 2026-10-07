@@ -9,6 +9,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .cli import render
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+BRAND_ASSETS = {
+    "/assets/brand/platmon-logo-light.svg": "platmon-logo-light.svg",
+    "/assets/brand/platmon-logo-dark.svg": "platmon-logo-dark.svg",
+    "/assets/brand/favicon.svg": "favicon.svg",
+}
 LIVE = ("/api/stats", "/api/status", "/text")
 
 
@@ -35,6 +40,9 @@ def make_handler(sampler, web=True):
             elif web and self.path in ("/", "/index.html"):
                 with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
                     body, ctype = f.read(), "text/html; charset=utf-8"
+            elif web and self.path in BRAND_ASSETS:
+                with open(os.path.join(WEB_DIR, "assets", "brand", BRAND_ASSETS[self.path]), "rb") as f:
+                    body, ctype = f.read(), "image/svg+xml"
             else:
                 self.send_error(404)
                 return
