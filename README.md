@@ -25,7 +25,8 @@ If the service is not running, `platmon` says so and how to start it. Install th
 it for you. It is one standard-library Python file (`frontends/cli.py`), so it also works on a PC that
 only watches a device.
 
-In a browser: `http://<host>:9797`. Raw data: `http://<host>:9797/api/stats`. The API has no
+In a browser: `http://<host>:9797`. Without Python, from any machine with curl (Windows and macOS too):
+`watch -n1 curl -s <host>:9797/text` shows the same screen as `platmon`. Raw data: `http://<host>:9797/api/stats`. The API has no
 authentication. Run it on trusted networks only.
 
 To run the server in the foreground instead (e.g. while developing):

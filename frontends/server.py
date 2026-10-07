@@ -1,8 +1,11 @@
-"""HTTP frontend: JSON at /api/stats and, when web is enabled, the web viewer at /. Started by platmon.py."""
+"""HTTP frontend: JSON at /api/stats, the terminal view as plain text at /text (for curl and watch) and,
+when web is enabled, the web viewer at /. Started by platmon.py."""
 import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from .cli import render
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
@@ -10,12 +13,15 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 def make_handler(sampler, web=True):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            if self.path == "/api/stats":
+            if self.path in ("/api/stats", "/text"):
                 stats = sampler.latest()
                 if stats is None:
                     self.send_error(503, "no current data (not collected yet, or collection keeps failing)")
                     return
-                body, ctype = json.dumps(stats).encode(), "application/json"
+                if self.path == "/api/stats":
+                    body, ctype = json.dumps(stats).encode(), "application/json"
+                else:  # same screen as the platmon command: watch -n1 curl -s host:9797/text
+                    body, ctype = (render(stats) + "\n").encode(), "text/plain; charset=utf-8"
             elif web and self.path in ("/", "/index.html"):
                 with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
                     body, ctype = f.read(), "text/html; charset=utf-8"

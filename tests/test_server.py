@@ -34,16 +34,19 @@ def status(url):
 
 
 @pytest.mark.parametrize("web, path, expected", [
-    (True, "/api/stats", 200), (True, "/", 200), (True, "/nope", 404),
-    (False, "/api/stats", 200), (False, "/", 404),  # web = no: API only
+    (True, "/api/stats", 200), (True, "/text", 200), (True, "/", 200), (True, "/nope", 404),
+    (False, "/api/stats", 200), (False, "/text", 200), (False, "/", 404),  # web = no: API and text only
 ])
 def test_routes(web, path, expected):
-    httpd, base = serve({"platform": "Test"}, web)
+    from test_cli import FULL
+    httpd, base = serve(FULL, web)
     try:
         code, body = status(base + path)
         assert code == expected
         if path == "/api/stats":
-            assert json.loads(body) == {"platform": "Test"}
+            assert json.loads(body) == FULL
+        if path == "/text":  # the terminal view, no screen control codes
+            assert body.decode().startswith("Test Board\n") and b"\033[" not in body
     finally:
         httpd.shutdown()
 
@@ -52,5 +55,6 @@ def test_no_snapshot_yet_is_503():
     httpd, base = serve(None)
     try:
         assert status(base + "/api/stats")[0] == 503
+        assert status(base + "/text")[0] == 503
     finally:
         httpd.shutdown()
