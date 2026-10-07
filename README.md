@@ -32,7 +32,8 @@ just the command with `scripts/install-cli.sh` (or `--user`, no sudo); it is one
 file (`frontends/cli.py`).
 
 In a browser: `http://<host>:9797`. Without Python, from any machine with curl (Windows and macOS too):
-`watch -n1 curl -s <host>:9797/text` shows the same screen as `platmon`. Raw data: `http://<host>:9797/api/stats`. The API has no
+`watch -n1 curl -s <host>:9797/text` shows the same screen as `platmon`. Raw data: `http://<host>:9797/api/stats`, collector state:
+`http://<host>:9797/api/status` (fields and freshness rules: [docs/api.md](docs/api.md)). The API has no
 authentication. Run it on trusted networks only.
 
 To run the server in the foreground instead (e.g. while developing):

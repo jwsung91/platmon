@@ -86,7 +86,7 @@ def test_once_prints_one_snapshot():
     finally:
         httpd.shutdown()
     assert r.returncode == 0
-    assert r.stdout.startswith("Test Board\n") and "\033[" not in r.stdout  # no screen clearing
+    assert r.stdout == render(FULL) + "\n"  # the metadata the server adds changes nothing, no screen clearing
 
 
 def test_not_running_explains_and_exits():

@@ -8,22 +8,96 @@ import pytest
 
 ROOT = Path(__file__).parent.parent
 NODE = shutil.which("node")
+LEGACY = " · this server reports no sample age"
+IN_REQUEST = {"sample_hang_waiting", "tab_return_checking", "tab_return_while_requesting"}  # reported mid-request
 
 
-@pytest.mark.skipif(NODE is None, reason="node not installed")
-def test_web_survives_errors_and_recovers():
+@pytest.fixture(scope="module")
+def steps():
+    if NODE is None:
+        pytest.skip("node not installed")
     out = subprocess.run([NODE, str(ROOT / "tests/web_harness.js"), str(ROOT / "frontends/web/index.html")],
                          capture_output=True, text=True, timeout=30, check=True).stdout
-    steps = {s["step"]: s for s in map(json.loads, out.splitlines())}
-    assert list(steps) == ["ok", "503", "hang", "down", "garbage", "recovered"]
+    return {s["step"]: s for s in map(json.loads, out.splitlines())}
 
-    assert steps["ok"]["err"] == ""
-    assert steps["503"]["err"] == ("No current data: platmon is running but has no recent sample (see its log)"
-                                   " · showing data from 1 s ago")
-    assert steps["hang"]["err"] == "No answer within 5 s · showing data from 7 s ago"  # timed out, not stuck
-    assert steps["down"]["err"] == "Connection lost: Failed to fetch · showing data from 8 s ago"
-    assert steps["garbage"]["err"] == "Unexpected response (not platmon data) · showing data from 9 s ago"
-    assert steps["recovered"]["err"] == ""
+
+def test_every_step_ran(steps):
+    assert list(steps) == ["ok", "503", "hang", "down", "garbage", "recovered",
+                           "sample", "same_sample", "sample_503", "sample_hang_waiting", "sample_hang",
+                           "bad_metadata", "new_instance", "new_sequence",
+                           "tab_return_checking", "tab_return_verified",
+                           "tab_return_while_requesting", "old_answer_ignored", "tab_return_rechecked",
+                           "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout"]
     for s in steps.values():
-        assert s["shows_data"], s            # the last good values stay on screen
-        assert s["refresh_scheduled"] == 1, s  # exactly one next update, whatever happened
+        assert s["shows_data"], s     # the last good values stay on screen
+        assert s["age_timers"] == 1, s  # one age display timer, never more
+        # exactly one next update, whatever happened; none while a request runs (it schedules the next)
+        assert s["refresh_scheduled"] == (0 if s["step"] in IN_REQUEST else 1), s
+
+
+def test_web_survives_errors_and_recovers(steps):
+    """An older server without sample metadata: the age is the time since its last answer, and says so.
+    (Before the sample age line, this age was appended to the error message as "showing data from N s ago".)"""
+    assert steps["ok"]["err"] == "" and steps["ok"]["age"] == "Response received 0 s ago" + LEGACY
+    assert steps["503"]["err"] == "No current data: platmon is running but has no recent sample (see its log)"
+    assert steps["503"]["age"] == "Last good: response received 1 s ago" + LEGACY + " (not current)"
+    assert steps["hang"]["err"] == "No answer within 5 s"  # timed out, not stuck
+    assert steps["hang"]["age"] == "Last good: response received 7 s ago" + LEGACY + " (not current)"
+    assert steps["down"]["err"] == "Connection lost: Failed to fetch"
+    assert steps["down"]["age"] == "Last good: response received 8 s ago" + LEGACY + " (not current)"
+    assert steps["garbage"]["err"] == "Unexpected response (not platmon data)"
+    assert steps["garbage"]["age"] == "Last good: response received 9 s ago" + LEGACY + " (not current)"
+    assert steps["recovered"]["err"] == "" and steps["recovered"]["age"] == "Response received 0 s ago" + LEGACY
+
+
+def test_sample_age_comes_from_the_server(steps):
+    assert steps["sample"]["age"] == "Sample #5 · data age 2 s"
+    assert steps["same_sample"]["age"] == "Sample #5 · data age 3 s"  # a repeated 200 does not reset it to 0
+    # failures keep the last sample and its growing age, also while a request hangs
+    assert steps["sample_503"]["age"] == "Last good: sample #5 · data age 4 s (not current)"
+    assert steps["sample_hang_waiting"]["age"] == "Last good: sample #5 · data age 7 s (not current)"
+    assert steps["sample_hang"]["age"] == "Last good: sample #5 · data age 10 s (not current)"
+    assert steps["sample_hang"]["err"] == "No answer within 5 s"
+
+
+def test_bad_metadata_is_not_age_zero(steps):
+    s = steps["bad_metadata"]
+    assert s["err"] == "" and s["age"] == "Response received 0 s ago · sample age unavailable (invalid metadata)"
+    assert "data age" not in s["age"]
+
+
+def test_new_instance_and_sequence(steps):
+    assert steps["new_instance"]["age"] == "Sample #1 · data age 0 s"
+    assert steps["new_sequence"]["age"] == "Sample #2 · data age 1 s"
+
+
+def test_tab_return(steps):
+    """Browser time may have stopped while the tab was hidden: say so until a new answer arrives,
+    asking at once, but never next to a request that is already running."""
+    c = steps["tab_return_checking"]
+    assert c["age"].startswith("Checking… last seen: sample #2") and c["fetches"] == steps["new_sequence"]["fetches"] + 1
+    assert c["refresh_scheduled"] == 0  # the pending refresh was replaced by this request, not added to
+    assert steps["tab_return_verified"]["age"] == "Sample #600 · data age 0 s"
+
+
+
+def test_tab_return_does_not_trust_a_request_started_before(steps):
+    """A request started before the tab was hidden is cancelled; if its answer still arrives, it is dropped
+    (it carries an age from before the break), and only the answer to a new request ends the check."""
+    w = steps["tab_return_while_requesting"]
+    assert w["age"].startswith("Checking… ") and w["fetches"] == steps["tab_return_verified"]["fetches"] + 1
+    late = steps["old_answer_ignored"]
+    assert late["age"] == "Checking… last seen: sample #600 · data age 601 s"  # not "sample #601 · data age 0 s"
+    assert late["fetches"] == w["fetches"] and late["refresh_scheduled"] == 1  # one new request due, no other
+    new = steps["tab_return_rechecked"]
+    assert new["age"] == "Sample #601 · data age 1 s" and new["fetches"] == late["fetches"] + 1  # same sample is fine
+
+
+def test_failed_check_after_tab_return_stays_not_current(steps):
+    aborted = steps["old_request_aborted"]
+    assert aborted["err"] == "" and aborted["age"].startswith("Checking… ")  # the cancel is not reported as an error
+    failed = steps["tab_return_check_503"]
+    assert failed["fetches"] == aborted["fetches"] + 1
+    assert failed["err"].startswith("No current data") and failed["age"].startswith("Last good: sample #601")
+    timeout = steps["tab_return_check_timeout"]
+    assert timeout["err"] == "No answer within 5 s" and timeout["age"].endswith("(not current)")
