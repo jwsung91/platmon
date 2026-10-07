@@ -56,13 +56,28 @@ const SYSTEM_LABELS = {os: '', kernel: 'kernel ', arch: '', hostname: 'host ', l
 const systemLine = sys => Object.entries(sys || {}).filter(([, v]) => v)
   .map(([k, v]) => (k in SYSTEM_LABELS ? SYSTEM_LABELS[k] : k + ' ') + v).join(' · ');
 const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
+const esc = v => String(v).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+// why CPU rows are missing: the service compares /proc/stat readings, so the first one has none (same as cli.py)
+const CPU_REASONS = {warmup: 'warming up', counter_regressed: 'counter went backwards', no_ticks: 'no ticks counted',
+  invalid_interval: 'invalid interval', gap: 'restarting after a gap'};
+function cpuNote(s) {
+  const groups = {};
+  for (const u of (s.cpu_sampling && s.cpu_sampling.unavailable) || [])
+    (groups[CPU_REASONS[u.reason] || u.reason] ||= []).push('CPU' + u.id);
+  const whys = Object.keys(groups);
+  if (!whys.length) return '';
+  return 'CPU sampling: ' + (!s.cpu.length && whys.length === 1 ? whys[0]
+    : whys.map(why => groups[why].join(' ') + ' ' + why).join('; '));
+}
 
 function render(s) {
   const up = Math.floor(s.uptime);
   $('model').textContent = s.model;
   $('meta').textContent = `${s.platform} · ${s.power_mode ? 'mode ' + s.power_mode + ' · ' : ''}up ${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
   $('sys').textContent = systemLine(s.system);
-  $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('');
+  const note = cpuNote(s);
+  $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('') +
+    (note ? `<div class="muted">${esc(note)}</div>` : '');
   const m = s.memory, d = s.disk, g = s.gpu;
   $('res').innerHTML =
     (g ? row('GPU', g.usage, g.usage.toFixed(1) + '%' + (g.freq ? ` ${(g.freq / 1e6).toFixed(0)}MHz` : '')) : '') +

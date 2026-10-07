@@ -66,24 +66,69 @@ def thermal_zones(root="/sys/class/thermal"):
     return temps, zone_types
 
 
-def cpu_times():
+def cpu_times(path="/proc/stat"):
     """{cpu id: jiffies} for online cores; offline cores are absent from /proc/stat."""
-    with open("/proc/stat") as f:
-        return {int(m.group(1)): list(map(int, l.split()[1:])) for l in f if (m := re.match(r"cpu(\d+)", l))}
+    with open(path) as f:
+        times = {int(m.group(1)): list(map(int, l.split()[1:])) for l in f if (m := re.match(r"cpu(\d+)", l))}
+    if not times:  # never a host with 0 CPUs: the file could not be read as expected
+        raise ValueError("no per-cpu lines in /proc/stat")
+    return times
 
 
 def cpu_percent(before, after):
-    """Busy % per core id from two /proc/stat samples (idle + iowait count as idle).
-    Cores that went on/offline between the samples are left out.
+    """Busy % per core id from two /proc/stat samples (idle + iowait count as idle), and why the other cores
+    of `after` have none: {id: usage}, {id: reason}. Cores gone in `after` are left out.
     Only user..steal (the first 8 fields) make up the total: guest and guest_nice are already counted
     in user and nice, so adding them again overstates the load on hosts running virtual machines."""
-    out = {}
-    for n in sorted(before.keys() & after.keys()):
-        b, a = before[n][:8], after[n][:8]
-        total = sum(a) - sum(b)
-        idle = (a[3] + a[4]) - (b[3] + b[4])
-        out[n] = round(100 * (total - idle) / total, 1) if total else 0.0
-    return out
+    usage, unavailable = {}, {}
+    for n in sorted(after):
+        if n not in before:  # new, or back online: no earlier reading of this core to compare with
+            unavailable[n] = "warmup"
+            continue
+        delta = [a - b for a, b in zip(after[n][:8], before[n][:8])]
+        total, idle = sum(delta), delta[3] + delta[4]
+        if any(d < 0 for d in delta):  # e.g. iowait can go backwards; not a reboot, not 0 %, just unusable
+            unavailable[n] = "counter_regressed"
+        elif not total:  # nothing measured, which is not the same as measured idle
+            unavailable[n] = "no_ticks"
+        else:
+            usage[n] = round(100 * (total - idle) / total, 1)
+    return usage, unavailable
+
+
+class CpuCounters:
+    """CPU usage from consecutive /proc/stat readings: each sample() reads it once and compares with the
+    previous successful reading, so a running service needs no wait inside its collection.
+    The usage is the busy share of the ticks between the two readings, over window_ms."""
+
+    def __init__(self, clock=time.monotonic_ns, max_gap=None, mode="interval"):
+        """clock: elapsed nanoseconds (the service passes the Sampler's); max_gap: seconds, a longer window
+        between readings is not averaged over (None: no limit)."""
+        self._clock, self.mode = clock, mode
+        self._max_gap = None if max_gap is None else round(max_gap * 1e9)
+        self._last = None  # (elapsed ns when the reading began, cpu_times()) of the last successful reading
+
+    def sample(self):
+        """({id: usage}, cpu_sampling). Every successful reading becomes the next baseline, whatever the
+        result; a failed one clears the baseline and raises, so the collection fails and restarts warmup."""
+        try:
+            now = self._clock()
+            times = cpu_times()
+        except Exception:
+            self._last = None
+            raise
+        last, self._last = self._last, (now, times)
+        window = None if last is None else now - last[0]
+        if last is None:
+            usage, unavailable = {}, dict.fromkeys(times, "warmup")
+        elif window <= 0:
+            usage, unavailable, window = {}, dict.fromkeys(times, "invalid_interval"), None
+        elif self._max_gap is not None and window > self._max_gap:
+            usage, unavailable = {}, dict.fromkeys(times, "gap")
+        else:
+            usage, unavailable = cpu_percent(last[1], times)
+        return usage, {"mode": self.mode, "window_ms": None if window is None else round(window / 1e6, 3),
+                       "unavailable": [{"id": n, "reason": r} for n, r in sorted(unavailable.items())]}
 
 
 def meminfo():
@@ -113,12 +158,16 @@ def system_info():
             "kernel": u.release, "arch": u.machine, "hostname": u.nodename}
 
 
-def collect():
-    """Fields every host has. gpu and power_mode stay None unless a board module fills them."""
-    t0 = cpu_times()
-    time.sleep(0.25)  # ponytail: per-request sampling, fine for a few viewers; add a background sampler if many
-    cpu = cpu_percent(t0, cpu_times())
-    freqs = {n: read_int(f"/sys/devices/system/cpu/cpu{n}/cpufreq/scaling_cur_freq") for n in cpu}
+def collect(cpu=None):
+    """Fields every host has. gpu and power_mode stay None unless a board module fills them.
+    cpu: the service's CpuCounters. Without one (a one-off call) the CPU usage comes from two readings
+    250 ms apart with a baseline of its own."""
+    if cpu is None:
+        cpu = CpuCounters(mode="oneshot")
+        cpu.sample()
+        time.sleep(0.25)
+    usage, sampling = cpu.sample()
+    freqs = {n: read_int(f"/sys/devices/system/cpu/cpu{n}/cpufreq/scaling_cur_freq") for n in usage}
 
     temps, zone_types = thermal_zones()
     # zones (acpitz, cpu-thermal, ...) also show up as hwmon chips; skip them to avoid duplicates
@@ -135,7 +184,8 @@ def collect():
         "system": system_info(),
         "uptime": float(read("/proc/uptime").split()[0]),
         "power_mode": None,
-        "cpu": [{"id": n, "usage": u, "freq": freqs[n] * 1000 if freqs[n] else None} for n, u in cpu.items()],
+        "cpu": [{"id": n, "usage": u, "freq": freqs[n] * 1000 if freqs[n] else None} for n, u in usage.items()],
+        "cpu_sampling": sampling,  # cores missing from cpu, and why
         "gpu": None,
         "memory": {"total": mem["MemTotal"], "used": mem["MemTotal"] - mem["MemAvailable"],
                    "swap_total": mem["SwapTotal"], "swap_used": mem["SwapTotal"] - mem["SwapFree"]},

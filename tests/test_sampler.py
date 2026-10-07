@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 
+from collector.common import CpuCounters
 from collector.sampler import Sampler, pick_clock
 
 
@@ -360,3 +361,78 @@ def test_pick_clock_when_boottime_fails(monkeypatch):
     monkeypatch.setattr(time, "CLOCK_BOOTTIME", 7, raising=False)
     monkeypatch.setattr(time, "clock_gettime_ns", unsupported, raising=False)
     assert pick_clock()[1]["source"] == "monotonic"
+
+
+def test_cpu_baseline_follows_readings_not_publishes(monkeypatch):
+    """The service's CPU window runs from the last successful /proc/stat reading, even when that collection
+    then failed or was dropped, so it is never stretched over a publish gap; a long one is a "gap"."""
+    import functools
+
+    import collector
+    from collector import common
+    from test_common import Proc, idle_busy
+
+    c = Clock()
+    p = Proc(monkeypatch)
+    cpu = CpuCounters(lambda: c.ns, max_gap=5.0)
+    mode = ["ok"]
+
+    def meminfo():  # runs after the CPU reading in common.collect()
+        if mode[0] == "fail":
+            raise OSError("memory unreadable")
+        if mode[0] == "slow":
+            c.advance(6)
+        return {"MemTotal": 8, "MemAvailable": 4, "SwapTotal": 0, "SwapFree": 0}
+
+    monkeypatch.setattr(common, "meminfo", meminfo)
+    s = fake(functools.partial(collector.collect, cpu), c)
+
+    def attempt(after_s, busy, m="ok"):
+        c.advance(after_s)
+        p.readings.append({0: idle_busy(busy, busy)})
+        mode[0] = m
+        s._attempt()
+        return s.read()
+
+    stats, _ = attempt(0, 0)
+    assert stats["cpu"] == [] and stats["cpu_sampling"]["unavailable"] == [{"id": 0, "reason": "warmup"}]
+    stats, status = attempt(1, 10, "fail")  # CPU read, then the collection failed: nothing published
+    assert stats["sample"]["sequence"] == 1 and stats["cpu"] == [] and status["state"] == "degraded"
+    reads = p.reads
+    for _ in range(3):  # polling neither reads /proc/stat nor changes what was published
+        assert s.read()[0]["cpu_sampling"] == stats["cpu_sampling"]
+    assert p.reads == reads
+    stats, _ = attempt(1, 20)  # compared with the failed attempt's reading, 1 s ago, not the published one
+    assert stats["sample"]["sequence"] == 2 and stats["cpu_sampling"]["window_ms"] == 1000.0
+    assert [c_["usage"] for c_ in stats["cpu"]] == [50.0]
+    _, status = attempt(1, 30, "slow")  # dropped as too slow; its reading is 7 s old by the next one
+    assert status["last_attempt"]["reason"] == "collection_too_slow"
+    stats, _ = attempt(1, 40)
+    assert stats["cpu"] == [] and stats["cpu_sampling"] == {
+        "mode": "interval", "window_ms": 7000.0, "unavailable": [{"id": 0, "reason": "gap"}]}
+    assert stats["sample"]["duration_ms"] == 0.0  # the snapshot itself is new; only the CPU window was long
+    earlier = s.read()[0]
+    stats, _ = attempt(1, 50)
+    assert [c_["usage"] for c_ in stats["cpu"]] == [50.0] and stats["sample"]["sequence"] == 4
+    assert earlier["cpu_sampling"]["unavailable"] == [{"id": 0, "reason": "gap"}]  # earlier copies unchanged
+
+
+@pytest.mark.parametrize("step", [-3600, 3600])
+def test_cpu_window_ignores_wall_clock_steps(monkeypatch, step):
+    from test_common import Proc, idle_busy
+
+    c = Clock()
+    p = Proc(monkeypatch)
+    cpu = CpuCounters(lambda: c.ns, max_gap=5.0)
+
+    def collect():
+        usage, sampling = cpu.sample()
+        return {"cpu": [{"id": n, "usage": u, "freq": None} for n, u in usage.items()], "cpu_sampling": sampling}
+
+    s = fake(collect, c)
+    p.readings += [{0: idle_busy(0, 0)}, {0: idle_busy(30, 10)}]
+    s._attempt()
+    c.advance(1.25, wall=step)  # NTP steps the wall clock between the two readings
+    s._attempt()
+    stats = s.read()[0]
+    assert stats["cpu_sampling"]["window_ms"] == 1250.0 and stats["cpu"][0]["usage"] == 25.0

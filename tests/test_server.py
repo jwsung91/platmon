@@ -157,3 +157,19 @@ def test_status_does_not_wait_for_the_first_snapshot():
         httpd.shutdown()
         s.stop()
         release.set()
+
+
+def test_polling_does_not_collect():
+    """Requests read the published snapshot; only the sampler's own rounds read /proc/stat."""
+    from test_cli import FULL
+    calls = []
+    s = NoWait(lambda: calls.append(1) or FULL)
+    s._attempt()
+    httpd, base = serve(None, sampler=s)
+    try:
+        polls = [json.loads(get(base + "/api/stats")[2]) for _ in range(3)]
+        get(base + "/text"), get(base + "/api/status")
+        assert len(calls) == 1
+        assert [p["sample"]["sequence"] for p in polls] == [1, 1, 1] and all(plain(p) == FULL for p in polls)
+    finally:
+        httpd.shutdown()

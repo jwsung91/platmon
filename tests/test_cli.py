@@ -121,3 +121,27 @@ def test_render_unreadable_gpu_clock_and_fan():
 def test_bad_interval_is_a_usage_error(interval):
     r = run_cli("localhost", interval)  # refused before connecting or sleeping
     assert r.returncode == 2 and "interval must be a number greater than 0" in r.stderr
+
+
+SAMPLING = {"mode": "interval", "window_ms": 1000.0, "unavailable": []}
+
+
+def test_render_with_cpu_sampling_unchanged():
+    """All cores measured: the screen is the same as for a server without cpu_sampling."""
+    assert render(dict(FULL, cpu_sampling=SAMPLING)) == render(FULL)
+
+
+def test_render_cpu_warmup():
+    """First reading of the service: no CPU rows yet, said as such; everything else still shows."""
+    out = render(dict(FULL, cpu=[], cpu_sampling=dict(SAMPLING, window_ms=None, unavailable=[
+        {"id": 0, "reason": "warmup"}, {"id": 2, "reason": "warmup"}])))
+    assert "CPU sampling: warming up" in out.split("\n")
+    assert "CPU0" not in out and "  0.0%" not in out.split("GPU")[0]  # no made-up 0 % bars
+    assert "RAM   " in out and "GPU   " in out
+
+
+def test_render_some_cpus_unavailable():
+    out = render(dict(FULL, cpu=FULL["cpu"][:1], cpu_sampling=dict(SAMPLING, unavailable=[
+        {"id": 2, "reason": "warmup"}, {"id": 3, "reason": "counter_regressed"}, {"id": 4, "reason": "new_code"}])))
+    assert "CPU0  " in out and "CPU2  " not in out
+    assert "CPU sampling: CPU2 warming up; CPU3 counter went backwards; CPU4 new_code" in out
