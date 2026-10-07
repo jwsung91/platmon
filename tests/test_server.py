@@ -52,9 +52,14 @@ def test_routes(web, path, expected):
 
 
 def test_no_snapshot_yet_is_503():
+    """JSON for the API and text for /text, so clients need not parse an HTML error page."""
     httpd, base = serve(None)
     try:
-        assert status(base + "/api/stats")[0] == 503
-        assert status(base + "/text")[0] == 503
+        for path, ctype in (("/api/stats", "application/json"), ("/text", "text/plain; charset=utf-8")):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(base + path, timeout=5)
+            assert e.value.code == 503 and e.value.headers["Content-Type"] == ctype
+            body = e.value.read().decode()
+            assert (json.loads(body)["error"] if path == "/api/stats" else body).startswith("no current data")
     finally:
         httpd.shutdown()
