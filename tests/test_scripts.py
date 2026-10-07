@@ -4,16 +4,38 @@ from pathlib import Path
 
 import pytest
 
-SCRIPTS = sorted((Path(__file__).parent.parent / "scripts").glob("*/*.sh"))
+SCRIPT_DIR = Path(__file__).parent.parent / "scripts"
+SCRIPTS = sorted(SCRIPT_DIR.glob("**/*.sh"))
 
 
 def test_expected_scripts_exist():
-    assert [f"{p.parent.name}/{p.name}" for p in SCRIPTS] == \
-           ["docker/start.sh", "docker/stop.sh",
+    assert [str(p.relative_to(SCRIPT_DIR)) for p in SCRIPTS] == \
+           ["docker/start.sh", "docker/stop.sh", "install-cli.sh",
             "systemd/install.sh", "systemd/start.sh", "systemd/stop.sh", "systemd/uninstall.sh"]
 
 
-@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: f"{p.parent.name}/{p.name}")
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: str(p.relative_to(SCRIPT_DIR)))
 def test_script_is_executable_bash(script):
     assert os.access(script, os.X_OK)
     subprocess.run(["bash", "-n", str(script)], check=True)  # syntax only; they need sudo/docker to run
+
+
+def test_install_cli_user(tmp_path):
+    """--user installs ~/.local/bin/platmon (no sudo), never overwrites a foreign file, and uninstalls."""
+    script = str(SCRIPT_DIR / "install-cli.sh")
+    env = dict(os.environ, HOME=str(tmp_path))
+    target = tmp_path / ".local/bin/platmon"
+
+    out = subprocess.run([script, "--user"], env=env, capture_output=True, text=True, check=True).stdout
+    assert f"installed {target}" in out
+    assert os.access(target, os.X_OK) and "# platmon-cli:" in target.read_text()
+    help_text = subprocess.run([str(target), "--help"], capture_output=True, text=True, check=True).stdout
+    assert help_text.startswith("usage: platmon")
+
+    subprocess.run([script, "--user", "--uninstall"], env=env, check=True, capture_output=True)
+    assert not target.exists()
+
+    target.write_text("#!/bin/sh\necho someone else's platmon\n")
+    r = subprocess.run([script, "--user"], env=env, capture_output=True, text=True)
+    assert r.returncode == 1 and "not the platmon client" in r.stderr
+    assert "someone else's" in target.read_text()

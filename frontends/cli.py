@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Remote terminal client for platmon: reads a host's /api/stats. Standalone; copy this file anywhere.
+"""platmon terminal client: live view of a platmon service, this device's by default.
+Standalone (standard library only); scripts/install-cli.sh installs it as the `platmon` command.
 
-Usage: python3 frontends/cli.py [host[:port]] [interval_sec]   (default localhost:9797, 1s)
+Usage: platmon [host[:port]] [interval_sec] [--once]   (default localhost:9797, 1s)
+The service itself runs in the background: scripts/systemd/install.sh or scripts/docker/start.sh.
 """
+# platmon-cli: marker that lets scripts/install-cli.sh recognise (and only replace) its own command
+import argparse
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
+
+PORT = 9797
 
 
 def bar(pct, width=20):
@@ -58,23 +65,50 @@ def render(s):
     return "\n".join(lines)
 
 
-def main():
-    args = sys.argv[1:]
-    host = args.pop(0) if args else "localhost:9797"
-    where = f"http://{host if ':' in host else host + ':9797'}/api/stats"
+def explain(addr, e):
+    """Why the service could not be read, and what to do about it."""
+    if isinstance(e, urllib.error.HTTPError):
+        hint = "\n  it has no current data yet, or collection keeps failing; check the service log" if e.code == 503 else ""
+        return f"platmon at {addr} answered {e.code} {e.reason}{hint}"
+    reason = getattr(e, "reason", e)
+    if addr.rsplit(":", 1)[0] in ("localhost", "127.0.0.1"):
+        return (f"platmon is not running on {addr} ({reason})\n"
+                "  start the service from the platmon repo: scripts/systemd/install.sh or scripts/docker/start.sh")
+    return f"cannot reach platmon at {addr} ({reason})\n  check that its service runs there and the port is reachable"
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="platmon", description="Live view of a platmon service (this device by default).",
+                                epilog="The service runs in the background: scripts/systemd/install.sh or "
+                                       "scripts/docker/start.sh in the platmon repo.")
+    p.add_argument("host", nargs="?", default="localhost", help=f"host[:port], default localhost:{PORT}")
+    p.add_argument("interval", nargs="?", type=float, default=1.0, help="seconds between updates, default 1")
+    p.add_argument("--once", action="store_true", help="print one snapshot without clearing the screen, then exit")
+    a = p.parse_args(argv)
+    if a.interval <= 0:
+        p.error("interval must be greater than 0")
+    addr = a.host if ":" in a.host else f"{a.host}:{PORT}"
+    url = f"http://{addr}/api/stats"
 
     def fetch():
-        with urllib.request.urlopen(where, timeout=5) as r:
-            return json.load(r)
-    interval = float(args[0]) if args else 1.0
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return render(json.load(r))
+
+    try:
+        out = fetch()
+    except (OSError, ValueError) as e:  # not running / unreachable: say so once instead of retrying forever
+        sys.exit(explain(addr, e))
+    if a.once:
+        print(out)
+        return
     try:
         while True:
-            try:
-                out = render(fetch())
-            except OSError as e:
-                out = f"{where}: {e}"
             print("\033[H\033[J" + out, flush=True)
-            time.sleep(interval)
+            time.sleep(a.interval)
+            try:
+                out = fetch()
+            except (OSError, ValueError) as e:  # lost while watching: keep the screen, keep retrying
+                out = f"{explain(addr, e)}\n(retrying every {a.interval:g}s, Ctrl+C to quit)"
     except KeyboardInterrupt:
         pass
 

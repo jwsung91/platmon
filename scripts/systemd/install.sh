@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install or update platmon as a systemd service from this checkout, enable it at boot and start it.
+# Install or update platmon as a systemd service from this checkout, enable it at boot and start it,
+# and install the `platmon` command (/usr/local/bin) to look at it.
 #   scripts/systemd/install.sh        (run it again after a git pull to update)
 # Code:   /opt/platmon                       replaced on every run
 # Config: /etc/platmon/platmon.ini           created once from platmon.ini, never overwritten
@@ -48,5 +49,7 @@ install -m 644 "$repo/platmon.service" "$unit"
 systemctl daemon-reload
 systemctl enable --quiet platmon
 echo "enabled at boot"
+# the `platmon` command to look at it; a failure here must not stop the service install
+"$repo/scripts/install-cli.sh" || echo "the platmon command was not installed (see above)" >&2
 
 exec "$here/start.sh"

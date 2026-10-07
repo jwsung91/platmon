@@ -39,7 +39,7 @@ check='import sys, urllib.request; urllib.request.urlopen(f"http://{sys.argv[1]}
 for _ in $(seq 20); do
     if python3 -c "$check" "$host" "$port" 2>/dev/null; then
         journalctl -u platmon -n 2 --no-pager -o cat
-        echo "platmon is up on port $port"
+        echo "platmon is up on port $port; look at it with: platmon"
         exit 0
     fi
     sleep 0.5

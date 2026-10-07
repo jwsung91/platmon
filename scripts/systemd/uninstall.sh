@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop platmon, disable it at boot and remove the installed code and unit.
+# Stop platmon, disable it at boot and remove the installed code, the unit and the `platmon` command.
 #   scripts/systemd/uninstall.sh          keeps the config in /etc/platmon for a later install
 #   scripts/systemd/uninstall.sh --purge  removes /etc/platmon too
 set -euo pipefail
@@ -18,6 +18,7 @@ if [ -f "$unit" ]; then
 fi
 rm -rf /opt/platmon
 echo "platmon service removed (unit and /opt/platmon)"
+"$(dirname "$0")/../install-cli.sh" --uninstall || true
 
 if [ "${1:-}" = --purge ]; then
     rm -rf /etc/platmon
