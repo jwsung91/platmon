@@ -67,15 +67,36 @@ function render(s) {
   document.querySelectorAll('section').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
 }
 
+const TIMEOUT_MS = 5000;  // a request that hangs must not stop the updates
+let lastOk = null;        // browser time of the last good update; the device clock may differ from this one
+
+// One request at a time; whatever happens, the next one is scheduled. On failure the last good values
+// stay on screen with their age, and the message says what failed.
 async function tick() {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  let stage = 'connect';
   try {
-    const r = await fetch('api/stats');
-    render(await r.json());
+    const r = await fetch('api/stats', {signal: ctl.signal, cache: 'no-store'});
+    if (r.status === 503) throw new Error('No current data: platmon is running but has no recent sample (see its log)');
+    if (!r.ok) throw new Error(`platmon answered ${r.status} ${r.statusText}`);
+    stage = 'read';
+    const s = await r.json();
+    stage = 'render';
+    render(s);
+    lastOk = Date.now();
     $('err').textContent = '';
   } catch (e) {
-    $('err').textContent = 'Connection lost: ' + e.message;
+    const why = e.name === 'AbortError' ? `No answer within ${TIMEOUT_MS / 1000} s`
+      : stage === 'connect' && e instanceof TypeError ? 'Connection lost: ' + e.message
+      : stage === 'read' ? 'Unexpected response (not platmon data)'
+      : e.message;
+    const age = lastOk === null ? '' : ` · showing data from ${Math.round((Date.now() - lastOk) / 1000)} s ago`;
+    $('err').textContent = why + age;
+  } finally {
+    clearTimeout(timer);
+    setTimeout(tick, 1000);
   }
-  setTimeout(tick, 1000);
 }
 tick();
 </script>
