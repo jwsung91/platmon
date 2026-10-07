@@ -57,7 +57,12 @@ for _ in $(seq 30); do
     case $state in
         healthy)
             docker compose "${files[@]}" logs --no-log-prefix --tail 2
-            echo "platmon is up on port 9797 (restarts with Docker at boot) - $change; look at it with: platmon"
+            # the port published on the host (compose.yaml may map it elsewhere); plain `platmon` covers 9797
+            port=$(docker compose "${files[@]}" port platmon 9797 | head -1)
+            port=${port##*:}
+            view=platmon
+            [ "${port:-9797}" = 9797 ] || view="platmon localhost:$port"
+            echo "platmon is up on port ${port:-9797} (restarts with Docker at boot) - $change; look at it with: $view"
             exit 0 ;;
         unhealthy) break ;;
     esac

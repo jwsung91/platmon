@@ -32,6 +32,11 @@ except ValueError as e:
 print("127.0.0.1" if http["bind"] == "0.0.0.0" else http["bind"], http.getint("port"))
 ' "$prefix" "$config")
 read -r host port <<< "$listen"
+# how to look at it: plain `platmon` covers localhost:9797, anything else needs the address
+addr=$host
+[ "$addr" = 127.0.0.1 ] && addr=localhost
+view=platmon
+[ "$addr:$port" = localhost:9797 ] || view="platmon $addr:$port"
 
 systemctl restart platmon
 
@@ -39,7 +44,7 @@ check='import sys, urllib.request; urllib.request.urlopen(f"http://{sys.argv[1]}
 for _ in $(seq 20); do
     if python3 -c "$check" "$host" "$port" 2>/dev/null; then
         journalctl -u platmon -n 2 --no-pager -o cat
-        echo "platmon is up on port $port; look at it with: platmon"
+        echo "platmon is up on port $port; look at it with: $view"
         exit 0
     fi
     sleep 0.5
