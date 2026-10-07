@@ -1,10 +1,10 @@
 """Jetson-only data: GPU load and clock, nvpmodel power mode, pwm_tach fan speed, L4T release."""
-import glob
+import fnmatch
 import os
 import re
 
 from . import sysfs
-from .sysfs import guard, host_path, hwmon_chips, read
+from .sysfs import entries, guard, host_path, hwmon_chips, read
 
 
 # GPU devfreq device names per BSP (NVIDIA L4T docs): Orin R36 17000000.gpu (verified on an Orin Nano),
@@ -18,9 +18,11 @@ def gpu(root="/sys", group=None):
     """GPU load and clocks. freq/max_freq are None (not 0) when the clock cannot be read.
     The load comes from the first candidate that reads; the others' failures only count if none does."""
     g = group or sysfs.Group("gpu")
-    devfreq = next((p for pattern in GPU_DEVFREQ for p in sorted(glob.glob(f"{root}/class/devfreq/{pattern}"))), None)
+    tried = sysfs.Group("gpu")  # failures on the way, reported only if no load is found
+    devices = entries(f"{root}/class/devfreq", tried)
+    devfreq = next((f"{root}/class/devfreq/{n}" for pattern in GPU_DEVFREQ for n in devices
+                    if fnmatch.fnmatchcase(n, pattern)), None)
     loads = ([f"{devfreq}/device/load"] if devfreq else []) + [f"{root}/{p}" for p in GPU_LOAD]
-    tried = sysfs.Group("gpu")
     load = next((v for v in (tried.read(p, "load") for p in loads) if v is not None), None)
     if load is None:
         for issue, detail in zip(tried.issues, tried.details):
@@ -72,7 +74,7 @@ def tach_fans(root="/sys/class/hwmon", group=None):
     g = group or sysfs.Group("fans")
     fans = []
     with guard(g):
-        for d, chip in hwmon_chips(root):
+        for d, chip in hwmon_chips(root, g):
             if not os.path.exists(f"{d}/rpm"):
                 continue
             rpm = g.read(f"{d}/rpm", f"{os.path.basename(d)}.rpm", found=f"{d}/rpm")

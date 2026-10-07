@@ -1,7 +1,6 @@
 """Helpers for reading /proc and /sys, shared by the common and board-specific collectors."""
 import contextlib
 import errno
-import glob
 import os
 import re
 import sys
@@ -31,14 +30,31 @@ def read_int(path, default=None):
     return int(v) if v else default
 
 
-def numbered(d, pattern):
-    """Sorted channel numbers N of files like temp{N}_input matching pattern in d."""
-    return sorted(int(re.search(r"(\d+)_", os.path.basename(p)).group(1)) for p in glob.glob(f"{d}/{pattern}"))
+def entries(path, *groups, listed=False):
+    """Sorted names in directory path. A directory that is not there is empty; any other listing error is
+    noted in groups (target: the directory's name) and gives [], so it is not taken for "nothing there".
+    listed: path itself was found by listing in this collection, so its absence means it disappeared."""
+    try:
+        return sorted(os.listdir(path))
+    except FileNotFoundError:
+        if listed:
+            for g in groups:
+                g.note(os.path.basename(path), "disappeared")
+        return []
+    except OSError as e:
+        for g in groups:
+            g.note(os.path.basename(path), reason_of(e), f"{path}: {e.strerror}")
+        return []
 
 
-def hwmon_chips(root="/sys/class/hwmon"):
-    """(dir, chip name) for every hwmon device."""
-    return [(d, read(f"{d}/name", "")) for d in sorted(glob.glob(f"{root}/hwmon*"))]
+def numbered(names, prefix, suffix):
+    """Sorted channel numbers N of names like prefix{N}suffix (temp{N}_input) among a directory's names."""
+    return sorted(int(m.group(1)) for n in names if (m := re.fullmatch(rf"{prefix}(\d+){suffix}", n)))
+
+
+def hwmon_chips(root="/sys/class/hwmon", *groups):
+    """(dir, chip name) for every hwmon device; a class directory that cannot be listed is noted in groups."""
+    return [(f"{root}/{n}", read(f"{root}/{n}/name", "")) for n in entries(root, *groups) if re.fullmatch(r"hwmon\d+", n)]
 
 
 # Diagnostics of optional metrics (collectors.<group> in /api/stats). Reasons in PROBLEMS are read failures,
@@ -88,6 +104,8 @@ class Group:
         try:
             with open(path) as f:
                 text = f.read().strip()
+        except UnicodeDecodeError:  # bytes that are not text cannot be a number either
+            return self.note(target, "invalid_data", path)
         except FileNotFoundError:
             gone = found is not None and not os.path.exists(found)
             return self.note(target, "disappeared" if gone else "not_exposed")
@@ -97,15 +115,6 @@ class Group:
             return parse(text)
         except ValueError:  # int("") included: an empty number is not 0
             return self.note(target, "invalid_data", path)
-
-    def listdir(self, root):
-        """Notes why root could not be listed (glob would just return nothing); a missing root is "nothing here"."""
-        try:
-            os.listdir(root)
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            self.note(os.path.basename(root), reason_of(e), f"{root}: {e.strerror}")
 
     def status(self):
         problems = [r for r in PROBLEMS if r in self.reasons]

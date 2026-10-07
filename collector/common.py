@@ -2,14 +2,13 @@
 
 Board-specific paths and tools belong in a board module (see jetson.py).
 """
-import glob
 import os
 import re
 import shutil
 import time
 
 from . import sysfs
-from .sysfs import DEVICE_TREE, HOST_ROOT, guard, host_path, hwmon_chips, numbered, read
+from .sysfs import DEVICE_TREE, HOST_ROOT, entries, guard, host_path, hwmon_chips, numbered, read
 
 
 def unique_key(table, key, d):
@@ -24,31 +23,31 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
     g = groups or sysfs.groups("temperature", "power", "fans")
     temp_g, power_g, fan_g = g["temperature"], g["power"], g["fans"]
     temps, power, fans = {}, {}, []
-    for grp in (temp_g, power_g, fan_g):
-        grp.listdir(root)
     with guard(temp_g, power_g, fan_g):
-        for d, chip in hwmon_chips(root):
+        for d, chip in hwmon_chips(root, temp_g, power_g, fan_g):
             if chip in skip:
                 continue
             dev = os.path.basename(d)
+            # one listing per chip for all its channels; if it cannot be listed, this chip is left out
+            names = entries(d, temp_g, power_g, fan_g, listed=True)
 
             def label(kind, n):
                 return read(f"{d}/{kind}{n}_label") or f"{chip} {kind}{n}"
 
-            for n in numbered(d, "temp*_input"):
+            for n in numbered(names, "temp", "_input"):
                 path = f"{d}/temp{n}_input"
                 t = temp_g.read(path, f"{dev}.temp{n}", found=path)
                 if t is not None:
                     key = unique_key(temps, f"{chip} {read(f'{d}/temp{n}_label') or f'temp{n}'}", d)
                     temps[key] = temp_g.got(t / 1000)  # m°C
-            for n in numbered(d, "power*_input"):
+            for n in numbered(names, "power", "_input"):
                 path = f"{d}/power{n}_input"
                 p = power_g.read(path, f"{dev}.power{n}", found=path)
                 if p is not None:
                     power[unique_key(power, label("power", n), d)] = power_g.got(round(p / 1e6, 2))  # µW
-            for n in numbered(d, "curr*_input"):  # ina3221-style rails; label required, unlabeled channels are sums
-                lbl = read(f"{d}/in{n}_label")
-                if not lbl:
+            for n in numbered(names, "curr", "_input"):  # ina3221-style rails; label required, unlabeled are sums
+                lbl = power_g.read(f"{d}/in{n}_label", f"{dev}.in{n}_label", parse=str, found=d)
+                if not lbl:  # no label (a sum channel), or noted if it could not be read
                     continue
                 path = f"{d}/curr{n}_input"
                 ma = power_g.read(path, f"{dev}.curr{n}", found=path)
@@ -60,13 +59,13 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
                 pwm = fan_g.read(f"{d}/pwm{n}", f"{dev}.pwm{n}", found=found)
                 return None if pwm is None else fan_g.got(round(pwm * 100 / 255))
 
-            fan_idx = numbered(d, "fan*_input")
+            fan_idx = numbered(names, "fan", "_input")
             for n in fan_idx:
                 path = f"{d}/fan{n}_input"
                 rpm = fan_g.read(path, f"{dev}.fan{n}", found=path)  # None if unreadable, not 0
                 fans.append({"name": label("fan", n), "rpm": None if rpm is None else fan_g.got(rpm),
                              "percent": percent(n, d)})
-            if not fan_idx and os.path.exists(f"{d}/pwm1"):  # pwm-fan without a tachometer
+            if not fan_idx and "pwm1" in names:  # pwm-fan without a tachometer
                 fans.append({"name": chip, "rpm": None, "percent": percent(1, f"{d}/pwm1")})
     return temps, power, fans
 
@@ -76,9 +75,9 @@ def thermal_zones(root="/sys/class/thermal", group=None):
     group: the temperature sysfs.Group; inactive zones (ENODATA) count as no_data, not as errors."""
     g = group or sysfs.Group("temperature")
     temps, zone_types = {}, set()
-    g.listdir(root)
     with guard(g):
-        for z in sorted(glob.glob(f"{root}/thermal_zone*"), key=lambda p: int(p.rsplit("e", 1)[1])):
+        zones = sorted(numbered(entries(root, g), "thermal_zone", ""))
+        for z in (f"{root}/thermal_zone{n}" for n in zones):
             zt = read(f"{z}/type", "")
             zone_types.add(zt.replace("-", "_"))
             t = g.read(f"{z}/temp", os.path.basename(z), found=z)

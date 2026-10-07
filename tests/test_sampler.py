@@ -532,7 +532,7 @@ def test_all_optional_failing_still_publishes_then_required_failure_keeps_last_g
     from test_common import Proc, fail_reads, fake_hwmon, idle_busy
 
     root = fake_hwmon(tmp_path, [{"name": "chip", "temp1_input": 1, "power1_input": 1, "fan1_input": 1}])
-    monkeypatch.setattr(common, "hwmon_chips", lambda r: [(f"{root}/hwmon0", "chip")])
+    monkeypatch.setattr(common, "hwmon_chips", lambda r, *groups: [(f"{root}/hwmon0", "chip")])
     monkeypatch.setattr(common, "thermal_zones", lambda group=None: ({}, set()))
     freq = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
     fail_reads(monkeypatch, {f"{root}/hwmon0/{f}": errno.EIO for f in ("temp1_input", "power1_input", "fan1_input")}

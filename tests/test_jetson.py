@@ -148,3 +148,21 @@ def test_tach_fan_unreadable_rpm(tmp_path):
     assert jetson.tach_fans(root, g) == [{"name": "pwm_tach", "rpm": None, "percent": None},
                                          {"name": "other_tach", "rpm": 0, "percent": None}]
     assert g.status()["state"] == "partial"
+
+
+def test_gpu_undecodable_candidate_falls_back(tmp_path):
+    make(tmp_path, {"devices/platform/gpu.0/load": 500})
+    (tmp_path / "class/devfreq/17000000.gpu/device").mkdir(parents=True)
+    (tmp_path / "class/devfreq/17000000.gpu/device/load").write_bytes(b"\xff\n")
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g)["usage"] == 50.0
+    assert g.status()["issues"] == []  # the failed candidate is not the result
+
+
+def test_gpu_unlistable_devfreq_without_fallback(tmp_path, monkeypatch):
+    from test_common import deny_listing
+    (tmp_path / "class/devfreq/17000000.gpu").mkdir(parents=True)
+    deny_listing(monkeypatch, tmp_path / "class/devfreq", errno.EACCES)
+    g = sysfs.Group("gpu")
+    assert jetson.gpu(str(tmp_path), g) is None
+    assert (g.status()["state"], g.status()["reason"]) == ("error", "permission_denied")  # not "not_exposed"

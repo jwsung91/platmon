@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from collector import detect, jetson
@@ -513,7 +515,7 @@ def test_partial_power_and_fan_channels(tmp_path, monkeypatch):
 def test_channel_that_disappears_then_recovers(tmp_path, monkeypatch):
     root = fake_hwmon(tmp_path, [{"name": "coretemp", "temp1_input": 45000}])
     real = common.numbered
-    monkeypatch.setattr(common, "numbered", lambda d, pattern: real(d, pattern) + ([2] if pattern == "temp*_input" else []))
+    monkeypatch.setattr(common, "numbered", lambda names, prefix, suffix: real(names, prefix, suffix) + ([2] if prefix == "temp" else []))
     g = sysfs.groups("temperature", "power", "fans")
     assert hwmon_sensors(root=root, groups=g)[0] == {"coretemp temp1": 45.0}  # temp2 listed, gone when read
     assert g["temperature"].status()["issues"] == [{"target": "hwmon0.temp2", "reason": "disappeared"}]
@@ -544,7 +546,7 @@ def test_inactive_thermal_zone_is_no_data(tmp_path, monkeypatch):
 
 
 def test_unexpected_error_in_one_group_is_internal_error(monkeypatch):
-    def broken(root):
+    def broken(root, *groups):
         raise RuntimeError("bug with /secret/path")
     monkeypatch.setattr(common, "hwmon_chips", broken)
     g = sysfs.groups("temperature", "power", "fans")
@@ -583,8 +585,11 @@ def test_cpu_frequency_failure_keeps_usage(monkeypatch):
 def test_no_optional_sensors_is_not_an_error(tmp_path, monkeypatch):
     """A plain Linux host without cpufreq, thermal zones or hwmon chips: everything required, nothing degraded."""
     import collector
-    monkeypatch.setattr(common, "hwmon_chips", lambda root: [])
-    monkeypatch.setattr(common.glob, "glob", lambda pattern: [])
+    monkeypatch.setattr(collector, "BOARD", None)  # a plain Linux host, whatever board runs the tests
+    monkeypatch.setattr(common, "hwmon_chips", lambda root, *groups: [])
+    real_entries = common.entries
+    monkeypatch.setattr(common, "entries", lambda path, *g, **kw: [] if path.startswith("/sys/class/thermal")
+                        else real_entries(path, *g, **kw))
     monkeypatch.setattr(sysfs, "open", lambda path, *a, **kw: (_ for _ in ()).throw(FileNotFoundError(path))
                         if "cpufreq" in str(path) else open(path, *a, **kw), raising=False)
     s = collector.collect()
@@ -607,3 +612,69 @@ def test_problems_are_logged_when_they_change(capsys):
     assert capsys.readouterr().err == ""  # the same problem again: not logged every second
     run()
     assert "temperature: readable again" in capsys.readouterr().err
+
+
+# PR #24 review: bytes that do not decode, listing errors inside the walk, unreadable rail labels
+
+def deny_listing(monkeypatch, path, code):
+    """Listing this directory fails (os.listdir and os.scandir, which glob uses); others list normally."""
+    real_listdir, real_scandir = os.listdir, os.scandir
+
+    def check(p):
+        if os.path.normpath(str(p)) == os.path.normpath(str(path)):
+            raise OSError(code, _errno.errorcode[code]) if code != _errno.EACCES else PermissionError(code, "denied")
+    monkeypatch.setattr(os, "listdir", lambda p=".": check(p) or real_listdir(p))
+    monkeypatch.setattr(os, "scandir", lambda p=".": check(p) or real_scandir(p))
+
+
+def test_undecodable_temperature_keeps_the_rest(tmp_path):
+    root = fake_hwmon(tmp_path, [{"name": "chip", "temp1_input": 45000, "temp3_input": 42000,
+                                  "power1_input": 1000000, "fan1_input": 900, "pwm1": 128}])
+    (tmp_path / "hwmon0" / "temp2_input").write_bytes(b"\xff\n")
+    g = sysfs.groups("temperature", "power", "fans")
+    temps, power, fans = hwmon_sensors(root=root, groups=g)
+    assert temps == {"chip temp1": 45.0, "chip temp3": 42.0} and power == {"chip power1": 1.0}
+    assert fans == [{"name": "chip fan1", "rpm": 900, "percent": 50}]
+    assert g["temperature"].status()["issues"] == [{"target": "hwmon0.temp2", "reason": "invalid_data"}]
+    assert g["power"].status()["state"] == g["fans"].status()["state"] == "ok"
+
+
+@pytest.mark.parametrize("code, reason", [(_errno.EACCES, "permission_denied"), (_errno.EIO, "io_error")])
+def test_unlistable_chip_is_reported_and_the_others_kept(tmp_path, monkeypatch, code, reason):
+    root = fake_hwmon(tmp_path, [{"name": "a", "temp1_input": 40000}, {"name": "b", "temp1_input": 50000}])
+    deny_listing(monkeypatch, tmp_path / "hwmon0", code)
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[0] == {"b temp1": 50.0}
+    assert g["temperature"].status() == {"state": "partial", "reason": "some_unreadable", "issues_truncated": 0,
+                                         "issues": [{"target": "hwmon0", "reason": reason}]}
+
+
+def test_unlistable_thermal_class(tmp_path, monkeypatch):
+    (tmp_path / "thermal_zone0").mkdir()
+    deny_listing(monkeypatch, tmp_path, _errno.EIO)
+    g = sysfs.Group("temperature")
+    assert thermal_zones(root=str(tmp_path), group=g)[0] == {}
+    assert g.status()["reason"] == "io_error"
+
+
+def test_empty_or_missing_classes_are_not_errors(tmp_path):
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=str(tmp_path), groups=g) == ({}, {}, [])  # empty class directory
+    assert hwmon_sensors(root=str(tmp_path / "missing"), groups=g) == ({}, {}, [])
+    assert thermal_zones(root=str(tmp_path / "missing"), group=g["temperature"])[0] == {}
+    assert {x.status()["state"] for x in g.values()} == {"unavailable"}
+
+
+def test_unreadable_rail_label_is_reported(tmp_path, monkeypatch):
+    rails = [{"name": "ina3221", "in1_label": "VDD_IN", "in1_input": 5000, "curr1_input": 1000,
+              "in2_label": "VDD_SOC", "in2_input": 5000, "curr2_input": 400, "in3_input": 5000, "curr3_input": 1400}]
+    root = fake_hwmon(tmp_path, rails)  # channel 3 has no label: a sum channel, skipped as before
+    fail_reads(monkeypatch, {f"{root}/hwmon0/in1_label": _errno.EIO})
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[1] == {"VDD_SOC": 2.0}
+    assert g["power"].status() == {"state": "partial", "reason": "some_unreadable", "issues_truncated": 0,
+                                   "issues": [{"target": "hwmon0.in1_label", "reason": "io_error"}]}
+    monkeypatch.setattr(sysfs, "open", open, raising=False)  # next collection: readable again
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[1] == {"VDD_IN": 5.0, "VDD_SOC": 2.0}
+    assert g["power"].status()["state"] == "ok"
