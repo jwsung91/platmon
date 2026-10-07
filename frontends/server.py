@@ -15,8 +15,12 @@ def make_handler(sampler, web=True):
         def do_GET(self):
             if self.path in ("/api/stats", "/text"):
                 stats = sampler.latest()
-                if stats is None:
-                    self.send_error(503, "no current data (not collected yet, or collection keeps failing)")
+                if stats is None:  # JSON for the API, text for /text, so clients need not parse an HTML page
+                    why = "no current data (not collected yet, or collection keeps failing)"
+                    if self.path == "/api/stats":
+                        self.reply(503, json.dumps({"error": why}).encode(), "application/json")
+                    else:
+                        self.reply(503, (why + "\n").encode(), "text/plain; charset=utf-8")
                     return
                 if self.path == "/api/stats":
                     body, ctype = json.dumps(stats).encode(), "application/json"
@@ -28,7 +32,10 @@ def make_handler(sampler, web=True):
             else:
                 self.send_error(404)
                 return
-            self.send_response(200)
+            self.reply(200, body, ctype)
+
+        def reply(self, code, body, ctype):
+            self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
