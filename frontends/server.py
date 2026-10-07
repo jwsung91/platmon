@@ -1,5 +1,6 @@
-"""HTTP frontend: JSON at /api/stats, the terminal view as plain text at /text (for curl and watch) and,
-when web is enabled, the web viewer at /. Started by platmon.py."""
+"""HTTP frontend: JSON at /api/stats, the sampler's runtime status at /api/status, the terminal view as plain
+text at /text (for curl and watch) and, when web is enabled, the web viewer at /. Started by platmon.py.
+Contract: docs/api.md."""
 import json
 import os
 import threading
@@ -8,17 +9,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .cli import render
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+LIVE = ("/api/stats", "/api/status", "/text")
 
 
 def make_handler(sampler, web=True):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            if self.path in ("/api/stats", "/text"):
-                stats = sampler.latest()
+            if self.path == "/api/status":  # never waits for the first snapshot; 200 even when not ready
+                body, ctype = json.dumps(sampler.read()[1]).encode(), "application/json"
+            elif self.path in ("/api/stats", "/text"):
+                stats, status = sampler.read(timeout=5.0)  # code and body from the same capture
                 if stats is None:  # JSON for the API, text for /text, so clients need not parse an HTML page
                     why = "no current data (not collected yet, or collection keeps failing)"
-                    if self.path == "/api/stats":
-                        self.reply(503, json.dumps({"error": why}).encode(), "application/json")
+                    if self.path == "/api/stats":  # the last good sample's identity and age, never its values
+                        body = {"error": why, "schema_version": status["schema_version"], "code": "no_current_data",
+                                "instance_id": status["instance_id"], "sample": status["sample"]}
+                        self.reply(503, json.dumps(body).encode(), "application/json")
                     else:
                         self.reply(503, (why + "\n").encode(), "text/plain; charset=utf-8")
                     return
@@ -38,6 +44,8 @@ def make_handler(sampler, web=True):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            if self.path in LIVE:  # a cached answer would show old data as current
+                self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
 

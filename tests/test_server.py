@@ -1,52 +1,69 @@
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
 import pytest
 
+from collector.sampler import METADATA_KEYS, Sampler
+from frontends.cli import render
 from frontends.server import make_handler
 
 
-class FakeSampler:
-    interval = 1.0
+class NoWait(Sampler):
+    """The real sampler without the first-snapshot wait of /api/stats and /text, to keep tests fast."""
 
-    def __init__(self, stats):
-        self.stats = stats
-
-    def latest(self, timeout=5.0):
-        return self.stats
+    def read(self, timeout=0.0):
+        return super().read(0.0)
 
 
-def serve(stats, web=True):
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(FakeSampler(stats), web))
+def serve(stats, web=True, sampler=None):
+    """Serves one collected snapshot of stats (None: nothing collected yet), or the given sampler."""
+    if sampler is None:
+        sampler = NoWait(lambda: stats)
+        if stats is not None:
+            sampler._attempt()
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(sampler, web))
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
     return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
 
 
-def status(url):
+def get(url):
     try:
         with urllib.request.urlopen(url, timeout=5) as r:
-            return r.status, r.read()
+            return r.status, r.headers, r.read()
     except urllib.error.HTTPError as e:
-        return e.code, b""
+        return e.code, e.headers, e.read()
+
+
+def plain(stats):
+    return {k: v for k, v in stats.items() if k not in METADATA_KEYS}
 
 
 @pytest.mark.parametrize("web, path, expected", [
-    (True, "/api/stats", 200), (True, "/text", 200), (True, "/", 200), (True, "/nope", 404),
-    (False, "/api/stats", 200), (False, "/text", 200), (False, "/", 404),  # web = no: API and text only
+    (True, "/api/stats", 200), (True, "/api/status", 200), (True, "/text", 200), (True, "/", 200),
+    (True, "/nope", 404),
+    (False, "/api/stats", 200), (False, "/api/status", 200), (False, "/text", 200),
+    (False, "/", 404),  # web = no: API and text only
 ])
 def test_routes(web, path, expected):
     from test_cli import FULL
     httpd, base = serve(FULL, web)
     try:
-        code, body = status(base + path)
+        code, headers, body = get(base + path)
         assert code == expected
-        if path == "/api/stats":
-            assert json.loads(body) == FULL
-        if path == "/text":  # the terminal view, no screen control codes
-            assert body.decode().startswith("Test Board\n") and b"\033[" not in body
+        if path == "/api/stats":  # the old fields as they were, plus the sample metadata
+            stats = json.loads(body)
+            assert plain(stats) == FULL and stats["schema_version"] == 1 and stats["sample"]["sequence"] == 1
+        if path == "/api/status":
+            assert json.loads(body)["state"] == "ready"
+        if path == "/text":  # the terminal view, unchanged by the metadata, no screen control codes
+            assert body.decode() == render(FULL) + "\n" and b"\033[" not in body
+        if path in ("/api/stats", "/api/status", "/text"):
+            ctype = "text/plain; charset=utf-8" if path == "/text" else "application/json"
+            assert headers["Content-Type"] == ctype and headers["Cache-Control"] == "no-store"
     finally:
         httpd.shutdown()
 
@@ -59,7 +76,47 @@ def test_no_snapshot_yet_is_503():
             with pytest.raises(urllib.error.HTTPError) as e:
                 urllib.request.urlopen(base + path, timeout=5)
             assert e.value.code == 503 and e.value.headers["Content-Type"] == ctype
+            assert e.value.headers["Cache-Control"] == "no-store"
             body = e.value.read().decode()
             assert (json.loads(body)["error"] if path == "/api/stats" else body).startswith("no current data")
     finally:
         httpd.shutdown()
+
+
+@pytest.mark.parametrize("web", [True, False])
+def test_503_metadata(web):
+    """The last good sample's identity and age, never its values; sample is null when there was none."""
+    clock = [0]
+    s = NoWait(lambda: {"cpu": [{"id": 0, "usage": 5.0}]}, clock=(lambda: clock[0], {"source": "fake"}))
+    httpd, base = serve(None, web, sampler=s)
+    try:
+        code, _, body = get(base + "/api/stats")
+        assert code == 503 and json.loads(body) == {
+            "error": "no current data (not collected yet, or collection keeps failing)", "schema_version": 1,
+            "code": "no_current_data", "instance_id": s.instance_id, "sample": None}
+        s._attempt()
+        clock[0] += 6 * 10**9  # past stale_after (5 s)
+        code, _, body = get(base + "/api/stats")
+        assert code == 503 and json.loads(body)["sample"] == {"sequence": 1, "age_ms": 6000.0, "data_age_ms": 6000.0}
+        assert "cpu" not in json.loads(body)
+        code, _, body = get(base + "/text")
+        assert code == 503 and body.decode().startswith("no current data")
+        code, _, body = get(base + "/api/status")  # 200 even when not ready: read "ready", not the code
+        assert code == 200 and json.loads(body)["ready"] is False and json.loads(body)["state"] == "stale"
+    finally:
+        httpd.shutdown()
+
+
+def test_status_does_not_wait_for_the_first_snapshot():
+    release = threading.Event()
+    s = Sampler(lambda: release.wait(10) and {}).start()  # the real wait: /api/stats would hold up to 5 s
+    httpd, base = serve(None, sampler=s)
+    try:
+        t0 = time.monotonic()
+        code, _, body = get(base + "/api/status")
+        assert time.monotonic() - t0 < 2
+        assert code == 200 and json.loads(body)["state"] == "starting"
+    finally:
+        httpd.shutdown()
+        s.stop()
+        release.set()

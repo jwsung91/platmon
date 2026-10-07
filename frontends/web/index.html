@@ -30,6 +30,7 @@
   <h1 id="model">platmon</h1>
   <div class="muted" id="meta"></div>
   <div class="muted" id="sys"></div>
+  <div class="muted" id="age"></div>
   <div id="err"></div>
 </header>
 <div class="grid">
@@ -68,11 +69,39 @@ function render(s) {
 }
 
 const TIMEOUT_MS = 5000;  // a request that hangs must not stop the updates
-let lastOk = null;        // browser time of the last good update; the device clock may differ from this one
+// What is on screen and how old it is. The age comes from the server (data_age_ms) plus browser time since
+// that answer arrived (performance.now, so the device and browser clocks never get compared); it ignores
+// transfer time. A repeated 200 for the same sample keeps counting from the server's age, never from 0.
+// Older servers send no sample metadata: then only the time since their last answer is known.
+let shown = null;       // {kind: 'sample' | 'legacy' | 'invalid', seq, ageMs, t0}
+let failing = false;    // the last request failed: what is shown is the last good data, not current
+let checking = false;   // tab came back: browser time may have stopped while hidden, wait for a new answer
+let inflight = false, refresh = null;
+
+function sampleOf(s, t0) {
+  if (!('schema_version' in s) && !('sample' in s)) return {kind: 'legacy', t0};
+  const m = s.sample;
+  const ok = s.schema_version === 1 && m && typeof m === 'object' && typeof m.instance_id === 'string'
+    && Number.isInteger(m.sequence) && m.sequence > 0 && Number.isFinite(m.data_age_ms) && m.data_age_ms >= 0;
+  return ok ? {kind: 'sample', seq: m.sequence, ageMs: m.data_age_ms, t0} : {kind: 'invalid', t0};
+}
+
+function showAge() {
+  if (!shown) { $('age').textContent = ''; return; }
+  const since = performance.now() - shown.t0;
+  const secs = ms => Math.round(ms / 1000) + ' s';
+  const text = shown.kind === 'sample' ? `sample #${shown.seq} · data age ${secs(shown.ageMs + since)}`
+    : `response received ${secs(since)} ago · ` + (shown.kind === 'legacy'
+      ? 'this server reports no sample age' : 'sample age unavailable (invalid metadata)');
+  const line = failing ? 'last good: ' + text + ' (not current)' : checking ? 'checking… last seen: ' + text : text;
+  $('age').textContent = line[0].toUpperCase() + line.slice(1);
+}
 
 // One request at a time; whatever happens, the next one is scheduled. On failure the last good values
 // stay on screen with their age, and the message says what failed.
 async function tick() {
+  clearTimeout(refresh);
+  inflight = true;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   let stage = 'connect';
@@ -82,22 +111,33 @@ async function tick() {
     if (!r.ok) throw new Error(`platmon answered ${r.status} ${r.statusText}`);
     stage = 'read';
     const s = await r.json();
+    const t0 = performance.now();
     stage = 'render';
     render(s);
-    lastOk = Date.now();
+    shown = sampleOf(s, t0);
+    failing = checking = false;
     $('err').textContent = '';
   } catch (e) {
-    const why = e.name === 'AbortError' ? `No answer within ${TIMEOUT_MS / 1000} s`
+    failing = true;  // shown keeps its own age: a failure does not make old data newer
+    checking = false;
+    $('err').textContent = e.name === 'AbortError' ? `No answer within ${TIMEOUT_MS / 1000} s`
       : stage === 'connect' && e instanceof TypeError ? 'Connection lost: ' + e.message
       : stage === 'read' ? 'Unexpected response (not platmon data)'
       : e.message;
-    const age = lastOk === null ? '' : ` · showing data from ${Math.round((Date.now() - lastOk) / 1000)} s ago`;
-    $('err').textContent = why + age;
   } finally {
     clearTimeout(timer);
-    setTimeout(tick, 1000);
+    inflight = false;
+    refresh = setTimeout(tick, 1000);
+    showAge();
   }
 }
+setInterval(showAge, 1000);  // the age keeps moving while a request hangs
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  checking = true;
+  showAge();
+  if (!inflight) tick();  // the running request, if any, brings the new answer
+});
 tick();
 </script>
 </body>

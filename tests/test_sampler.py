@@ -1,7 +1,12 @@
 import itertools
+import json
+import threading
 import time
+import uuid
 
-from collector.sampler import Sampler
+import pytest
+
+from collector.sampler import Sampler, pick_clock
 
 
 def test_latest_follows_collect():
@@ -63,3 +68,256 @@ def test_stale_snapshot_is_not_served():
 def test_default_stale_after():
     assert Sampler(dict, interval=1.0).stale_after == 5.0  # floor, so a slow collect alone does not trip it
     assert Sampler(dict, interval=10.0).stale_after == 30.0
+
+
+# sample metadata and runtime status, driven by a fake clock: _attempt() is one collection round
+
+
+class Clock:
+    def __init__(self):
+        self.ns, self.wall = 10**12, 1_700_000_000.0
+
+    def advance(self, seconds, wall=None):
+        """Moves elapsed time; the wall clock moves by `wall` if given (a clock step), else by the same."""
+        self.ns += round(seconds * 1e9)
+        self.wall += seconds if wall is None else wall
+
+
+def fake(collect, clock, **kw):
+    return Sampler(collect, clock=(lambda: clock.ns, {"source": "fake", "suspend_aware": False}),
+                   wall=lambda: clock.wall, **kw)
+
+
+def slow(clock, stats, seconds=0.25):
+    """A collect that takes `seconds` of (fake) time."""
+    def collect():
+        clock.advance(seconds)
+        return stats
+    return collect
+
+
+STATS = {"time": 1234.5, "cpu": [{"id": 0, "usage": 0.0, "freq": None}], "gpu": None}  # a measured 0 stays 0
+
+
+def test_metadata_is_added_and_stats_are_unchanged():
+    c = Clock()
+    s = fake(slow(c, STATS), c)
+    s._attempt()
+    c.advance(0.1)
+    stats, status = s.read()
+    assert {k: v for k, v in stats.items() if k not in ("schema_version", "sample", "collectors")} == STATS
+    assert stats["schema_version"] == 1 and stats["collectors"] == {"core": {"state": "ok", "reason": None}}
+    assert stats["sample"] == {
+        "instance_id": s.instance_id, "sequence": 1,
+        "started_at": 1_700_000_000.0, "completed_at": 1_700_000_000.25,  # completed after collect returned
+        "duration_ms": 250.0, "age_ms": 100.0, "data_age_ms": 350.0, "data_age_basis": "cycle_start_upper_bound",
+        "interval_ms": 1000.0, "stale_after_ms": 5000.0}
+    sample = stats["sample"]
+    assert sample["data_age_ms"] == sample["age_ms"] + sample["duration_ms"]
+    assert s.latest() == STATS  # the old interface: no metadata
+    assert status["state"] == "ready" and status["ready"] is True
+
+
+def test_polling_does_not_change_the_sample():
+    c = Clock()
+    s = fake(slow(c, STATS), c)
+    s._attempt()
+    first = s.read()[0]["sample"]
+    c.advance(1)
+    again = s.read()[0]["sample"]
+    assert again["sequence"] == first["sequence"] == 1 and again["completed_at"] == first["completed_at"]
+    assert again["age_ms"] == first["age_ms"] + 1000  # only the ages move
+
+
+def test_sequence_counts_published_snapshots_only():
+    c = Clock()
+    mode = ["ok"]
+
+    def collect():
+        c.advance(6 if mode[0] == "slow" else 0.1)
+        if mode[0] == "fail":
+            raise OSError("sensor gone")
+        return {"n": 1}
+
+    s = fake(collect, c)
+    s._attempt()
+    assert s.read()[1]["sample"]["sequence"] == 1
+    for m, reason in (("fail", "collection_failed"), ("slow", "collection_too_slow")):
+        mode[0] = m
+        s._attempt()
+        assert s.read()[1]["last_attempt"]["reason"] == reason
+        assert s.read()[1]["sample"]["sequence"] == 1
+    mode[0] = "ok"
+    s._attempt()
+    assert s.read()[1]["sample"]["sequence"] == 2
+
+
+def test_each_sampler_is_a_new_instance():
+    c = Clock()
+    a, b = fake(dict, c), fake(dict, c)
+    a._attempt(), a._attempt(), b._attempt()
+    assert a.instance_id != b.instance_id and str(uuid.UUID(a.instance_id)) == a.instance_id
+    assert (a.read()[0]["sample"]["sequence"], b.read()[0]["sample"]["sequence"]) == (2, 1)
+
+
+@pytest.mark.parametrize("step", [-3600, 3600])
+def test_wall_clock_steps_do_not_change_durations(step):
+    c = Clock()
+
+    def collect():
+        c.advance(0.25, wall=step)  # e.g. NTP corrects the clock mid-collect
+        return {}
+
+    s = fake(collect, c)
+    s._attempt()
+    c.advance(4, wall=-step)
+    sample = s.read()[0]["sample"]
+    assert sample["completed_at"] - sample["started_at"] == pytest.approx(step)
+    assert (sample["duration_ms"], sample["age_ms"], sample["data_age_ms"]) == (250.0, 4000.0, 4250.0)
+
+
+def test_stale_boundary():
+    c = Clock()
+    s = fake(slow(c, {}), c, stale_after=5)
+    s._attempt()
+    c.advance(4.75)  # data age exactly stale_after: still current
+    assert s.read()[0]["sample"]["data_age_ms"] == 5000.0
+    c.ns += 1
+    stats, status = s.read()
+    assert stats is None and status["state"] == "stale" and status["ready"] is False
+    assert status["sample"]["sequence"] == 1  # still described, no longer served
+
+
+def test_too_slow_result_is_not_published():
+    c = Clock()
+    s = fake(slow(c, {"x": 1}, seconds=5.001), c)
+    s._attempt()
+    stats, status = s.read()
+    assert stats is None and status["sample"] is None and status["state"] == "stale"
+    assert status["last_attempt"] == {"state": "error", "reason": "collection_too_slow",
+                                      "completed_at": 1_700_000_005.001, "duration_ms": 5001.0,
+                                      "consecutive_failures": 1}
+
+
+def test_failure_keeps_last_good_then_recovers():
+    c = Clock()
+    ok = [True]
+
+    def collect():
+        c.advance(0.05)
+        if not ok[0]:
+            raise OSError("/secret/path gone")
+        return {"v": c.ns}
+
+    s = fake(collect, c)
+    s._attempt()
+    good = s.read()[0]
+    c.advance(1)
+    ok[0] = False
+    s._attempt()
+    s._attempt()
+    stats, status = s.read()
+    assert stats["v"] == good["v"] and stats["sample"]["sequence"] == 1  # same values, times, sequence
+    assert stats["sample"]["completed_at"] == good["sample"]["completed_at"]
+    assert stats["collectors"]["core"]["state"] == "ok"  # the snapshot's own state, not the latest attempt's
+    assert status["state"] == "degraded" and status["ready"] is True
+    assert status["last_attempt"]["reason"] == "collection_failed"
+    assert status["last_attempt"]["consecutive_failures"] == 2
+    assert "secret" not in json.dumps(status)  # no exception text in the API
+    c.advance(5)
+    stats, status = s.read()
+    assert stats is None and status["state"] == "stale" and status["sample"]["sequence"] == 1
+    ok[0] = True
+    s._attempt()
+    stats, status = s.read()
+    assert stats["sample"]["sequence"] == 2 and stats["v"] != good["v"]
+    assert status["state"] == "ready" and status["last_attempt"]["consecutive_failures"] == 0
+
+
+def test_starting_status():
+    c = Clock()
+    status = fake(dict, c).read()[1]
+    assert status["state"] == "starting" and status["ready"] is False
+    assert status["sample"] is None and status["last_attempt"] is None and status["collecting_for_ms"] is None
+    assert status["clock"] == {"source": "fake", "suspend_aware": False}
+
+
+def test_blocked_first_collect_turns_stale():
+    """status answers at once while the first collect hangs, and says how long it has been running."""
+    c = Clock()
+    entered, release = threading.Event(), threading.Event()
+
+    def collect():
+        entered.set()
+        release.wait(10)
+        return {}
+
+    s = fake(collect, c).start()
+    try:
+        assert entered.wait(5)
+        assert s.read()[1]["collecting_for_ms"] == 0.0
+        c.advance(5)
+        status = s.read()[1]
+        assert (status["state"], status["collecting_for_ms"], status["last_attempt"]) == ("starting", 5000.0, None)
+        c.ns += 1
+        assert s.read()[1]["state"] == "stale"
+        assert s.read(timeout=0.01) == (None, s.read()[1])  # a bounded wait, then no stats
+    finally:
+        s.stop()
+        release.set()
+        s._thread.join(5)
+
+
+def test_returned_dicts_are_copies():
+    c = Clock()
+    shared = {"cpu": [{"id": 0, "usage": 1.0}]}
+    s = fake(lambda: shared, c)
+    s._attempt()
+    before = s.read()
+    stats, status = s.read()
+    stats["cpu"][0]["usage"] = 99.0
+    stats["sample"]["sequence"] = 99
+    status["clock"]["source"] = "changed"
+    status["sample"]["sequence"] = 99
+    shared["cpu"][0]["usage"] = 50.0  # the collector reusing its own dict
+    s.latest()["cpu"].append("x")
+    assert s.read() == before
+
+
+def test_reads_match_their_metadata_while_collecting():
+    """Values and metadata come from one capture: collect returns n == the sequence it will be published as."""
+    n = itertools.count(1)
+    s = Sampler(lambda: {"n": next(n)}, interval=0.001).start()
+    try:
+        seen = set()
+        for _ in range(2000):
+            stats = s.read(timeout=5)[0]
+            assert stats["n"] == stats["sample"]["sequence"]
+            seen.add(stats["n"])
+        assert len(seen) > 1
+    finally:
+        s.stop()
+
+
+def test_start_twice_is_one_writer_and_restart_is_refused():
+    s = Sampler(dict, interval=10).start()
+    t = s._thread
+    assert s.start()._thread is t
+    s.stop()
+    with pytest.raises(RuntimeError, match="create a new Sampler"):
+        s.start()
+
+
+def test_pick_clock(monkeypatch):
+    if hasattr(time, "CLOCK_BOOTTIME"):
+        assert pick_clock()[1] == {"source": "boottime", "suspend_aware": True}
+    monkeypatch.delattr(time, "CLOCK_BOOTTIME", raising=False)
+    assert pick_clock() == (time.monotonic_ns, {"source": "monotonic", "suspend_aware": False})
+
+
+def test_pick_clock_when_boottime_fails(monkeypatch):
+    def unsupported(clock):
+        raise OSError(22, "Invalid argument")
+    monkeypatch.setattr(time, "CLOCK_BOOTTIME", 7, raising=False)
+    monkeypatch.setattr(time, "clock_gettime_ns", unsupported, raising=False)
+    assert pick_clock()[1]["source"] == "monotonic"
