@@ -1,7 +1,7 @@
 import pytest
 
 from collector import detect, jetson
-from collector.common import cpu_percent, hwmon_sensors, thermal_zones
+from collector.common import cpu_percent, hwmon_sensors, os_release, thermal_zones
 
 
 @pytest.mark.parametrize("before, after, expected", [
@@ -76,7 +76,8 @@ def test_thermal_zones(tmp_path):
 
 
 def test_host_paths_from_env(tmp_path):
-    """Containers point PLATMON_DEVICE_TREE / PLATMON_DISK at bind mounts of the host's paths."""
+    """Containers point PLATMON_DEVICE_TREE / PLATMON_HOST_ROOT at bind mounts of the host's paths:
+    board detection, disk usage, OS name and (Jetson) L4T release all come from the host, not the image."""
     import json
     import os
     import subprocess
@@ -86,12 +87,29 @@ def test_host_paths_from_env(tmp_path):
     dt.mkdir()
     (dt / "compatible").write_bytes(b"nvidia,p3767-0005\0nvidia,tegra234\0")
     (dt / "model").write_bytes(b"Test Board\0")
+    root = tmp_path / "host"
+    (root / "etc").mkdir(parents=True)
+    (root / "usr/lib").mkdir(parents=True)
+    (root / "usr/lib/os-release").write_text('NAME="Ubuntu"\nPRETTY_NAME="Ubuntu 22.04.5 LTS"\n')
+    (root / "etc/os-release").symlink_to("../usr/lib/os-release")  # relative, as on Ubuntu/Debian
+    (root / "etc/nv_tegra_release").write_text("# R36 (release), REVISION: 5.2, GCID: 1, BOARD: generic\n")
     code = ("import collector, json, shutil; s = collector.collect(); "
-            "print(json.dumps([collector.PLATFORM, s['model'], s['disk']['total'], shutil.disk_usage(%r).total]))"
-            % str(tmp_path))
-    env = dict(os.environ, PLATMON_DEVICE_TREE=str(dt), PLATMON_DISK=str(tmp_path))
+            "print(json.dumps([collector.PLATFORM, s['model'], s['disk']['total'], shutil.disk_usage(%r).total, "
+            "s['system']['os'], s['system'].get('l4t')]))" % str(root))
+    env = dict(os.environ, PLATMON_DEVICE_TREE=str(dt), PLATMON_HOST_ROOT=str(root))
     out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True,
                          cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    platform, model, disk_total, expected_total = json.loads(out.stdout)
+    platform, model, disk_total, expected_total, os_name, l4t = json.loads(out.stdout)
     assert (platform, model) == ("Jetson Orin", "Test Board")
     assert disk_total == expected_total
+    assert (os_name, l4t) == ("Ubuntu 22.04.5 LTS", "R36.5.2")
+
+
+@pytest.mark.parametrize("text, expected", [
+    ('NAME="Ubuntu"\nVERSION="22.04.5 LTS (Jammy Jellyfish)"\nPRETTY_NAME="Ubuntu 22.04.5 LTS"\n', "Ubuntu 22.04.5 LTS"),
+    ("NAME='Raspbian GNU/Linux'\nVERSION='12 (bookworm)'\n", "Raspbian GNU/Linux 12 (bookworm)"),  # no PRETTY_NAME
+    ("# comment only\n", None),
+    (None, None),  # file missing
+])
+def test_os_release(text, expected):
+    assert os_release(text) == expected

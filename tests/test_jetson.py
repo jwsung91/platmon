@@ -23,3 +23,13 @@ def test_gpu(tmp_path):
         (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / path).write_text(str(value))
     assert jetson.gpu(str(tmp_path)) == {"usage": 50.0, "freq": 306000000, "max_freq": 1020000000}
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("# R36 (release), REVISION: 5.2, GCID: 46426093, BOARD: generic, EABI: aarch64, DATE: Thu Jul 16", "R36.5.2"),
+    ("# R35 (release), REVISION: 4.1, GCID: 33958178, BOARD: t186ref", "R35.4.1"),
+    ("garbage", None),
+    (None, None),
+])
+def test_l4t(text, expected):
+    assert jetson.l4t(text) == expected

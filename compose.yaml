@@ -12,7 +12,7 @@ services:
       - "9797:9797"
     environment:
       PLATMON_DEVICE_TREE: /host/firmware/devicetree/base
-      PLATMON_DISK: /host/root
+      PLATMON_HOST_ROOT: /host/root
     volumes:
       # Docker hides /sys/firmware; the device tree there identifies Jetson / Raspberry Pi boards.
       # Hosts without one (PCs) still have /sys/firmware, so this mount works everywhere.

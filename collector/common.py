@@ -8,7 +8,7 @@ import re
 import shutil
 import time
 
-from .sysfs import DEVICE_TREE, DISK, hwmon_chips, numbered, read, read_int
+from .sysfs import DEVICE_TREE, HOST_ROOT, host_path, hwmon_chips, numbered, read, read_int
 
 
 def hwmon_sensors(skip=(), root="/sys/class/hwmon"):
@@ -90,6 +90,24 @@ def meminfo():
     return m
 
 
+def os_release(text):
+    """Distribution name from os-release text (freedesktop format): PRETTY_NAME, else NAME VERSION."""
+    fields = {}
+    for line in (text or "").splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            fields[key.strip()] = value.strip().strip("\"'")
+    return fields.get("PRETTY_NAME") or " ".join(filter(None, (fields.get("NAME"), fields.get("VERSION")))) or None
+
+
+def system_info():
+    """OS of the host (read through HOST_ROOT, so a container reports the host, not its image), kernel, arch, hostname.
+    Board modules may add their own entries (e.g. Jetson: l4t)."""
+    u = os.uname()
+    return {"os": os_release(read(host_path("/etc/os-release")) or read(host_path("/usr/lib/os-release"))),
+            "kernel": u.release, "arch": u.machine, "hostname": u.nodename}
+
+
 def collect():
     """Fields every host has. gpu and power_mode stay None unless a board module fills them."""
     t0 = cpu_times()
@@ -103,12 +121,13 @@ def collect():
     temps.update(hw_temps)
 
     mem = meminfo()
-    disk = shutil.disk_usage(DISK)
+    disk = shutil.disk_usage(HOST_ROOT)
 
     return {
         "time": time.time(),
         "model": (read(f"{DEVICE_TREE}/model") or read("/sys/class/dmi/id/product_name")
                   or os.uname().nodename).rstrip("\0"),
+        "system": system_info(),
         "uptime": float(read("/proc/uptime").split()[0]),
         "power_mode": None,
         "cpu": [{"id": n, "usage": u, "freq": freqs[n] * 1000 if freqs[n] else None} for n, u in cpu.items()],
