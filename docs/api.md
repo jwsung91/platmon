@@ -161,7 +161,11 @@ A group with nothing to try is `unavailable`, never `ok`.
 (a channel such as `hwmon2.temp1`, a directory such as `hwmon0`, or a field such as `cur_freq`, up to 64
 characters; not a stable sensor id) and a reason. Paths, file contents and exception text are not in the API; the service log has them,
 written when a group's problems change rather than on every collection. Where one value has several
-sources (the Jetson GPU load), the first that reads is used and the others' failures are not reported.
+sources (the Jetson GPU load), the first that reads is used and the others' failures are not reported;
+a devfreq directory that cannot be listed is still reported, since it also hides the GPU clocks. A name or
+label that cannot be read (a chip's or thermal zone's name, a channel label) is reported and the default
+name is used instead (the chip's or zone's directory name, e.g. `hwmon2`, or the channel name), so its
+values are kept; ina3221 rails, which need their label, are left out instead.
 
 A snapshot with a `partial` or `error` group is still current: `/api/stats` and `/text` answer 200,
 `/api/status` says `degraded` with `ready: true`, and `last_attempt` is `ok` with 0 consecutive failures,
