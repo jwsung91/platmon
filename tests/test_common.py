@@ -300,10 +300,27 @@ def test_oneshot_does_not_touch_the_service_baseline(monkeypatch):
 
 
 def test_direct_collect_is_a_oneshot_reading():
-    """collect() without counters, as before: two real readings 250 ms apart, nothing kept."""
+    """collect() without counters, on this host: two real readings 250 ms apart, nothing kept. Which CPUs
+    have a usage depends on the host (exact values and reasons are tested with fixtures above)."""
     import collector
     s = collector.collect()
     sampling = s["cpu_sampling"]
     assert sampling["mode"] == "oneshot" and sampling["window_ms"] >= 250
-    assert all(u["reason"] == "no_ticks" for u in sampling["unavailable"])  # an idle core may count no ticks
-    assert len(s["cpu"]) + len(sampling["unavailable"]) >= 1
+    measured = [c["id"] for c in s["cpu"]]
+    missing = [u["id"] for u in sampling["unavailable"]]
+    assert measured and len(set(measured + missing)) == len(measured) + len(missing)  # each CPU in one list
+    assert all(0 <= c["usage"] <= 100 for c in s["cpu"])
+    assert {u["reason"] for u in sampling["unavailable"]} <= {"warmup", "counter_regressed", "no_ticks"}
+
+
+def test_oneshot_reports_unusable_cpus(monkeypatch):
+    """The one-off path uses the same rules: a CPU that appears between its two readings warms up, one whose
+    iowait went down is counter_regressed, and the others are still measured."""
+    p = Proc(monkeypatch)
+    monkeypatch.setattr(common.time, "sleep", lambda seconds: None)
+    p.readings += [{0: idle_busy(0, 0), 1: [0, 0, 0, 0, 50, 0, 0, 0]},
+                   {0: idle_busy(10, 10), 1: [0, 0, 0, 100, 40, 0, 0, 0], 2: idle_busy(5, 5)}]
+    s = common.collect()
+    assert [(c["id"], c["usage"]) for c in s["cpu"]] == [(0, 50.0)]
+    assert s["cpu_sampling"]["mode"] == "oneshot" and s["cpu_sampling"]["unavailable"] == [
+        {"id": 1, "reason": "counter_regressed"}, {"id": 2, "reason": "warmup"}]
