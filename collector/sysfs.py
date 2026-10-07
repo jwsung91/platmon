@@ -6,7 +6,12 @@ import re
 # Host paths a container cannot see at their usual place (Docker hides /sys/firmware and has its own /).
 # Point them at bind mounts there; see compose.yaml.
 DEVICE_TREE = os.environ.get("PLATMON_DEVICE_TREE", "/proc/device-tree")
-DISK = os.environ.get("PLATMON_DISK", "/")
+HOST_ROOT = os.environ.get("PLATMON_HOST_ROOT", "/")  # the host's / : disk usage, /etc/os-release, ...
+
+
+def host_path(path):
+    """path on the host's root filesystem (unchanged outside a container)."""
+    return os.path.join(HOST_ROOT, path.lstrip("/"))
 
 
 def read(path, default=None):

@@ -20,11 +20,21 @@ def gib(b):
     return f"{b / 2**30:.1f}G"
 
 
+SYSTEM_LABELS = {"os": "", "kernel": "kernel ", "arch": "", "hostname": "host ", "l4t": "L4T "}  # others: "key value"
+
+
+def system_line(system):
+    """One line from the system entries, whatever the board added; empty for servers without them."""
+    return " · ".join(SYSTEM_LABELS.get(k, f"{k} ") + str(v) for k, v in (system or {}).items() if v)
+
+
 def render(s):
     up = int(s["uptime"])
+    system = system_line(s.get("system"))
     lines = [
         f"{s['model']}",
         f"{s['platform']}   " + (f"mode {s['power_mode']}   " if s["power_mode"] else "") + f"up {up // 86400}d {up % 86400 // 3600:02}:{up % 3600 // 60:02}",
+        *([system] if system else []),
         "",
     ]
     for c in s["cpu"]:

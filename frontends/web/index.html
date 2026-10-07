@@ -29,6 +29,7 @@
 <header>
   <h1 id="model">platmon</h1>
   <div class="muted" id="meta"></div>
+  <div class="muted" id="sys"></div>
   <div id="err"></div>
 </header>
 <div class="grid">
@@ -42,12 +43,17 @@ const $ = id => document.getElementById(id);
 const gib = b => (b / 2 ** 30).toFixed(1) + 'G';
 const row = (label, pct, text) =>
   `<div class="row"><span>${label}</span><div class="track"><div class="fill${pct > 85 ? ' hot' : ''}" style="width:${Math.min(pct, 100)}%"></div></div><span>${text}</span></div>`;
+// system entries are listed as they come, so board-specific ones (e.g. Jetson's l4t) need no change here
+const SYSTEM_LABELS = {os: '', kernel: 'kernel ', arch: '', hostname: 'host ', l4t: 'L4T '};
+const systemLine = sys => Object.entries(sys || {}).filter(([, v]) => v)
+  .map(([k, v]) => (k in SYSTEM_LABELS ? SYSTEM_LABELS[k] : k + ' ') + v).join(' · ');
 const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
 
 function render(s) {
   const up = Math.floor(s.uptime);
   $('model').textContent = s.model;
   $('meta').textContent = `${s.platform} · ${s.power_mode ? 'mode ' + s.power_mode + ' · ' : ''}up ${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
+  $('sys').textContent = systemLine(s.system);
   $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('');
   const m = s.memory, d = s.disk, g = s.gpu;
   $('res').innerHTML =

@@ -1,7 +1,7 @@
-"""Jetson-only data: GPU load and clock, nvpmodel power mode, pwm_tach fan speed."""
+"""Jetson-only data: GPU load and clock, nvpmodel power mode, pwm_tach fan speed, L4T release."""
 import re
 
-from .sysfs import hwmon_chips, read, read_int
+from .sysfs import host_path, hwmon_chips, read, read_int
 
 
 def gpu(root="/sys"):
@@ -20,6 +20,12 @@ def power_mode(status, conf_text):
     return m.group(1) if m else mode_id
 
 
+def l4t(text):
+    """/etc/nv_tegra_release ("# R36 (release), REVISION: 5.2, ...") -> "R36.5.2"."""
+    m = re.search(r"R(\d+) \(release\), REVISION: ([\d.]+)", text or "")
+    return f"R{m.group(1)}.{m.group(2)}" if m else None
+
+
 def tach_fans(root="/sys/class/hwmon"):
     """pwm_tach reports fan speed in a non-standard "rpm" file; its pwm half is the pwmfan chip."""
     fans = []
@@ -35,3 +41,6 @@ def extend(stats):
     stats["power_mode"] = power_mode(status, read("/etc/nvpmodel.conf")) if status else None
     stats["gpu"] = gpu()
     stats["fans"] += tach_fans()
+    release = l4t(read(host_path("/etc/nv_tegra_release")))
+    if release:
+        stats["system"]["l4t"] = release

@@ -5,6 +5,7 @@ One collector core runs on the device; the frontends enabled in its config (HTTP
 
 - No dependencies: Python 3.9+ standard library only
 - Reads `/proc` and `/sys` directly (CPU, GPU on Jetson, memory, disk, temperatures, power rails, fans)
+- Shows the OS release, kernel, architecture and hostname (plus the L4T release on Jetson)
 - Detects the platform (Jetson Orin / Xavier, Raspberry Pi, PC, Linux) and hides what the board lacks
 
 ## Usage
@@ -75,8 +76,9 @@ Without the scripts: `docker compose up -d --build` (Jetson: `docker compose -f 
 - `/sys/firmware` → board detection. Docker hides the device tree, so without this mount a Jetson
   shows up as "PC" and loses its GPU, power mode and fan data. The startup log line
   `platmon: platform …` shows what was detected.
-- `/` (not recursive) → disk usage of the host's root filesystem. The host's `/proc`, `/sys` and
-  `/run` are not exposed through it.
+- `/` (not recursive) → the host's root filesystem: disk usage, and the OS release (`/etc/os-release`)
+  and L4T release so they show the host, not the image. The host's `/proc`, `/sys` and `/run` are not
+  exposed through it.
 - `./platmon.ini` → config. Keep `[http] port = 9797` inside the container and change the
   published port in `compose.yaml` instead (the health check uses 9797).
 - Runs as an unprivileged user, needs no NVIDIA container runtime, and is marked unhealthy while
