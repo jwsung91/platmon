@@ -67,3 +67,43 @@ def test_render_server_without_system_info():
 def test_render_unknown_system_entry():
     """Entries added by a future board module show up as "key value" without changing the viewer."""
     assert "firmware 1.2" in render(dict(FULL, system={"os": "X", "firmware": "1.2"}))
+
+
+CLI = str(__import__("pathlib").Path(__file__).parent.parent / "frontends" / "cli.py")
+
+
+def run_cli(*args):
+    import subprocess
+    import sys
+    return subprocess.run([sys.executable, CLI, *args], capture_output=True, text=True, timeout=20)
+
+
+def test_once_prints_one_snapshot():
+    from test_server import serve
+    httpd, base = serve(FULL)
+    try:
+        r = run_cli("--once", base.removeprefix("http://"))
+    finally:
+        httpd.shutdown()
+    assert r.returncode == 0
+    assert r.stdout.startswith("Test Board\n") and "\033[" not in r.stdout  # no screen clearing
+
+
+def test_not_running_explains_and_exits():
+    import socket
+    with socket.socket() as s:  # a port nothing listens on
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    r = run_cli(f"localhost:{port}")  # without --once too: fail once, no endless retry loop
+    assert r.returncode == 1
+    assert f"platmon is not running on localhost:{port}" in r.stderr and "scripts/docker/start.sh" in r.stderr
+
+
+def test_no_current_data_is_explained():
+    from test_server import serve
+    httpd, base = serve(None)  # service up, but no snapshot: 503
+    try:
+        r = run_cli("--once", base.removeprefix("http://"))
+    finally:
+        httpd.shutdown()
+    assert r.returncode == 1 and "answered 503" in r.stderr and "no current data" in r.stderr

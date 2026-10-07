@@ -10,29 +10,35 @@ One collector core runs on the device as a background service with an HTTP API; 
 
 ## Usage
 
-On the device:
+platmon runs as a background service on the device (see "Run at boot": systemd or Docker), and you look at
+it with the `platmon` command, a browser, or `curl`:
 
 ```sh
-python3 platmon.py [platmon.ini]             # defaults: HTTP API + web page on :9797
+platmon                          # this device: live view, Ctrl+C to quit
+platmon 192.168.55.53            # another device (host[:port], default port 9797)
+platmon 192.168.55.53 2          # update every 2 s
+platmon --once                   # one snapshot without clearing the screen (scripts, ssh, logs)
 ```
 
-`platmon.ini` lists every option with its default (collection interval, HTTP bind/port, web page on/off).
+If the service is not running, `platmon` says so and how to start it. Install the command with
+`scripts/install-cli.sh` (or `--user` for `~/.local/bin`, no sudo); `scripts/systemd/install.sh` installs
+it for you. It is one standard-library Python file (`frontends/cli.py`), so it also works on a PC that
+only watches a device.
 
-From anywhere on the network, open `http://<host>:9797` in a browser, or use the remote terminal client
-(`frontends/cli.py` needs nothing else, copy it anywhere):
+In a browser: `http://<host>:9797`. Raw data: `http://<host>:9797/api/stats`. The API has no
+authentication. Run it on trusted networks only.
 
-```sh
-python3 frontends/cli.py <host>[:port] [interval]
-```
-
-Raw data: `http://<host>:9797/api/stats`. The API has no authentication. Run it on trusted networks only.
+To run the server in the foreground instead (e.g. while developing):
+`python3 platmon.py [platmon.ini]`. `platmon.ini` lists every option with its default (collection
+interval, HTTP bind/port, web page on/off).
 
 ### Layout
 
 ```
 platmon.py   server: config -> one collector core -> HTTP API and web page
 collector/   core: collect() (common.py for any Linux, jetson.py for Jetson) and the background Sampler
-frontends/   server.py (HTTP + web/), cli.py (terminal client)
+frontends/   server.py (HTTP + web/), cli.py (terminal client, installed as `platmon`)
+scripts/     systemd/ and docker/ start/stop scripts, install-cli.sh
 tests/
 ```
 
@@ -44,10 +50,10 @@ one way while the other is running (or, for systemd, still enabled at boot).
 **systemd** (the scripts ask for sudo):
 
 ```sh
-scripts/systemd/install.sh              # install or update (after git pull), enable at boot, start
+scripts/systemd/install.sh              # install or update (after git pull), enable at boot, start, add `platmon`
 scripts/systemd/start.sh                # start, or restart to apply config changes; checks /api/stats
 scripts/systemd/stop.sh                 # stop for now; still enabled, so it starts again at boot
-scripts/systemd/uninstall.sh            # stop, disable, remove /opt/platmon and the unit; keeps the config
+scripts/systemd/uninstall.sh            # stop, disable, remove /opt/platmon, the unit and `platmon`; keeps the config
 scripts/systemd/uninstall.sh --purge    # ... and remove /etc/platmon too
 ```
 
@@ -67,6 +73,8 @@ The container monitors the host, so it needs a few read-only host mounts (all se
 scripts/docker/start.sh    # build and start; on Jetson adds compose.jetson.yaml (nvpmodel power mode); waits until healthy
 scripts/docker/stop.sh     # stop and remove the container (the image stays)
 ```
+
+Look at it with `platmon` after installing the command once: `scripts/install-cli.sh`.
 
 Without the scripts: `BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose up -d --build` (Jetson: add
 `-f compose.yaml -f compose.jetson.yaml`). The variable keeps the image id stable when nothing changed;

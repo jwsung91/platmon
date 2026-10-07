@@ -54,6 +54,7 @@ for _ in $(seq 30); do
         healthy)
             docker compose "${files[@]}" logs --no-log-prefix --tail 2
             echo "platmon is up on port 9797 (restarts with Docker at boot) - $change"
+            command -v platmon >/dev/null || echo "to look at it from a shell: scripts/install-cli.sh, then platmon"
             exit 0 ;;
         unhealthy) break ;;
     esac
