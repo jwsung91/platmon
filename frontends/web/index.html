@@ -76,7 +76,8 @@ const TIMEOUT_MS = 5000;  // a request that hangs must not stop the updates
 let shown = null;       // {kind: 'sample' | 'legacy' | 'invalid', seq, ageMs, t0}
 let failing = false;    // the last request failed: what is shown is the last good data, not current
 let checking = false;   // tab came back: browser time may have stopped while hidden, wait for a new answer
-let inflight = false, refresh = null;
+let inflight = null, refresh = null;  // inflight: the running request's AbortController
+let epoch = 0;          // counts tab returns: an answer to a request started before the latest one proves nothing
 
 function sampleOf(s, t0) {
   if (!('schema_version' in s) && !('sample' in s)) return {kind: 'legacy', t0};
@@ -101,8 +102,7 @@ function showAge() {
 // stay on screen with their age, and the message says what failed.
 async function tick() {
   clearTimeout(refresh);
-  inflight = true;
-  const ctl = new AbortController();
+  const ctl = inflight = new AbortController(), mine = epoch;
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   let stage = 'connect';
   try {
@@ -112,12 +112,14 @@ async function tick() {
     stage = 'read';
     const s = await r.json();
     const t0 = performance.now();
+    if (mine !== epoch) return;  // started before the tab came back: drop it, finally asks again
     stage = 'render';
     render(s);
     shown = sampleOf(s, t0);
     failing = checking = false;
     $('err').textContent = '';
   } catch (e) {
+    if (mine !== epoch) return;
     failing = true;  // shown keeps its own age: a failure does not make old data newer
     checking = false;
     $('err').textContent = e.name === 'AbortError' ? `No answer within ${TIMEOUT_MS / 1000} s`
@@ -126,17 +128,19 @@ async function tick() {
       : e.message;
   } finally {
     clearTimeout(timer);
-    inflight = false;
-    refresh = setTimeout(tick, 1000);
+    inflight = null;
+    refresh = setTimeout(tick, mine === epoch ? 1000 : 0);
     showAge();
   }
 }
 setInterval(showAge, 1000);  // the age keeps moving while a request hangs
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
+  epoch++;
   checking = true;
   showAge();
-  if (!inflight) tick();  // the running request, if any, brings the new answer
+  if (inflight) inflight.abort();  // its answer would not count; its finally starts the new request
+  else tick();
 });
 tick();
 </script>

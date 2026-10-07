@@ -26,7 +26,8 @@ def test_every_step_ran(steps):
                            "sample", "same_sample", "sample_503", "sample_hang_waiting", "sample_hang",
                            "bad_metadata", "new_instance", "new_sequence",
                            "tab_return_checking", "tab_return_verified",
-                           "tab_return_while_requesting", "tab_return_while_requesting_done"]
+                           "tab_return_while_requesting", "old_answer_ignored", "tab_return_rechecked",
+                           "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout"]
     for s in steps.values():
         assert s["shows_data"], s     # the last good values stay on screen
         assert s["age_timers"] == 1, s  # one age display timer, never more
@@ -77,7 +78,26 @@ def test_tab_return(steps):
     assert c["age"].startswith("Checking… last seen: sample #2") and c["fetches"] == steps["new_sequence"]["fetches"] + 1
     assert c["refresh_scheduled"] == 0  # the pending refresh was replaced by this request, not added to
     assert steps["tab_return_verified"]["age"] == "Sample #600 · data age 0 s"
+
+
+
+def test_tab_return_does_not_trust_a_request_started_before(steps):
+    """A request started before the tab was hidden is cancelled; if its answer still arrives, it is dropped
+    (it carries an age from before the break), and only the answer to a new request ends the check."""
     w = steps["tab_return_while_requesting"]
     assert w["age"].startswith("Checking… ") and w["fetches"] == steps["tab_return_verified"]["fetches"] + 1
-    assert steps["tab_return_while_requesting_done"]["fetches"] == w["fetches"]  # no second request
-    assert steps["tab_return_while_requesting_done"]["age"] == "Sample #601 · data age 0 s"
+    late = steps["old_answer_ignored"]
+    assert late["age"] == "Checking… last seen: sample #600 · data age 601 s"  # not "sample #601 · data age 0 s"
+    assert late["fetches"] == w["fetches"] and late["refresh_scheduled"] == 1  # one new request due, no other
+    new = steps["tab_return_rechecked"]
+    assert new["age"] == "Sample #601 · data age 1 s" and new["fetches"] == late["fetches"] + 1  # same sample is fine
+
+
+def test_failed_check_after_tab_return_stays_not_current(steps):
+    aborted = steps["old_request_aborted"]
+    assert aborted["err"] == "" and aborted["age"].startswith("Checking… ")  # the cancel is not reported as an error
+    failed = steps["tab_return_check_503"]
+    assert failed["fetches"] == aborted["fetches"] + 1
+    assert failed["err"].startswith("No current data") and failed["age"].startswith("Last good: sample #601")
+    timeout = steps["tab_return_check_timeout"]
+    assert timeout["err"] == "No answer within 5 s" and timeout["age"].endswith("(not current)")

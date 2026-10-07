@@ -32,7 +32,7 @@ const reply = (status, body) => ({ok: status >= 200 && status < 300, status,
 const ok = body => () => Promise.resolve(reply(200, body));
 const hang = signal => new Promise((_, reject) => signal && signal.addEventListener('abort',
   () => reject(Object.assign(new Error('aborted'), {name: 'AbortError'}))));
-let release;  // answers a held request when the test says so
+let release;  // answers a held request when the test says so; it ignores abort, like an answer already on its way
 const held = body => () => new Promise(resolve => { release = () => resolve(reply(200, body)); });
 
 const answers = [];  // what the next requests get, in order
@@ -41,7 +41,8 @@ global.fetch = (url, opts) => { fetches++; return answers.shift()((opts || {}).s
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
-  refresh_scheduled: timers.filter(t => t.fn && t.ms === 1000).length, age_timers: intervals.length, fetches,
+  refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
+  age_timers: intervals.length, fetches,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -74,7 +75,21 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
   answers.push(held(meta('b', 600, 300)));
   tabReturns(); report('tab_return_checking');
   release(); await settle(); report('tab_return_verified');
+  // a request started before the tab was hidden, answered after it came back: its 300 ms is 10 min old
   await next(held(meta('b', 601, 300)));
-  tabReturns(); report('tab_return_while_requesting');  // the running request is the check
-  release(); await settle(); report('tab_return_while_requesting_done');
+  now += 600000;
+  tabReturns(); report('tab_return_while_requesting');  // that request is cancelled, not trusted
+  release(); await settle(); report('old_answer_ignored');  // arrives anyway: dropped, a new request is due
+  answers.push(ok(meta('b', 601, 900)));  // the new request may well get the same sample
+  fire(0); await settle(); report('tab_return_rechecked');
+
+  // the check after a return fails: still not current
+  await next(hang);
+  now += 600000;
+  tabReturns();  // the old request rejects with AbortError, which is not reported as a timeout
+  await settle(); report('old_request_aborted');
+  answers.push(() => Promise.resolve(reply(503, {error: 'no current data'})));
+  fire(0); await settle(); report('tab_return_check_503');
+  answers.push(hang);
+  tabReturns(); now += 5000; fire(5000); await settle(); report('tab_return_check_timeout');
 })();
