@@ -57,15 +57,18 @@ class Sampler:
     def start(self):
         """Starts the one writer thread; again while running does nothing. A stopped sampler cannot restart:
         make a new one."""
-        if self._stop.is_set():
-            raise RuntimeError("sampler was stopped; create a new Sampler instead of restarting it")
-        if self._thread is None:
-            self._thread = threading.Thread(target=self._run, name="sampler", daemon=True)
-            self._thread.start()
+        with self._lock:  # check and create as one step, so racing callers cannot make two writers
+            if self._stop.is_set():
+                raise RuntimeError("sampler was stopped; create a new Sampler instead of restarting it")
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name="sampler", daemon=True)
+                self._thread.start()  # returns once the thread runs; _run takes the lock only later
         return self
 
     def stop(self):
-        self._stop.set()
+        """Asks the writer to end after its current round; does not wait for it."""
+        with self._lock:
+            self._stop.set()
 
     def _run(self):
         while not self._stop.is_set():

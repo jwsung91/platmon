@@ -308,6 +308,45 @@ def test_start_twice_is_one_writer_and_restart_is_refused():
         s.start()
 
 
+def test_concurrent_start_makes_one_writer(monkeypatch):
+    """Two callers race into start(): the first is held while it creates the writer thread, the second
+    arrives meanwhile. Only one writer may be created and only one collect may run."""
+    real = threading.Thread
+    creating, go, second = threading.Event(), threading.Event(), threading.Event()
+    created, collects, collected = [], [], threading.Event()
+
+    class Gated(real):
+        def __init__(self, *args, **kw):
+            if kw.get("name") == "sampler":
+                created.append(self)
+                if len(created) == 1:
+                    creating.set()
+                    go.wait(5)
+                else:
+                    second.set()
+            super().__init__(*args, **kw)
+
+    s = Sampler(lambda: collects.append(1) or collected.set() or {}, interval=10)
+    callers = [real(target=s.start) for _ in range(2)]
+    monkeypatch.setattr(threading, "Thread", Gated)
+    try:
+        callers[0].start()
+        assert creating.wait(5)
+        callers[1].start()
+        assert not second.wait(0.2)  # the second caller must not get to create a thread at all
+        go.set()
+        for t in callers:
+            t.join(5)
+        assert collected.wait(5)
+    finally:
+        go.set()
+        s.stop()
+        for t in created:
+            t.join(5)  # stop() ends a writer after its round; bounded
+    assert len(created) == 1 and s._thread is created[0]
+    assert collects == [1]
+
+
 def test_pick_clock(monkeypatch):
     if hasattr(time, "CLOCK_BOOTTIME"):
         assert pick_clock()[1] == {"source": "boottime", "suspend_aware": True}
