@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""platmon: start the collector core once, then the frontends enabled in the config.
+"""platmon server: start the collector core once, then the outputs enabled in the config (today: the HTTP API
+and web page). It runs as a background service (scripts/systemd, scripts/docker); look at it with the `platmon`
+command (frontends/cli.py), a browser, or http://<host>:9797/text.
 
-Usage: python3 platmon.py [config.ini] [--frontends http,terminal]
+Usage: python3 platmon.py [config.ini] [--frontends http]
 Without a config file the built-in defaults apply (see platmon.ini).
 """
 import argparse
@@ -11,20 +13,22 @@ import sys
 
 from collector import BOARD, PLATFORM, collect
 from collector.sampler import Sampler
-from frontends import server, terminal
+from frontends import server
 
-FRONTENDS = {"http": server.start, "terminal": terminal.start}  # name -> start(sampler, cfg section)
+FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outputs that run inside the core
 
 DEFAULTS = {  # the type of each default is the type its config value must parse as
     "core": {"interval": 1.0},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
-    "terminal": {"enabled": False},
 }
+REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
 RANGES = {("core", "interval"): (0.1, 3600), ("http", "port"): (1, 65535)}
 
 
 def check(cfg):
     """Reject unknown sections and keys (typos), values of the wrong type and values out of range."""
+    for section in set(cfg.sections()) & REMOVED.keys():
+        raise ValueError(f"[{section}] is no longer supported: {REMOVED[section]}")
     unknown = set(cfg.sections()) - DEFAULTS.keys()
     if unknown:
         raise ValueError(f"unknown config section(s): {', '.join(sorted(unknown))}")
@@ -67,7 +71,7 @@ def load_config(path=None, frontends=None):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="platmon platform monitor")
+    p = argparse.ArgumentParser(description="platmon server: collector core + HTTP API (view it with the platmon command)")
     p.add_argument("config", nargs="?", help="INI file; built-in defaults apply without one")
     p.add_argument("--frontends", help=f"comma-separated, overrides enabled= in the config ({','.join(FRONTENDS)})")
     a = p.parse_args(argv)

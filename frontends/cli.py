@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Remote terminal client for platmon: reads a host's /api/stats. Standalone; copy this file anywhere.
-render() is shared with the in-process terminal frontend.
 
 Usage: python3 frontends/cli.py [host[:port]] [interval_sec]   (default localhost:9797, 1s)
-On the device itself, use the launcher instead: python3 platmon.py --frontends terminal
 """
 import json
 import sys
