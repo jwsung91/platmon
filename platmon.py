@@ -51,7 +51,8 @@ def check(cfg):
 
 
 def load_config(path=None, frontends=None):
-    """Defaults < config file < frontends (list of names; enables exactly those). Raises ValueError."""
+    """Defaults < config file < frontends (list of names; enables exactly those). Raises ValueError, also when
+    the result would start nothing: scripts/systemd/install.sh relies on this to refuse before changing anything."""
     cfg = configparser.ConfigParser(interpolation=None)
     cfg.read_dict({s: {k: ("yes" if v else "no") if isinstance(v, bool) else str(v) for k, v in o.items()}
                    for s, o in DEFAULTS.items()})
@@ -67,6 +68,9 @@ def load_config(path=None, frontends=None):
             raise ValueError(f"unknown frontend(s): {', '.join(sorted(unknown))}; choose from {', '.join(FRONTENDS)}")
         for name in FRONTENDS:
             cfg[name]["enabled"] = "yes" if name in frontends else "no"
+    if not any(cfg[name].getboolean("enabled") for name in FRONTENDS):
+        raise ValueError(f"nothing to run: every output is disabled; set enabled = yes in [{'] or ['.join(FRONTENDS)}]"
+                         " (or pass --frontends)")
     return cfg
 
 
