@@ -36,7 +36,6 @@ def test_frontends_flag_enables_exactly_those(tmp_path):
     ini = tmp_path / "p.ini"
     ini.write_text("[http]\nenabled = no\n")
     assert enabled(load_config(str(ini), ["http"])) == {"http"}
-    assert enabled(load_config(str(ini), [])) == set()
 
 
 @pytest.mark.parametrize("ini, frontends, error", [
@@ -51,6 +50,9 @@ def test_frontends_flag_enables_exactly_those(tmp_path):
     ("[http]\nenabled = maybe\n", None, "is not a valid bool"),
     ("[http]\nport = 70000\n", None, "out of range"),
     ("[core]\ninterval = 0\n", None, "out of range"),  # 0 would make the sampler spin
+    # loads fine but would start nothing: refused here, so install.sh refuses before replacing anything
+    ("[http]\nenabled = no\n", None, r"nothing to run: every output is disabled; set enabled = yes in \[http\]"),
+    ("", [], "nothing to run"),  # --frontends with no name
     ("[core]\ninterval = -1\n", None, "out of range"),
     ("port = 1\n", None, "cannot parse config"),  # no section header
     ("[http]\nbind = 10%\n", ["http"], None),  # % is literal, not interpolation
