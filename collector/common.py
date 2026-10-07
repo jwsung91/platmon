@@ -67,9 +67,17 @@ def thermal_zones(root="/sys/class/thermal"):
 
 
 def cpu_times(path="/proc/stat"):
-    """{cpu id: jiffies} for online cores; offline cores are absent from /proc/stat."""
+    """{cpu id: jiffies} for online cores; offline cores are absent from /proc/stat.
+    Every cpuN line must have at least user..steal (8 counters, Linux 2.6.11+); guest fields may follow.
+    Raises ValueError otherwise, so a broken reading fails the collection instead of becoming a baseline."""
+    times = {}
     with open(path) as f:
-        times = {int(m.group(1)): list(map(int, l.split()[1:])) for l in f if (m := re.match(r"cpu(\d+)", l))}
+        for line in f:
+            name, *fields = line.split() or [""]
+            if re.fullmatch(r"cpu\d+", name):
+                if len(fields) < 8:
+                    raise ValueError(f"{name}: {len(fields)} counters in /proc/stat, need at least 8")
+                times[int(name[3:])] = list(map(int, fields))
     if not times:  # never a host with 0 CPUs: the file could not be read as expected
         raise ValueError("no per-cpu lines in /proc/stat")
     return times
@@ -85,7 +93,10 @@ def cpu_percent(before, after):
         if n not in before:  # new, or back online: no earlier reading of this core to compare with
             unavailable[n] = "warmup"
             continue
-        delta = [a - b for a, b in zip(after[n][:8], before[n][:8])]
+        a, b = after[n][:8], before[n][:8]
+        if len(a) != len(b) or len(a) < 5:  # never cut short by zip: callers pass whole readings
+            raise ValueError(f"cpu{n}: readings with {len(b)} and {len(a)} counters cannot be compared")
+        delta = [x - y for x, y in zip(a, b)]
         total, idle = sum(delta), delta[3] + delta[4]
         if any(d < 0 for d in delta):  # e.g. iowait can go backwards; not a reboot, not 0 %, just unusable
             unavailable[n] = "counter_regressed"
@@ -109,24 +120,26 @@ class CpuCounters:
         self._last = None  # (elapsed ns when the reading began, cpu_times()) of the last successful reading
 
     def sample(self):
-        """({id: usage}, cpu_sampling). Every successful reading becomes the next baseline, whatever the
-        result; a failed one clears the baseline and raises, so the collection fails and restarts warmup."""
+        """({id: usage}, cpu_sampling). Every valid reading becomes the next baseline, also when it gives no
+        usage (counter_regressed, no_ticks, invalid_interval, gap); a failed or invalid one clears the
+        baseline and raises, so the collection fails and the next reading restarts warmup."""
         try:
             now = self._clock()
             times = cpu_times()
+            last = self._last
+            window = None if last is None else now - last[0]
+            if last is None:
+                usage, unavailable = {}, dict.fromkeys(times, "warmup")
+            elif window <= 0:
+                usage, unavailable, window = {}, dict.fromkeys(times, "invalid_interval"), None
+            elif self._max_gap is not None and window > self._max_gap:
+                usage, unavailable = {}, dict.fromkeys(times, "gap")
+            else:
+                usage, unavailable = cpu_percent(last[1], times)
         except Exception:
             self._last = None
             raise
-        last, self._last = self._last, (now, times)
-        window = None if last is None else now - last[0]
-        if last is None:
-            usage, unavailable = {}, dict.fromkeys(times, "warmup")
-        elif window <= 0:
-            usage, unavailable, window = {}, dict.fromkeys(times, "invalid_interval"), None
-        elif self._max_gap is not None and window > self._max_gap:
-            usage, unavailable = {}, dict.fromkeys(times, "gap")
-        else:
-            usage, unavailable = cpu_percent(last[1], times)
+        self._last = (now, times)  # only once the reading was usable
         return usage, {"mode": self.mode, "window_ms": None if window is None else round(window / 1e6, 3),
                        "unavailable": [{"id": n, "reason": r} for n, r in sorted(unavailable.items())]}
 

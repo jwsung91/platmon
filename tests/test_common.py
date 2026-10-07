@@ -135,14 +135,61 @@ def test_read_failure_raises_and_restarts_warmup(monkeypatch):
     assert usage == {} and sampling["unavailable"] == [{"id": 0, "reason": "warmup"}]
 
 
-def test_cpu_times_without_cpu_lines_is_an_error(tmp_path):
+@pytest.mark.parametrize("text", [
+    "cpu  1 2 3 4 5 6 7 8\nintr 0\n",            # the total line only: not "0 CPUs"
+    "cpu0 1 2 3 4 5 6 7 8\ncpu2 1 x 3 4 5 6 7 8\n",  # a counter that is not a number
+    "cpu0\n",                                      # no counters
+    "cpu0 1 0 0 1\n",                              # fewer than user..steal
+    "cpu0 1 2 3 4 5 6 7 8\ncpu1 1 2 3 4 5 6 7",    # last line short, no trailing newline
+])
+def test_cpu_times_rejects_broken_readings(tmp_path, text):
     stat = tmp_path / "stat"
-    stat.write_text("cpu  1 2 3 4 5 6 7 8\nintr 0\n")  # the total line only: not "0 CPUs"
+    stat.write_text(text)
     with pytest.raises(ValueError):
         cpu_times(str(stat))
-    stat.write_text("cpu  1 2 3 4\ncpu0 1 2 3 4 5 6 7 8 0 0\ncpu2 1 x\n")
-    with pytest.raises(ValueError):  # a line that does not parse
-        cpu_times(str(stat))
+
+
+def test_cpu_times_reads_eight_or_more_counters(tmp_path):
+    stat = tmp_path / "stat"
+    stat.write_text("cpu  9 9 9 9 9 9 9 9 9 9\ncpu0 1 2 3 4 5 6 7 8\ncpu1 1 2 3 4 5 6 7 8 9 10\nctxt 5\n")
+    assert cpu_times(str(stat)) == {0: [1, 2, 3, 4, 5, 6, 7, 8], 1: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+
+
+def test_cpu_percent_does_not_cut_readings_short():
+    with pytest.raises(ValueError):
+        cpu_percent({0: [0] * 8}, {0: [1, 0, 0, 1, 0]})
+
+
+def stat_files(tmp_path, monkeypatch, lines):
+    """The real /proc/stat parser on a sequence of files, one per reading."""
+    paths = []
+    for i, line in enumerate(lines):
+        paths.append(tmp_path / f"stat{i}")
+        paths[-1].write_text("cpu  0 0 0 0 0 0 0 0\n" + line + "\n")
+    real = common.cpu_times
+    monkeypatch.setattr(common, "cpu_times", lambda: real(str(paths.pop(0))))
+
+
+GOOD = ["cpu0 0 0 0 0 0 0 0 0", "cpu0 2 0 0 2 0 0 0 0", "cpu0 3 0 0 3 0 0 0 0"]
+
+
+@pytest.mark.parametrize("first_ok", [True, False])
+def test_broken_reading_is_not_a_baseline(tmp_path, monkeypatch, first_ok):
+    """A short line fails that reading and clears the baseline; the next valid one warms up, then measures."""
+    stat_files(tmp_path, monkeypatch, (GOOD[:1] if first_ok else []) + ["cpu0 1 0 0 1"] + GOOD[1:])
+    now = [0]
+    c = CpuCounters(lambda: now[0], max_gap=5.0)
+
+    def sample():
+        now[0] += 10**9
+        return c.sample()
+
+    if first_ok:
+        assert sample()[1]["unavailable"] == [{"id": 0, "reason": "warmup"}]
+    with pytest.raises(ValueError):
+        sample()
+    assert sample() == ({}, {"mode": "interval", "window_ms": None, "unavailable": [{"id": 0, "reason": "warmup"}]})
+    assert sample() == ({0: 50.0}, {"mode": "interval", "window_ms": 1000.0, "unavailable": []})
 
 
 def test_counters_are_independent(monkeypatch):

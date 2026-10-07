@@ -105,9 +105,13 @@ types are the same, but the numbers average over a different window: a short bur
 The service's CPU baseline is the last successful reading, not the last published snapshot: when a
 collection reads the CPUs and then fails on another sensor (or is dropped as too slow), nothing is
 published, but the next window still starts at that reading, so it never spans readings that were not
-taken. A window longer than the gap limit is not used. A failed `/proc/stat` read fails the collection
-(`collection_failed`) and the next reading starts with `warmup`. The service's first snapshot therefore
-has `cpu: []`, all CPUs `warmup`, and is still a normal, current snapshot (`ready`).
+taken. A window longer than the gap limit is not used. A `/proc/stat` read that fails, or has a `cpuN`
+line with fewer than the 8 counters user..steal, fails the collection (`collection_failed`), is not used
+as a baseline, and the next valid reading starts with `warmup`.
+
+The service's first CPU reading is all `warmup`, so a snapshot made from it has `cpu: []` and is still a
+normal, current snapshot (`ready`). Usually that is the first published snapshot; if the first collection
+read the CPUs and then failed on another sensor, the first published one already has CPU usage.
 
 Limits: CPUs that go offline and come back between two readings are not noticed (their counters continue
 or are caught as `counter_regressed`); the lines of `/proc/stat` are not read at one instant.

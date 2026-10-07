@@ -436,3 +436,39 @@ def test_cpu_window_ignores_wall_clock_steps(monkeypatch, step):
     s._attempt()
     stats = s.read()[0]
     assert stats["cpu_sampling"]["window_ms"] == 1250.0 and stats["cpu"][0]["usage"] == 25.0
+
+
+def test_broken_cpu_reading_fails_the_collection(tmp_path, monkeypatch):
+    """A broken /proc/stat reading is collection_failed (not published), first or later; the next valid
+    reading is published with warmup, and the one after that is measured."""
+    import functools
+
+    import collector
+    from test_common import stat_files
+
+    bad, good = "cpu0 1 0 0 1", ["cpu0 %d 0 0 %d 0 0 0 0" % (n, n) for n in range(10, 60, 10)]
+    stat_files(tmp_path, monkeypatch, [bad, good[0], good[1], bad, good[2], good[3]])
+    c = Clock()
+    s = fake(functools.partial(collector.collect, CpuCounters(lambda: c.ns, max_gap=5.0)), c)
+
+    def attempt():
+        c.advance(1)
+        s._attempt()
+        return s.read()
+
+    stats, status = attempt()  # broken first reading: nothing published, sequence not started
+    assert stats is None and status["sample"] is None
+    assert status["last_attempt"]["reason"] == "collection_failed"
+    stats, status = attempt()  # recovery: published, CPUs warming up
+    assert stats["sample"]["sequence"] == 1 and stats["cpu"] == [] and status["state"] == "ready"
+    assert stats["cpu_sampling"]["unavailable"] == [{"id": 0, "reason": "warmup"}]
+    good_stats = attempt()[0]
+    assert good_stats["sample"]["sequence"] == 2 and [x["usage"] for x in good_stats["cpu"]] == [50.0]
+    stats, status = attempt()  # broken again: last good values, times and sequence stay
+    assert status["state"] == "degraded" and stats == {**good_stats, "sample": {
+        **good_stats["sample"], "age_ms": 1000.0, "data_age_ms": 1000.0}}
+    stats = attempt()[0]
+    assert stats["sample"]["sequence"] == 3 and stats["cpu"] == []
+    assert stats["cpu_sampling"]["unavailable"] == [{"id": 0, "reason": "warmup"}]
+    stats = attempt()[0]
+    assert stats["sample"]["sequence"] == 4 and stats["cpu_sampling"]["window_ms"] == 1000.0
