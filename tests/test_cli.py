@@ -115,3 +115,9 @@ def test_render_unreadable_gpu_clock_and_fan():
                       fans=[{"name": "CPU fan", "rpm": None, "percent": None}]))
     assert "GPU   " in out and "50.0%" in out and "MHz" not in out.split("GPU")[1].split("\n")[0]
     assert "FAN   CPU fan  n/a" in out
+
+
+@pytest.mark.parametrize("interval", ["0", "-1", "nan", "inf"])
+def test_bad_interval_is_a_usage_error(interval):
+    r = run_cli("localhost", interval)  # refused before connecting or sleeping
+    assert r.returncode == 2 and "interval must be a number greater than 0" in r.stderr
