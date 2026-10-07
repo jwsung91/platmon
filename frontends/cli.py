@@ -8,6 +8,7 @@ The service itself runs in the background: scripts/systemd/install.sh or scripts
 # platmon-cli: marker that lets scripts/install-cli.sh recognise (and only replace) its own command
 import argparse
 import json
+import math
 import sys
 import time
 import urllib.error
@@ -86,8 +87,8 @@ def main(argv=None):
     p.add_argument("interval", nargs="?", type=float, default=1.0, help="seconds between updates, default 1")
     p.add_argument("--once", action="store_true", help="print one snapshot without clearing the screen, then exit")
     a = p.parse_args(argv)
-    if a.interval <= 0:
-        p.error("interval must be greater than 0")
+    if not (math.isfinite(a.interval) and a.interval > 0):  # nan and inf would crash in time.sleep()
+        p.error("interval must be a number greater than 0")
     addr = a.host if ":" in a.host else f"{a.host}:{PORT}"
     url = f"http://{addr}/api/stats"
 
