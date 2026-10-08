@@ -11,7 +11,11 @@ server's answers.
 Baseline: `dabb89f` (product code unchanged on the bench branch). Bench tool: the branch's first commit,
 `a6288e3` (copied to its own directory on each device with `git archive`). Every number below is a
 measured value unless marked as computed; CPU % is of **one core**. Raw per-run records (`results.jsonl`)
-are kept outside the repository.
+are kept outside the repository; their SHA-256 (first 16 hex digits): orin `23c5f184c2ece9c5`, rpi4
+`8abca757e1ad788c`, wsl `41f26b3c256ac513`. The tables were re-aggregated from those files with the
+report code of the bench branch's later commits; the measurement code is still `a6288e3`. The re-check
+found no timeout, pending probe call, skipped tick, dropped record, clock jump or condition mismatch,
+and the CPU % recomputed from the raw rusage and elapsed time matches the recorded values.
 
 ### Environment (anonymised)
 
@@ -32,27 +36,29 @@ min, Raspberry Pi 30 windows / 78.6 min (of 32 / 90).
 
 ### Table 1 — core cost per interval (1 client polling every 1 s)
 
-B0 → B1 → B1 → B0 per interval; "final" is one extra 300 s window per variant. Passive p95: the
-callback's elapsed / thread-CPU time, nearest rank over all B1 collections (n). Attempt p95: elapsed
-time of `Sampler._attempt`. RSS: end of window, B1 minus B0 means. 2nd-half growth: RSS change over the
-second half of the window, largest run.
+B0 → B1 → B1 → B0 per interval; "final" is one extra 300 s window per variant. "Pooled" p95: nearest
+rank over the samples of all valid runs of that row taken together (sample and run counts given).
+"Max of per-run p95": each run's own p95, the largest of them; a different, more conservative number,
+not a pooled p95. Passive: the callback's elapsed / thread-CPU time. Attempt: elapsed time of
+`Sampler._attempt`. RSS: end of window, B1 minus B0 means. 2nd-half growth: RSS change over the second
+half of the window, largest run.
 
-| platform | interval s | B0 CPU % | B1 CPU % | B1-B0 pp | repeat spread pp | passive p95 ms (n) | attempt p95 ms B0 / B1 | RSS B1-B0 MiB | 2nd-half growth KiB B0 / B1 | failed / overrun | actual interval p50 / max ms |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| orin | 0.5 | 3.20, 3.20 | 3.51, 3.59 | +0.350 | 0.072 | 1.34 / 1.32 (480) | 20.2 / 23.1 | -0.45 | 1332 / 4 | 0 / 0 | 500.2 / 500.8 |
-| orin | 1 | 1.75, 1.74 | 1.93, 1.92 | +0.178 | 0.010 | 1.42 / 1.41 (241) | 20.3 / 22.0 | +0.88 | 8 / 0 | 0 / 0 | 1000.2 / 1000.4 |
-| orin | 2 | 0.99, 1.01 | 1.14, 1.13 | +0.144 | 0.020 | 1.46 / 1.44 (120) | 20.4 / 22.6 | -0.70 | 444 / 8 | 0 / 0 | 2000.2 / 2000.4 |
-| orin | 2 (final, 300 s) | 1.00 | 1.12 | +0.121 | single pair | 1.43 / 1.41 (150) | 20.3 / 22.9 | +1.18 | 0 / 0 | 0 / 0 | 2000.2 / 2000.4 |
-| orin | 5 | 0.55, 0.55 | 0.63, 0.61 | +0.070 | 0.028 | 1.46 / 1.46 (48, exploratory) | 20.6 / 22.8 | -0.20 | 1444 / 4 | 0 / 0 | 5000.2 / 5000.5 |
-| rpi4 | 0.5 | 2.29, 2.15 | 2.72, 2.76 | +0.523 | 0.138 | 1.63 / 1.63 (480) | 9.0 / 11.2 | +0.01 | 16 / 8 | 0 / 0 | 500.2 / 500.4 |
-| rpi4 | 1 | 1.39, 1.40 | 1.68, 1.61 | +0.250 | 0.069 | 1.64 / 1.64 (240) | 9.0 / 11.1 | +0.05 | 16 / 8 | 0 / 0 | 1000.2 / 1000.3 |
-| rpi4 | 2 | 0.91, 0.92 | 1.12, 1.11 | +0.202 | 0.015 | 1.65 / 1.65 (120) | 9.2 / 11.2 | +0.04 | 12 / 12 | 0 / 0 | 2000.2 / 2000.4 |
-| rpi4 | 2 (final, 300 s) | 0.90 | 1.11 | +0.208 | single pair | 1.64 / 1.64 (150) | 8.9 / 11.5 | +0.02 | 20 / 12 | 0 / 0 | 2000.2 / 2000.3 |
-| rpi4 | 5 | 0.67, 0.65 | 0.73, 0.79 | +0.100 | 0.052 | 1.90 / 1.74 (48, exploratory) | 9.5 / 11.7 | +0.04 | 12 / 16 | 0 / 0 | 5000.2 / 5000.3 |
-| wsl | 0.5 | 0.67, 0.73 | 0.99, 0.82 | +0.207 | 0.169 | 1.07 / 1.05 (480) | 3.8 / 4.8 | +0.12 | 0 / 0 | 0 / 0 | 500.2 / 503.6 |
-| wsl | 1 | 0.43, 0.44 | 0.54, 0.57 | +0.120 | 0.029 | 1.13 / 0.97 (240) | 3.6 / 5.2 | +0.11 | 0 / 0 | 0 / 0 | 1000.2 / 1004.6 |
-| wsl | 2 | 0.33, 0.27 | 0.36, 0.38 | +0.064 | 0.056 | 0.91 / 0.90 (120) | 3.6 / 4.8 | +1.63 | 0 / 0 | 0 / 0 | 2000.2 / 2005.9 |
-| wsl | 5 | 0.31, 0.24 | 0.28, 0.30 | +0.013 | 0.066 (indistinguishable) | 1.05 / 1.05 (48, exploratory) | 3.8 / 4.9 | +0.16 | 0 / 0 | 0 / 0 | 5000.2 / 5004.2 |
+| platform | interval s | B0 CPU % | B1 CPU % | B1-B0 pp | repeat spread pp | B1 passive p95 ms, pooled: elapsed / CPU (samples, runs) | B1 passive, max of per-run p95 ms | attempt p95 ms, pooled B0 / B1 | RSS B1-B0 MiB | 2nd-half growth KiB B0 / B1 | failed / overrun | actual interval p50 / max ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| orin | 0.5 | 3.20, 3.20 | 3.51, 3.59 | +0.350 | 0.072 | 1.33 / 1.32 (480, 2 runs) | 1.34 | 20.2 / 24.0 | -0.45 | 1332 / 4 | 0 / 0 | 500.2 / 500.8 |
+| orin | 1 | 1.75, 1.74 | 1.93, 1.92 | +0.178 | 0.010 | 1.40 / 1.39 (241, 2 runs) | 1.42 | 20.3 / 22.1 | +0.88 | 8 / 0 | 0 / 0 | 1000.2 / 1000.4 |
+| orin | 2 | 0.99, 1.01 | 1.14, 1.13 | +0.144 | 0.020 | 1.44 / 1.44 (120, 2 runs) | 1.46 | 20.4 / 22.6 | -0.70 | 444 / 8 | 0 / 0 | 2000.2 / 2000.4 |
+| orin | 2 (final, 300 s) | 1.00 | 1.12 | +0.121 | single pair | 1.43 / 1.41 (150, 1 run) | 1.43 | 20.3 / 22.9 | +1.18 | 0 / 0 | 0 / 0 | 2000.2 / 2000.4 |
+| orin | 5 | 0.55, 0.55 | 0.63, 0.61 | +0.070 | 0.028 | 1.46 / 1.45 (48, 2 runs, exploratory) | 1.46 | 20.7 / 22.9 | -0.20 | 1444 / 4 | 0 / 0 | 5000.2 / 5000.5 |
+| rpi4 | 0.5 | 2.29, 2.15 | 2.72, 2.76 | +0.523 | 0.138 | 1.63 / 1.63 (480, 2 runs) | 1.63 | 9.0 / 11.2 | +0.01 | 16 / 8 | 0 / 0 | 500.2 / 500.4 |
+| rpi4 | 1 | 1.39, 1.40 | 1.68, 1.61 | +0.250 | 0.069 | 1.64 / 1.64 (240, 2 runs) | 1.64 | 9.0 / 11.1 | +0.05 | 16 / 8 | 0 / 0 | 1000.2 / 1000.3 |
+| rpi4 | 2 | 0.91, 0.92 | 1.12, 1.11 | +0.202 | 0.015 | 1.65 / 1.64 (120, 2 runs) | 1.65 | 9.3 / 11.2 | +0.04 | 12 / 12 | 0 / 0 | 2000.2 / 2000.4 |
+| rpi4 | 2 (final, 300 s) | 0.90 | 1.11 | +0.208 | single pair | 1.64 / 1.64 (150, 1 run) | 1.64 | 8.9 / 11.5 | +0.02 | 20 / 12 | 0 / 0 | 2000.2 / 2000.3 |
+| rpi4 | 5 | 0.67, 0.65 | 0.73, 0.79 | +0.100 | 0.052 | 1.90 / 1.74 (48, 2 runs, exploratory) | 1.90 | 9.6 / 11.7 | +0.04 | 12 / 16 | 0 / 0 | 5000.2 / 5000.3 |
+| wsl | 0.5 | 0.67, 0.73 | 0.99, 0.82 | +0.207 | 0.169 | 1.00 / 0.99 (480, 2 runs) | 1.07 | 3.8 / 4.9 | +0.12 | 0 / 0 | 0 / 0 | 500.2 / 503.6 |
+| wsl | 1 | 0.43, 0.44 | 0.54, 0.57 | +0.120 | 0.029 | 0.96 / 0.94 (240, 2 runs) | 1.13 | 3.6 / 5.1 | +0.11 | 0 / 0 | 0 / 0 | 1000.2 / 1004.6 |
+| wsl | 2 | 0.33, 0.27 | 0.36, 0.38 | +0.064 | 0.056 | 0.91 / 0.90 (120, 2 runs) | 0.91 | 3.7 / 4.7 | +1.63 | 0 / 0 | 0 / 0 | 2000.2 / 2005.9 |
+| wsl | 5 | 0.31, 0.24 | 0.28, 0.30 | +0.013 | 0.066 (indistinguishable) | 1.03 / 1.04 (48, 2 runs, exploratory) | 1.05 | 3.8 / 5.0 | +0.16 | 0 / 0 | 0 / 0 | 5000.2 / 5004.2 |
 
 Per collection (B0, thread CPU p50): the product collection costs 14.5 ms on the Orin, 7.6 ms on the
 Raspberry Pi and 2.0 ms on WSL; the whole attempt (collection, provenance check, publish) about 0.5-1.3 ms
@@ -64,8 +70,9 @@ second half grew 0 KiB on the Orin and at most 20 KiB on the Raspberry Pi. 120-3
 ### Table 2 — clients (collection every 1 s)
 
 One window per variant for the client rows (no repeats): read large differences only. CPU is the server
-process; the clients' own CPU is separate. Handler: `do_GET` elapsed / thread CPU, p95. Client latency:
-nearest rank over the requests in the window.
+process; the clients' own CPU is separate. Handler: `do_GET` elapsed time, p95. Client latency:
+nearest rank over the requests in the window. In the "matrix" rows (two runs per variant) the handler
+and latency values are the mean of the two runs' own percentiles, not a pooled percentile.
 
 | platform | clients × poll | B0 CPU % | B1 CPU % | server requests | handler p95 ms B0 / B1 | client latency p50 / p95 ms B0 | B1 | response KiB B0 / B1 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -113,16 +120,18 @@ driver caching. The product already calls `statvfs` on the root filesystem in ev
 
 - **The existing daemon is most of the cost.** With no client, B0 at 1 s costs 1.52 % (Orin) and
   0.92 % (Raspberry Pi); the product collection's thread CPU (14.5 / 7.6 ms per collection) accounts for
-  almost all of it (14.5 ms per second = 1.45 %).
+  almost all of it (14.5 ms per second = 1.45 %). Which parts of the collection cost the most was
+  not measured: the bench times the collection as a whole.
 - **The B1 increase is two parts.** The passive callback: about 1.4 ms (Orin) / 1.6 ms (Raspberry Pi)
   thread CPU per collection, i.e. 0.14 / 0.16 pp at 1 s. The bigger answer: +3.8 KiB (Orin: 10
   interfaces including docker bridge and veth) / +1.3 KiB (Raspberry Pi) JSON per request, +0.5-0.7 ms
   handler CPU per request, paid per request, not per collection. Together: about 1.9 / 2.3 ms per second
   at 1 s with one client polling every 1 s, against 1.78 / 2.5 ms measured. That is why doubling the
   interval does not halve the increase (+0.178 → +0.144 pp on the Orin).
-- **The callback runs cold.** In a tight loop the same Raspberry Pi callback takes 0.45 ms CPU
-  (diagnostic run, not in the tables); once a second, about 1.6 ms. Caches and clocks are cold after a
-  second of sleep; the in-service number is the one that counts.
+- **Back-to-back calls do not predict the service cost.** In a tight loop the same Raspberry Pi
+  callback took 0.45 ms CPU (diagnostic run, not in the tables); once a second in the service, about
+  1.6 ms. Cold caches and a lower CPU clock after a second of sleep are possible explanations, not
+  verified here; the in-service number is the one that counts.
 - **HTTP is not free.** Each 1-per-second client adds about 0.23 pp (Orin) / 0.45 pp (Raspberry Pi) to
   the server process in B0, more than the handler's own thread CPU (1.2 / 2.2 ms): connection set-up,
   a thread per request and HTTP parsing are paid outside `do_GET`. On the Raspberry Pi one polling client
@@ -134,8 +143,8 @@ driver caching. The product already calls `statvfs` on the root filesystem in ev
 
 | | hypothesis (proposed budget) | Orin Nano | Raspberry Pi 4 | WSL (supplementary) |
 | --- | --- | --- | --- | --- |
-| H1 | passive adds ≤ 0.1 pp CPU at 1 s | **rejected**: +0.178 pp (spread 0.010) | **rejected**: +0.250 pp (spread 0.069) | rejected: +0.120 pp (spread 0.029) |
-| H1 | passive callback p95 ≤ 2 ms | **supported**: 1.42 ms elapsed | **supported**: 1.64 ms | supported: 1.13 ms |
+| H1 | passive adds ≤ 0.1 pp CPU at 1 s (budget set before the runs, not changed after) | **rejected**: +0.178 pp (spread 0.010) | **rejected**: +0.250 pp (spread 0.069) | rejected: +0.120 pp (spread 0.029) |
+| H1 | passive callback p95 ≤ 2 ms | **supported**: pooled 1.40 ms elapsed (max of per-run p95 1.42) | **supported**: pooled 1.64 ms (max 1.64) | supported: pooled 0.96 ms (max 1.13) |
 | H2 | whole daemon ≤ 1 % at 1 s, 1 client at 1 s | **rejected, already in B0**: 1.75 % (B1 1.93 %) | **rejected, already in B0**: 1.40 % (B1 1.65 %) | supported: 0.43 % (B1 0.55 %) |
 | H2 | passive RSS increase ≤ 5 MiB | **supported**: -1.94 to +1.18 MiB | **supported**: +0.01 to +0.05 MiB | supported |
 | H2 | no growth with sample count after warmup | supported in 120-300 s windows (one-off steps only); hours not tested | supported in 120-300 s windows | supported in 120 s windows |
@@ -152,17 +161,19 @@ from a small base.
 
 | function | default candidate | low-overhead candidate | measured on | evidence | not verified / constraints |
 | --- | --- | --- | --- | --- | --- |
-| core collection | 1 s stays the default for now; it already exceeds the 1 % budget on both ARM boards without the new feature | 2 s (B0: Orin 1.00 %, Raspberry Pi 0.91 %; with passive 1.12 / 1.11 %) | Orin Nano, Raspberry Pi 4 | Table 1, final 300 s windows | meeting 1 % at 1 s needs a cheaper product collection (Orin 14.5 ms per collection), not a cadence change; decide in a follow-up |
-| passive Network / Disk (as prototyped) | same cadence as the core | 2 s | Orin Nano, Raspberry Pi 4 | +0.14-0.21 pp at 2 s, callback p95 ≤ 1.65 ms | fails the 0.1 pp budget at 1 and 2 s; integration cost (metadata, diagnostics, freshness) not measured; a smaller answer (e.g. physical interfaces only) not measured |
+| core collection | 1 s keeps the current behaviour. **Not** a low-overhead result: it exceeds the 1 % budget on both ARM boards already without the new feature (B0 1.75 / 1.40 %) | 2 s lowers the cost but does **not** meet the 1 % budget with passive collection (final 300 s: B1 1.12 % Orin, 1.11 % Raspberry Pi; B0 1.00 / 0.90 %). 5 s is the only measured interval below 1 % with passive collection (B1 about 0.62 / 0.76 %) | Orin Nano, Raspberry Pi 4 | Table 1 | at 5 s the Raspberry Pi's passive increase (+0.100 pp, repeat spread 0.052) sits on the 0.1 pp line: H1 is not established there. Where the collection's 14.5 / 7.6 ms go is not located yet; any default change belongs in a follow-up |
+| passive Network / Disk (as prototyped) | same cadence as the core | - | Orin Nano, Raspberry Pi 4 | +0.14-0.21 pp at 2 s, callback p95 ≤ 1.65 ms | fails the 0.1 pp budget at 1 and 2 s; measures the Network/Disk path plus PSI's unsupported path, not PSI's success path; integration cost (metadata, diagnostics, freshness) not measured |
 | PSI | - | - | none | `/proc/pressure` missing on all three systems | parser covered by fixtures only; cost on a PSI kernel not measured |
-| Wi-Fi RSSI (`/proc/net/wireless`) | 2 s, outside the core collection's critical path | 5 s | Orin Nano, Raspberry Pi 4 | 0.3-0.8 ms CPU, but 1.6 / 6.2 ms elapsed per read | nl80211 not measured; radio/firmware power effect not measured |
-| filesystem capacity | 30 s (candidate only) | 60 s | Orin Nano, Raspberry Pi 4 | per call 0.4-1.0 ms mount parse + 0.02-0.07 ms statvfs, 0 failures | 4 / 2 samples per cadence: blocking safety not established; remote/FUSE mounts excluded by design, not tested |
+| Wi-Fi RSSI (`/proc/net/wireless`) | 2 s (design candidate), outside the core collection's critical path | 5 s | Orin Nano, Raspberry Pi 4 | 0.3-0.8 ms CPU, but 1.6 / 6.2 ms elapsed per read | nl80211 not measured; radio/firmware power effect not measured; two drivers only, not a general result |
+| filesystem capacity | 30 s (design candidate) | 60 s | Orin Nano, Raspberry Pi 4 | per call 0.4-1.0 ms mount parse + 0.02-0.07 ms statvfs, 0 failures | 4 / 2 samples per cadence: blocking safety not established; remote/FUSE mounts excluded by design, not tested |
 | RTT | - | - | none | not run | no approved target |
 | API polling (clients) | 1 client at 1 s | poll every 2 s | Orin Nano, Raspberry Pi 4 | 1 → 3 clients: +0.6 / +0.9 pp | single windows; a browser's own load not measured |
 
 When the cost has to come down, slowing the clients (or the web page's poll) cuts the per-request part,
-slowing the collection cuts the collection part: they are separate knobs (Table 2). Container scope was
-not measured; the numbers are for a native host process.
+slowing the collection cuts the collection part: they are separate knobs (Table 2). The next step is to
+break both down at 1 s (inside the collection, and the response's copy and JSON), not to narrow what is
+observed. Container scope was not measured; the numbers are for a native host process. PSI's success
+path, nl80211, RTT and container scope remain unverified.
 
 
 ## Method
@@ -229,7 +240,11 @@ The runner (`cadence.py run`) stops starting new runs after 90 minutes or 32 win
 counting every phase in the same output directory, and before each run checks the device: the existing
 platmon service still answers, no current throttle/under-voltage bits, at least 300 MiB available memory
 and 500 MiB free disk. A run that fails a check, times out or sees a clock jump is kept and marked
-invalid with the reason.
+invalid with the reason. Every wait has a deadline, from the bench server's ready line (30 s) to the
+end of the run; on a timeout the runner kills only the processes it started and waits for them to end,
+and if one does not, it records that and starts no further run. A probe whose last call was still
+running at the end is kept with its partial samples but marked invalid (incomplete), because the
+slowest call is missing from them.
 
 `B1 - B0` is computed per device and condition from the per-run values; it is called
 **indistinguishable** when it is not larger than the spread between repeats of the same variant, and
