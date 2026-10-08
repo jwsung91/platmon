@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from collector import detect, jetson
@@ -390,3 +392,335 @@ def test_oneshot_reports_unusable_cpus(monkeypatch):
     assert s["cpu_sampling"]["mode"] == "oneshot" and s["cpu_sampling"]["unavailable"] == [
         {"id": 1, "reason": "counter_regressed"}, {"id": 2, "reason": "warmup"}]
     check_oneshot(s)
+
+
+# optional metrics: what could not be read is noted per group (collectors.<group>), the rest is kept
+
+import errno as _errno
+import json as _json
+
+from collector import sysfs
+
+
+def fail_reads(monkeypatch, errors):
+    """Reads of the given paths raise the given OSError (EACCES, EIO, ENODATA ...); other paths read normally."""
+    real = open
+
+    def fake(path, *args, **kw):
+        if str(path) in errors:
+            code = errors[str(path)]
+            raise OSError(code, _errno.errorcode[code]) if code != _errno.EACCES else PermissionError(code, "denied")
+        return real(path, *args, **kw)
+    monkeypatch.setattr(sysfs, "open", fake, raising=False)
+
+
+@pytest.mark.parametrize("content, expected, reason", [
+    ("0", 0, None),             # a measured 0 is a value
+    ("42000", 42000, None),
+    ("", None, "invalid_data"),  # an empty number is not 0
+    ("4x", None, "invalid_data"),
+])
+def test_group_read_values(tmp_path, content, expected, reason):
+    (tmp_path / "v").write_text(content)
+    g = sysfs.Group("t")
+    assert g.read(str(tmp_path / "v"), "v") == expected
+    assert g.reasons == ({reason} if reason else set())
+
+
+@pytest.mark.parametrize("code, reason", [(_errno.EACCES, "permission_denied"), (_errno.EPERM, "permission_denied"),
+                                          (_errno.EIO, "io_error"), (_errno.ENODATA, "no_data")])
+def test_group_read_errors(tmp_path, monkeypatch, code, reason):
+    path = tmp_path / "v"
+    path.write_text("1")
+    fail_reads(monkeypatch, {str(path): code})
+    g = sysfs.Group("t")
+    assert g.read(str(path), "v") is None and g.reasons == {reason}
+    assert g.issues == ([{"target": "v", "reason": reason}] if reason != "no_data" else [])  # no_data: not a problem
+    assert str(tmp_path) not in _json.dumps(g.status())  # paths and error text stay out of the API
+
+
+def test_group_read_missing_file(tmp_path):
+    g = sysfs.Group("t")
+    assert g.read(str(tmp_path / "pwm1"), "pwm1", found=str(tmp_path)) is None
+    assert g.reasons == {"not_exposed"} and g.issues == []  # an attribute this device does not have
+    assert g.read(str(tmp_path / "gone/temp1_input"), "temp1", found=str(tmp_path / "gone")) is None
+    assert g.issues == [{"target": "temp1", "reason": "disappeared"}]  # listed, then gone before the read
+
+
+@pytest.mark.parametrize("values, reasons, expected", [
+    (2, [], ("ok", None)),
+    (2, ["not_exposed"], ("ok", None)),                     # an attribute it does not have is fine
+    (1, ["invalid_data"], ("partial", "some_unreadable")),
+    (0, ["invalid_data", "permission_denied", "io_error"], ("error", "permission_denied")),  # most serious first
+    (0, ["disappeared", "invalid_data"], ("error", "disappeared")),
+    (0, ["internal_error", "permission_denied"], ("error", "internal_error")),
+    (0, ["not_exposed", "no_data"], ("unavailable", "no_data")),
+    (0, ["not_detected", "not_exposed"], ("unavailable", "not_exposed")),
+    (0, ["unsupported_platform"], ("unavailable", "unsupported_platform")),
+    (0, [], ("unavailable", "not_detected")),               # nothing tried is never ok
+])
+def test_group_status(values, reasons, expected):
+    g = sysfs.Group("t")
+    g.values = values
+    for i, r in enumerate(reasons):
+        g.note(f"x{i}", r)
+    st = g.status()
+    assert (st["state"], st["reason"]) == expected
+
+
+def test_group_issues_are_capped():
+    g = sysfs.Group("t")
+    for i in range(40):
+        g.note("hwmon0.temp%d" % i + "x" * 100, "io_error")
+    st = g.status()
+    assert len(st["issues"]) == 32 and st["issues_truncated"] == 8
+    assert all(len(i["target"]) <= 64 for i in st["issues"]) and len(g.details) == 32
+
+
+def test_one_bad_temperature_keeps_the_rest(tmp_path):
+    temps, power, fans = hwmon_sensors(root=fake_hwmon(tmp_path, [
+        {"name": "coretemp", "temp1_input": 45000, "temp2_input": "", "temp3_input": "garbage", "temp4_input": 0},
+        {"name": "ina219", "power1_input": 1000000},
+        {"name": "nct6775", "fan1_input": 900, "pwm1": 255},
+    ]))
+    assert temps == {"coretemp temp1": 45.0, "coretemp temp4": 0.0} and power == {"ina219 power1": 1.0}
+    assert fans == [{"name": "nct6775 fan1", "rpm": 900, "percent": 100}]
+    g = sysfs.groups("temperature", "power", "fans")
+    hwmon_sensors(root=str(tmp_path), groups=g)
+    assert g["temperature"].status() == {"state": "partial", "reason": "some_unreadable", "issues_truncated": 0,
+                                         "issues": [{"target": "hwmon0.temp2", "reason": "invalid_data"},
+                                                    {"target": "hwmon0.temp3", "reason": "invalid_data"}]}
+    assert g["power"].status()["state"] == g["fans"].status()["state"] == "ok"
+
+
+def test_partial_power_and_fan_channels(tmp_path, monkeypatch):
+    """A rail whose voltage cannot be read is left out, the chip's other rail stays; a fan whose speed
+    cannot be read keeps its pwm percent (and a measured 0 rpm stays 0)."""
+    root = fake_hwmon(tmp_path, [
+        {"name": "ina3221", "in1_label": "VDD_IN", "in1_input": 5000, "curr1_input": 1200,
+         "in2_label": "VDD_SOC", "in2_input": 5000, "curr2_input": 400},
+        {"name": "nct6775", "fan1_input": 950, "pwm1": 128, "fan2_input": 0, "pwm2": 0},
+    ])
+    fail_reads(monkeypatch, {f"{root}/hwmon0/in2_input": _errno.EIO, f"{root}/hwmon1/fan1_input": _errno.EACCES})
+    g = sysfs.groups("temperature", "power", "fans")
+    temps, power, fans = hwmon_sensors(root=root, groups=g)
+    assert power == {"VDD_IN": 6.0}
+    assert fans == [{"name": "nct6775 fan1", "rpm": None, "percent": 50},
+                    {"name": "nct6775 fan2", "rpm": 0, "percent": 0}]
+    assert g["power"].status()["issues"] == [{"target": "hwmon0.in2", "reason": "io_error"}]
+    assert g["fans"].status()["issues"] == [{"target": "hwmon1.fan1", "reason": "permission_denied"}]
+    assert g["temperature"].status()["state"] == "unavailable"  # no temperature channel: absent, not an error
+
+
+def test_channel_that_disappears_then_recovers(tmp_path, monkeypatch):
+    root = fake_hwmon(tmp_path, [{"name": "coretemp", "temp1_input": 45000}])
+    real = common.numbered
+    monkeypatch.setattr(common, "numbered", lambda names, prefix, suffix: real(names, prefix, suffix) + ([2] if prefix == "temp" else []))
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[0] == {"coretemp temp1": 45.0}  # temp2 listed, gone when read
+    assert g["temperature"].status()["issues"] == [{"target": "hwmon0.temp2", "reason": "disappeared"}]
+    monkeypatch.setattr(common, "numbered", real)
+    g = sysfs.groups("temperature", "power", "fans")
+    hwmon_sensors(root=root, groups=g)
+    assert g["temperature"].status() == {"state": "ok", "reason": None, "issues": [], "issues_truncated": 0}
+
+
+def test_unlistable_hwmon_class(tmp_path, monkeypatch):
+    def denied(path):
+        raise PermissionError(_errno.EACCES, "denied")
+    monkeypatch.setattr(sysfs.os, "listdir", denied)
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=str(tmp_path), groups=g) == ({}, {}, [])
+    assert g["temperature"].status()["reason"] == "permission_denied"  # could not look, not "nothing there"
+
+
+def test_inactive_thermal_zone_is_no_data(tmp_path, monkeypatch):
+    for i, (zt, t) in enumerate([("cpu-thermal", 51200), ("cv0-thermal", 0)]):
+        (tmp_path / f"thermal_zone{i}").mkdir()
+        (tmp_path / f"thermal_zone{i}" / "type").write_text(zt)
+        (tmp_path / f"thermal_zone{i}" / "temp").write_text(str(t))
+    fail_reads(monkeypatch, {str(tmp_path / "thermal_zone1" / "temp"): _errno.ENODATA})
+    g = sysfs.Group("temperature")
+    assert thermal_zones(root=str(tmp_path), group=g)[0] == {"cpu": 51.2}
+    assert g.status() == {"state": "ok", "reason": None, "issues": [], "issues_truncated": 0}
+
+
+def test_unexpected_error_in_one_group_is_internal_error(monkeypatch):
+    def broken(root, *groups):
+        raise RuntimeError("bug with /secret/path")
+    monkeypatch.setattr(common, "hwmon_chips", broken)
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(groups=g) == ({}, {}, [])
+    for name in ("temperature", "power", "fans"):
+        assert g[name].status()["issues"] == [{"target": name, "reason": "internal_error"}]
+    assert "secret" not in _json.dumps({n: x.status() for n, x in g.items()})  # traceback only in the log
+    assert "secret" in g["temperature"].details[0]
+
+
+def test_cpu_frequency_failure_keeps_usage(monkeypatch):
+    p = Proc(monkeypatch)
+    c = p.counters()
+    p.readings += [{0: idle_busy(0, 0), 1: idle_busy(0, 0)}, {0: idle_busy(10, 10), 1: idle_busy(20, 0)}]
+    freq = "/sys/devices/system/cpu/cpu{}/cpufreq/scaling_cur_freq"
+    real = open
+
+    def fake(path, *args, **kw):
+        if path == freq.format(0):
+            raise OSError(_errno.EIO, "EIO")
+        if path == freq.format(1):
+            import io
+            return io.StringIO("1200000\n")
+        return real(path, *args, **kw)
+    monkeypatch.setattr(sysfs, "open", fake, raising=False)
+    first = common.collect(c)
+    assert first["cpu"] == [] and first["collectors"]["cpu_frequency"]["reason"] == "no_data"  # warmup: no rows
+    p.ns += 10**9
+    s = common.collect(c)
+    assert s["cpu"] == [{"id": 0, "usage": 50.0, "freq": None}, {"id": 1, "usage": 0.0, "freq": 1200000000}]
+    assert s["collectors"]["cpu_frequency"] == {"state": "partial", "reason": "some_unreadable", "issues_truncated": 0,
+                                                "issues": [{"target": "cpu0", "reason": "io_error"}]}
+    assert s["cpu_sampling"]["window_ms"] is not None  # the CPU baseline went on as before
+
+
+def test_no_optional_sensors_is_not_an_error(tmp_path, monkeypatch):
+    """A plain Linux host without cpufreq, thermal zones or hwmon chips: everything required, nothing degraded."""
+    import collector
+    monkeypatch.setattr(collector, "BOARD", None)  # a plain Linux host, whatever board runs the tests
+    monkeypatch.setattr(common, "hwmon_chips", lambda root, *groups: [])
+    real_entries = common.entries
+    monkeypatch.setattr(common, "entries", lambda path, *g, **kw: [] if path.startswith("/sys/class/thermal")
+                        else real_entries(path, *g, **kw))
+    monkeypatch.setattr(sysfs, "open", lambda path, *a, **kw: (_ for _ in ()).throw(FileNotFoundError(path))
+                        if "cpufreq" in str(path) else open(path, *a, **kw), raising=False)
+    s = collector.collect()
+    states = {k: v["state"] for k, v in s["collectors"].items()}
+    assert set(states.values()) == {"unavailable"} and s["cpu"] and s["memory"]["total"] > 0
+
+
+def test_problems_are_logged_when_they_change(capsys):
+    logged = {}
+
+    def run(reason=None):
+        g = sysfs.groups("temperature")
+        if reason:
+            g["temperature"].note("hwmon0.temp1", reason, "/sys/class/hwmon/hwmon0/temp1_input: Input/output error")
+        return sysfs.summarize(g, logged)
+
+    run("io_error")
+    assert "temperature: hwmon0.temp1: io_error (/sys/class/hwmon/hwmon0/temp1_input" in capsys.readouterr().err
+    run("io_error")
+    assert capsys.readouterr().err == ""  # the same problem again: not logged every second
+    run()
+    assert "temperature: readable again" in capsys.readouterr().err
+
+
+# PR #24 review: bytes that do not decode, listing errors inside the walk, unreadable rail labels
+
+def deny_listing(monkeypatch, path, code):
+    """Listing this directory fails (os.listdir and os.scandir, which glob uses); others list normally."""
+    real_listdir, real_scandir = os.listdir, os.scandir
+
+    def check(p):
+        if os.path.normpath(str(p)) == os.path.normpath(str(path)):
+            raise OSError(code, _errno.errorcode[code]) if code != _errno.EACCES else PermissionError(code, "denied")
+    monkeypatch.setattr(os, "listdir", lambda p=".": check(p) or real_listdir(p))
+    monkeypatch.setattr(os, "scandir", lambda p=".": check(p) or real_scandir(p))
+
+
+def test_undecodable_temperature_keeps_the_rest(tmp_path):
+    root = fake_hwmon(tmp_path, [{"name": "chip", "temp1_input": 45000, "temp3_input": 42000,
+                                  "power1_input": 1000000, "fan1_input": 900, "pwm1": 128}])
+    (tmp_path / "hwmon0" / "temp2_input").write_bytes(b"\xff\n")
+    g = sysfs.groups("temperature", "power", "fans")
+    temps, power, fans = hwmon_sensors(root=root, groups=g)
+    assert temps == {"chip temp1": 45.0, "chip temp3": 42.0} and power == {"chip power1": 1.0}
+    assert fans == [{"name": "chip fan1", "rpm": 900, "percent": 50}]
+    assert g["temperature"].status()["issues"] == [{"target": "hwmon0.temp2", "reason": "invalid_data"}]
+    assert g["power"].status()["state"] == g["fans"].status()["state"] == "ok"
+
+
+@pytest.mark.parametrize("code, reason", [(_errno.EACCES, "permission_denied"), (_errno.EIO, "io_error")])
+def test_unlistable_chip_is_reported_and_the_others_kept(tmp_path, monkeypatch, code, reason):
+    root = fake_hwmon(tmp_path, [{"name": "a", "temp1_input": 40000}, {"name": "b", "temp1_input": 50000}])
+    deny_listing(monkeypatch, tmp_path / "hwmon0", code)
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[0] == {"b temp1": 50.0}
+    assert g["temperature"].status() == {"state": "partial", "reason": "some_unreadable", "issues_truncated": 0,
+                                         "issues": [{"target": "hwmon0", "reason": reason}]}
+
+
+def test_unlistable_thermal_class(tmp_path, monkeypatch):
+    (tmp_path / "thermal_zone0").mkdir()
+    deny_listing(monkeypatch, tmp_path, _errno.EIO)
+    g = sysfs.Group("temperature")
+    assert thermal_zones(root=str(tmp_path), group=g)[0] == {}
+    assert g.status()["reason"] == "io_error"
+
+
+def test_empty_or_missing_classes_are_not_errors(tmp_path):
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=str(tmp_path), groups=g) == ({}, {}, [])  # empty class directory
+    assert hwmon_sensors(root=str(tmp_path / "missing"), groups=g) == ({}, {}, [])
+    assert thermal_zones(root=str(tmp_path / "missing"), group=g["temperature"])[0] == {}
+    assert {x.status()["state"] for x in g.values()} == {"unavailable"}
+
+
+def test_unreadable_rail_label_is_reported(tmp_path, monkeypatch):
+    rails = [{"name": "ina3221", "in1_label": "VDD_IN", "in1_input": 5000, "curr1_input": 1000,
+              "in2_label": "VDD_SOC", "in2_input": 5000, "curr2_input": 400, "in3_input": 5000, "curr3_input": 1400}]
+    root = fake_hwmon(tmp_path, rails)  # channel 3 has no label: a sum channel, skipped as before
+    fail_reads(monkeypatch, {f"{root}/hwmon0/in1_label": _errno.EIO})
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[1] == {"VDD_SOC": 2.0}
+    assert g["power"].status() == {"state": "partial", "reason": "some_unreadable", "issues_truncated": 0,
+                                   "issues": [{"target": "hwmon0.in1_label", "reason": "io_error"}]}
+    monkeypatch.setattr(sysfs, "open", open, raising=False)  # next collection: readable again
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[1] == {"VDD_IN": 5.0, "VDD_SOC": 2.0}
+    assert g["power"].status()["state"] == "ok"
+
+
+# PR #24 re-review: names and display labels that do not decode
+
+TWO_CHIPS = [{"name": "a", "temp1_input": 40000, "temp1_label": "Package", "power1_input": 1000000,
+              "power1_label": "VIN", "fan1_input": 900, "fan1_label": "CPU fan", "pwm1": 255},
+             {"name": "b", "temp1_input": 50000, "power1_input": 2000000, "fan1_input": 800, "pwm1": 0}]
+CHIP_B = ({"b temp1": 50.0}, {"b power1": 2.0}, [{"name": "b fan1", "rpm": 800, "percent": 0}])
+
+
+@pytest.mark.parametrize("file, kept, groups_with_issue", [
+    # the chip name is used for every key: hwmon0's values are kept under its directory name
+    ("name", ({"hwmon0 Package": 40.0}, {"VIN": 1.0}, [{"name": "CPU fan", "rpm": 900, "percent": 100}]),
+     {"temperature", "power", "fans"}),
+    ("temp1_label", ({"a temp1": 40.0}, {"VIN": 1.0}, [{"name": "CPU fan", "rpm": 900, "percent": 100}]), {"temperature"}),
+    ("power1_label", ({"a Package": 40.0}, {"a power1": 1.0}, [{"name": "CPU fan", "rpm": 900, "percent": 100}]), {"power"}),
+    ("fan1_label", ({"a Package": 40.0}, {"VIN": 1.0}, [{"name": "a fan1", "rpm": 900, "percent": 100}]), {"fans"}),
+])
+def test_undecodable_name_or_label_keeps_the_values(tmp_path, file, kept, groups_with_issue):
+    root = fake_hwmon(tmp_path, TWO_CHIPS)
+    good = (tmp_path / "hwmon0" / file).read_bytes()
+    (tmp_path / "hwmon0" / file).write_bytes(b"\xff\n")
+    g = sysfs.groups("temperature", "power", "fans")
+    temps, power, fans = hwmon_sensors(root=root, groups=g)
+    assert (temps, power, fans) == ({**kept[0], **CHIP_B[0]}, {**kept[1], **CHIP_B[1]}, kept[2] + CHIP_B[2])
+    for name, grp in g.items():
+        st = grp.status()
+        if name in groups_with_issue:
+            assert st["state"] == "partial" and st["issues"] == [{"target": f"hwmon0.{file}", "reason": "invalid_data"}]
+        else:
+            assert st["state"] == "ok"
+    (tmp_path / "hwmon0" / file).write_bytes(good)  # readable again in the next collection
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g) == hwmon_sensors(root=root) and len(hwmon_sensors(root=root)[0]) == 2
+    assert {x.status()["state"] for x in g.values()} == {"ok"}
+
+
+def test_undecodable_zone_type_keeps_the_zones(tmp_path):
+    for i, (zt, t) in enumerate([("cpu-thermal", 51200), ("gpu-thermal", 52000)]):
+        (tmp_path / f"thermal_zone{i}").mkdir()
+        (tmp_path / f"thermal_zone{i}" / "type").write_text(zt)
+        (tmp_path / f"thermal_zone{i}" / "temp").write_text(str(t))
+    (tmp_path / "thermal_zone0" / "type").write_bytes(b"\xff\n")
+    g = sysfs.Group("temperature")
+    assert thermal_zones(root=str(tmp_path), group=g)[0] == {"thermal_zone0": 51.2, "gpu": 52.0}
+    assert g.status()["issues"] == [{"target": "thermal_zone0.type", "reason": "invalid_data"}]

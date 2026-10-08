@@ -56,10 +56,10 @@ come from an older platmon (legacy) and have no sample metadata.
 - `interval_ms`: the configured collection interval. It is not the window CPU usage is averaged over:
   that is `cpu_sampling.window_ms`.
 - `stale_after_ms`: when the snapshot stops counting as current: 3 intervals, at least 5 s.
-- `collectors.core`: the state when this snapshot was made. `ok` means the collection call succeeded, not
-  that every sensor could be read; a missing sensor is still `null` in its field as before, and some or
-  all CPUs can still be missing from `cpu` (see `cpu_sampling`). A later failure does not change it: see
-  `/api/status`.
+- `collectors.core`: the state when this snapshot was made. `ok` means the required data was collected
+  and the snapshot built, not that every sensor could be read: the optional groups next to it say that
+  (see Optional metrics), and some or all CPUs can still be missing from `cpu` (see `cpu_sampling`). A
+  later failure does not change it: see `/api/status`.
 
 A snapshot is current while `data_age_ms <= stale_after_ms`. A collection that already took longer than
 `stale_after` is dropped (`collection_too_slow`) instead of being served as new data.
@@ -116,6 +116,68 @@ read the CPUs and then failed on another sensor, the first published one already
 Limits: CPUs that go offline and come back between two readings are not noticed (their counters continue
 or are caught as `counter_regressed`); the lines of `/proc/stat` are not read at one instant.
 
+### Optional metrics
+
+Required for a snapshot: the CPU counters (`/proc/stat`), memory, the root filesystem's disk usage and the
+identity fields (model, system, uptime). If one of them cannot be read, the whole collection fails
+(`collection_failed`): nothing new is published, the last good snapshot is served until it is stale, then
+503. Optional: CPU clocks, GPU, temperatures, power, fans, the Jetson power mode and L4T release. What
+cannot be read there is reported in its group and left out, and the snapshot is still published with
+everything else it read in this collection; earlier values are never copied in.
+
+How a value that could not be read looks: a temperature or power rail is missing from its table; a fan
+stays listed with `rpm` or `percent` `null`; a CPU's `freq` and the GPU's `freq`/`max_freq` are `null`;
+`gpu` is `null` without a load; `power_mode` is `null`; `system.l4t` is missing. A measured `0` is `0`.
+
+`collectors` has one entry per optional group: `cpu_frequency`, `gpu`, `temperature`, `power`, `fans`,
+`power_mode`, `board_info` (the L4T release):
+
+```json
+"collectors": {
+  "core": {"state": "ok", "reason": null},
+  "temperature": {"state": "partial", "reason": "some_unreadable",
+                  "issues": [{"target": "hwmon2.temp1", "reason": "invalid_data"}], "issues_truncated": 0},
+  "gpu": {"state": "unavailable", "reason": "unsupported_platform", "issues": [], "issues_truncated": 0}
+}
+```
+
+| State | Meaning | `reason` |
+| --- | --- | --- |
+| `ok` | values read, no read failures (an attribute a device does not have is not a failure) | `null` |
+| `partial` | some values read, some failed | `some_unreadable` |
+| `error` | read failures and no value at all | the most serious failure |
+| `unavailable` | no value, and nothing failed: not there, not supported, no data now | the most specific absence |
+
+Read failures, most serious first: `internal_error` (an unexpected exception in that group's code),
+`permission_denied` (EACCES/EPERM), `io_error` (any other read or listing error), `disappeared` (listed in
+this collection, gone when read), `invalid_data` (empty, not text, or not a number). A directory that
+cannot be listed (a sensor class or one chip) is a failure, not "nothing found"; the other chips are kept. Absences, most specific first:
+`no_data` (there, but no current value, e.g. ENODATA from an inactive thermal zone, or no CPU rows to read
+clocks for during warmup), `not_exposed` (the device does not provide that attribute), `not_detected`
+(nothing of the kind found), `unsupported_platform` (no provider on this board, e.g. the GPU off Jetson).
+A group with nothing to try is `unavailable`, never `ok`.
+
+`issues` lists the failures only, at most 32 per group (`issues_truncated` counts the rest), as a target
+(a channel such as `hwmon2.temp1`, a directory such as `hwmon0`, or a field such as `cur_freq`, up to 64
+characters; not a stable sensor id) and a reason. Paths, file contents and exception text are not in the API; the service log has them,
+written when a group's problems change rather than on every collection. Where one value has several
+sources (the Jetson GPU load), the first that reads is used and the others' failures are not reported;
+a devfreq directory that cannot be listed is still reported, since it also hides the GPU clocks. A name or
+label that cannot be read (a chip's or thermal zone's name, a channel label) is reported and the default
+name is used instead (the chip's or zone's directory name, e.g. `hwmon2`, or the channel name), so its
+values are kept; ina3221 rails, which need their label, are left out instead.
+
+A snapshot with a `partial` or `error` group is still current: `/api/stats` and `/text` answer 200,
+`/api/status` says `degraded` with `ready: true`, and `last_attempt` is `ok` with 0 consecutive failures,
+because the collection itself succeeded. `unavailable` groups alone do not make it `degraded`.
+
+Limits: this handles reads that fail or return bad data. platmon does not cancel a read that blocks.
+Only when the collection returns is its duration checked: if it took longer than `stale_after`, it is
+dropped as `collection_too_slow`. While a read stays blocked, the collection is still running
+(`collecting_for_ms` grows, `last_attempt` is unchanged) and the last snapshot just becomes stale.
+`/api/status` keeps answering in that state, which does not mean the collection is making progress.
+Stable sensor ids and per-sensor reading times are not part of this.
+
 When there is no current snapshot (none yet, or collection keeps failing), the answer is 503:
 
 ```json
@@ -157,7 +219,8 @@ check uses `/api/stats` for that reason).
 
 - `state`, `ready`:
   - `ready` (ready: true): the snapshot is current and the last collection succeeded.
-  - `degraded` (ready: true): the snapshot is still current, but the last collection failed.
+  - `degraded` (ready: true): the snapshot is still current, but the last collection failed, or an
+    optional group of that snapshot is `partial` or `error` (see Optional metrics in `/api/stats`).
   - `starting` (ready: false): no snapshot and no failure yet, and the first collection has not run
     longer than `stale_after`.
   - `stale` (ready: false): anything else: the last snapshot is too old, or there never was one and the
@@ -185,3 +248,7 @@ metadata it shows the time since its last answer instead, and says that it is no
 
 CPUs listed in `cpu_sampling.unavailable` get a short note under the CPU rows ("CPU sampling: warming
 up"), on the page and in the `platmon` command alike; they are not drawn as 0 %.
+
+Optional groups that are `partial` or `error` are named in one line under the header ("Collection:
+temperature partial, gpu error"), on the page and in the `platmon` command; `unavailable` groups (no GPU,
+no fans) are not. The details are in `collectors` of `/api/stats`.

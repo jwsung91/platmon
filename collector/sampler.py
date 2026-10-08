@@ -13,6 +13,7 @@ import uuid
 
 SCHEMA_VERSION = 1
 METADATA_KEYS = ("schema_version", "sample", "collectors")  # added to the stats dict by read()
+BAD = ("partial", "error")  # optional collector states that make a fresh snapshot "degraded"
 
 
 def pick_clock():
@@ -118,7 +119,10 @@ class Sampler:
             record, attempt, since = self._record, self._attempt_result, self._collecting_since
         fresh = record is not None and now - record["started"] <= self._stale_ns
         if fresh:
-            state = "degraded" if attempt["state"] == "error" else "ready"
+            optional = record["stats"].get("collectors")
+            unreadable = isinstance(optional, dict) and any(
+                isinstance(c, dict) and c.get("state") in BAD for k, c in optional.items() if k != "core")
+            state = "degraded" if attempt["state"] == "error" or unreadable else "ready"
         elif record is None and attempt is None and (since is None or now - since <= self._stale_ns):
             state = "starting"
         else:
@@ -137,6 +141,8 @@ class Sampler:
         if not fresh:
             return None, status
         stats = copy.deepcopy(record["stats"])
+        optional = stats.pop("collectors", None)
+        optional = {k: v for k, v in optional.items() if k != "core"} if isinstance(optional, dict) else {}
         stats.update({
             "schema_version": SCHEMA_VERSION,
             "sample": {"instance_id": self.instance_id, "sequence": record["sequence"],
@@ -145,8 +151,9 @@ class Sampler:
                        "age_ms": ms(now - record["completed"]), "data_age_ms": ms(now - record["started"]),
                        "data_age_basis": "cycle_start_upper_bound",
                        "interval_ms": ms(round(self.interval * 1e9)), "stale_after_ms": ms(self._stale_ns)},
-            # this snapshot's own state when it was made; later failures show in status, not here
-            "collectors": {"core": {"state": "ok", "reason": None}},
+            # this snapshot's own state when it was made; later failures show in status, not here. core is
+            # the Sampler's (the snapshot was built); optional groups come from collect() as they were
+            "collectors": {"core": {"state": "ok", "reason": None}, **optional},
         })
         return stats, status
 
@@ -154,4 +161,8 @@ class Sampler:
         """Most recent snapshot as collect() returned it (no metadata); waits up to timeout for the first one.
         None if there is none yet or collect has kept failing for longer than stale_after."""
         stats = self.read(timeout)[0]
-        return stats and {k: v for k, v in stats.items() if k not in METADATA_KEYS}
+        if stats is None:
+            return None
+        optional = {k: v for k, v in stats["collectors"].items() if k != "core"}
+        stats = {k: v for k, v in stats.items() if k not in METADATA_KEYS}
+        return {**stats, "collectors": optional} if optional else stats

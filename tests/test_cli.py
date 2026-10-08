@@ -145,3 +145,23 @@ def test_render_some_cpus_unavailable():
         {"id": 2, "reason": "warmup"}, {"id": 3, "reason": "counter_regressed"}, {"id": 4, "reason": "new_code"}])))
     assert "CPU0  " in out and "CPU2  " not in out
     assert "CPU sampling: CPU2 warming up; CPU3 counter went backwards; CPU4 new_code" in out
+
+
+def g(state, reason=None):
+    return {"state": state, "reason": reason, "issues": [], "issues_truncated": 0}
+
+
+def test_render_collection_note_only_for_read_failures():
+    fine = dict(FULL, collectors={"core": g("ok"), "temperature": g("ok"), "gpu": g("unavailable", "not_detected"),
+                                  "fans": g("unavailable", "not_exposed")})
+    assert render(fine) == render(FULL)  # absent sensors are not a warning
+    out = render(dict(FULL, collectors={"core": g("ok"), "temperature": g("partial", "some_unreadable"),
+                                        "gpu": g("error", "io_error"), "fans": g("ok")}))
+    assert out.split("\n")[3] == "Collection: temperature partial, gpu error"
+    assert out.split("\n")[4] == "" and "CPU0  " in out  # everything else as before
+
+
+@pytest.mark.parametrize("collectors", ["x", None, {"odd": 5, "x": {"state": None}}, {"new_group": g("error", "new_code")}])
+def test_render_odd_collectors(collectors):
+    out = render(dict(FULL, collectors=collectors))  # no exception for unknown shapes, groups or reasons
+    assert out.startswith("Test Board\n")

@@ -42,7 +42,7 @@ const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resol
 const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
-  age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML,
+  age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -98,4 +98,12 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
   await next(ok({...meta('c', 1, 100), cpu: [], cpu_sampling: sampling([{id: 0, reason: 'warmup'}, {id: 1, reason: 'warmup'}])}), 'cpu_warmup');
   await next(ok({...meta('c', 2, 100), cpu_sampling: sampling([{id: 2, reason: 'warmup'}, {id: 3, reason: 'counter_regressed'}])}), 'cpu_partial');
   await next(ok({...meta('c', 3, 100), cpu_sampling: sampling([{id: 4, reason: '<img src=x>'}])}), 'cpu_odd_reason');
+
+  // optional collectors: a note only for groups that could not read everything; absent ones are not a warning
+  const grp = (state, reason = null) => ({state, reason, issues: [], issues_truncated: 0});
+  await next(ok({...meta('c', 4, 100), collectors: {core: grp('ok'), temperature: grp('partial', 'some_unreadable'),
+    gpu: grp('error', 'io_error'), fans: grp('unavailable', 'not_detected'), '<b>x</b>': grp('error')}}), 'collection_bad');
+  await next(() => Promise.reject(new TypeError('Failed to fetch')), 'collection_bad_then_down');
+  await next(ok({...meta('c', 5, 100), collectors: {core: grp('ok'), temperature: grp('ok'), gpu: grp('unavailable')}}), 'collection_ok');
+  await next(ok({...meta('c', 6, 100), collectors: 'odd'}), 'collection_odd');
 })();
