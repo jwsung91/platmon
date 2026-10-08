@@ -7,12 +7,13 @@ interval. Every number is a measurement on the devices unless marked as computed
 
 ## Summary
 
-- **Collection is most of the cost, and inside it three things dominate on both ARM boards**: reading
-  the sensor files (Orin about 6.2 ms per collection over 50 reads; Raspberry Pi 4 about 1.9 ms over 8),
-  resolving sysfs paths for source identity (`sysfs.canonical`: Orin 3.7 ms over 17 calls, Raspberry Pi
-  1.3 ms over 3, i.e. 25 % / 15 % of a collection), and hashing source descriptors (`sysfs.source`:
-  1.2 / 0.8 ms). The first is the observation itself; the second and third are recomputed every
-  collection for paths and descriptors that did not change.
+- **Collection is most of the cost, and inside it three measured stages dominate on both ARM boards**:
+  `Group.read` (opening, reading, text handling and parsing one value: Orin about 6.2 ms per collection
+  over 50 calls; Raspberry Pi 4 about 1.9 ms over 8), `sysfs.canonical` (resolving sysfs paths for source
+  identity: Orin 3.7 ms over 17 calls, Raspberry Pi 1.3 ms over 3, i.e. 25 % / 15 % of a collection) and
+  `sysfs.source` (building the descriptor, its JSON, the SHA-256 and the result: 1.2 / 0.8 ms). The first
+  is the observation itself; the second and third are recomputed every collection for paths and
+  descriptors that did not change.
 - **A request costs 2.0 ms (Orin) / 4.0 ms (Raspberry Pi) of worker-thread CPU, plus 0.45 / 0.7 ms on the
   listener thread.** The largest measured step is not JSON but the two `copy.deepcopy` calls in
   `Sampler.read` (0.60 / 0.93-0.98 ms); `json.dumps` is 0.25 / 0.39 ms.
@@ -22,16 +23,20 @@ interval. Every number is a measurement on the devices unless marked as computed
   allowed retry with fewer stages (stages-lite) added 7.9 % on the Orin (within the 10 % quality line) but
   still 17.9 % on the Raspberry Pi. The Orin stages-lite numbers are the primary ones; every Raspberry Pi
   stage number, and the per-read numbers on both boards (full stages only), are diagnostic.
-- **Next change to test (one):** resolve sysfs path identities once instead of every collection
-  (Table 4). Upper bound of the saving, not a prediction: 3.7 ms per collection on the Orin (0.37 pp at
-  1 s), 1.3 ms on the Raspberry Pi (0.13 pp).
+- **Next change to test (one):** reuse sysfs path identities between collections instead of resolving
+  them every time (Table 4), with the conditions for resolving again still to be designed. Reference
+  values, not a saving: the instrumented stage costs 3.7 ms per collection on the Orin (converted:
+  0.37 pp at 1 s) and 1.3 ms on the Raspberry Pi (0.13 pp, diagnostic).
+- **Profiles:** only the Orin's (Python 3.10) are used. The Raspberry Pi's (Python 3.13) are kept but
+  excluded: cProfile there records every thread, so they cannot be read as one thread's profile, not even
+  for the order of functions. The profile modes now refuse to run on Python 3.12 and later.
 
 ## Setup
 
 | | |
 | --- | --- |
 | Product code | `04990c0` (main after #26; collector, frontends, `platmon.py` identical to `dabb89f`), source hash `3b2b21434c4de83e` |
-| Bench code | `b103d52` (stages, profile; bench hash `85508079dc7c7c64`) for 18 windows per board; `b6cbcf9` (adds stages-lite; `3bbbb6f59608c1ea`) for the 4-window retry. Results of the two are reported apart. |
+| Bench code | `b103d52` (stages, profile; bench hash `85508079dc7c7c64`) for 18 windows per board; `b6cbcf9` (adds stages-lite; `3bbbb6f59608c1ea`) for the 4-window retry. Results of the two are reported apart. The tables were re-aggregated with the later report code of this branch, which compares only runs equal in interval, poll, clients, Python, product and bench hash and scope, and keeps stages and stages-lite apart: every comparison set matched, no number changed. |
 | Raw records | kept outside the repository; SHA-256 (first 16 hex digits) orin `bfb51d4a69e68f7f`, rpi4 `3b5e7bdd78049b0e`, wsl `a180d70742bfd931` |
 | Boards | Orin Nano devkit (Super), L4T R36.5.2, MAXN_SUPER, `schedutil`, Python 3.10.12, 6/3/2 temperature/power/fan sensors; Raspberry Pi 4 Model B, Debian 13, `ondemand`, Python 3.13.5, 1/0/0 sensors; WSL 2 (supplementary), Python 3.12.3, no sensors exposed |
 | Conditions | native process next to each board's own platmon service, collection 1 s, synthetic client(s) polling `/api/stats` every 1 s (new connection per request, as in D0), 30 s warmup, 120 s windows |
@@ -57,7 +62,12 @@ The reference runs reproduce D0: Orin B0 with one client 1.73 % (D0 1.75 %), Ras
 - **stages-lite**: the same without the per-value wrappers (`Group.read`, `Group.sensor`,
   `Group.status`, `entries`, `hwmon_chips`).
 - **profile-collect / profile-request**: cProfile on the thread CPU clock, one profiler per thread,
-  enabled only in the window (50 s), merged afterwards. Used to find candidates, never for CPU %.
+  enabled only in the window (50 s), merged afterwards. Used to find candidates, never for CPU %. Only
+  valid where each thread has its own profile function (Python 3.11 and older; checked by tests on 3.9 in
+  CI and on the Orin's 3.10). From Python 3.12 cProfile uses `sys.monitoring`, whose events are global:
+  a profile then also records other threads (with this timer, even negative times) and a second one
+  cannot be enabled while one is active. The modes now refuse to start there and the report marks such
+  results as not usable.
 
 Stages are nested: the "parts" (`common.thermal_zones`, `common.hwmon_sensors`, ...) and the "kinds of
 work" (`work.Group.read`, `work.canonical`, ...) are two classifications of the same time and are never
@@ -117,10 +127,10 @@ the reads and other unwrapped work it does itself.
 | publish `deepcopy` (in `_attempt`) | 1 | 0.26 | 0.17 / 0.39 | 0.03 | 1 | 0.59 | 0.60 / 0.65 | 0.06 |
 | `sampler._provenance` / `_check` | 1 | 0.35 | 0.25 / 0.51 | 0.03 | 1 | 0.49 | 0.49 / 0.54 | 0.05 |
 | *by kind of work, nested in the parts above:* | | | | | | | | |
-| `work.Group.read` (open + read + parse) — full stages | 50 | 6.21 | 10.71 / 11.14 | 0.62 | 8 | 1.90 | 1.95 / 2.03 | 0.19 |
+| `work.Group.read` (open, read, text handling, parse) — full stages | 50 | 6.21 | 10.71 / 11.14 | 0.62 | 8 | 1.90 | 1.95 / 2.03 | 0.19 |
 | `work.canonical` (realpath, relpath, exists) | 17 | 3.69 | 3.65 / 4.37 | 0.37 | 3 | 1.27 | 1.28 / 1.35 | 0.13 |
 | `work.chip_identities` (calls canonical per chip) | 2 | 1.82 (0.21) | 1.69 / 2.38 | 0.18 | 1 | 0.99 (0.16) | 0.99 / 1.05 | 0.10 |
-| `work.source` (descriptor JSON + SHA-256) | 20 | 1.18 | 1.25 / 1.37 | 0.12 | 5 | 0.76 | 0.79 / 0.86 | 0.08 |
+| `work.source` (descriptor, JSON, SHA-256, result) | 20 | 1.18 | 1.25 / 1.37 | 0.12 | 5 | 0.76 | 0.79 / 0.86 | 0.08 |
 | `work.entries` (directory listings) — full stages | 8 | 0.49 | 0.50 / 0.56 | 0.05 | 3 | 0.29 | 0.31 / 0.35 | 0.03 |
 | `work.Group.sensor` / `Group.status` — full stages | 20 / 7 | 0.09 / 0.03 | - | 0.01 | 5 / 7 | 0.06 / 0.13 | - | 0.02 |
 
@@ -128,14 +138,15 @@ Per call (computed): a read costs about 124 µs CPU on the Orin and 238 µs on t
 `canonical` 217 / 423 µs; a `source` 59 / 151 µs. On the Orin, reads take 10.7 ms elapsed for 6.2 ms
 CPU; the difference is waiting or scheduling, not shown to be sensor I/O.
 
-**What the profiler adds** (Orin, 50 collections; cProfile inflates call-heavy code, so only the shape
-is used): inside `canonical`, most of the time is Python path handling (`posixpath._joinrealpath`,
-`join`, `normpath`, `relpath`); the `lstat` system calls themselves are 0.097 s of 1.09 s cumulative.
+**What the Orin profile hints at** (Python 3.10, 50 collections; cProfile slows Python code more than C
+functions, so these are leads, not cost shares of the uninstrumented service): inside `canonical`, the
+time is mostly in Python path handling (`posixpath._joinrealpath`, `join`, `normpath`, `relpath`); the
+`lstat` system calls themselves are 0.097 s of 1.09 s cumulative.
 `chip_identities` runs twice per collection on the Jetson (from `hwmon_sensors` and `tach_fans`) over
 the same chip listing. `sysfs.numbered` (a regular expression per directory entry, per channel kind) is
-about 0.29 s of 2.95 s and sits in `hwmon_sensors`' self time. The profiler's share for `deepcopy` (8 %
-Orin, 28 % Raspberry Pi of the collect profile) is much higher than its measured stage cost (0.26 /
-0.59 ms): it calls many small functions, which the profiler slows down most.
+about 0.29 s of 2.95 s and sits in `hwmon_sensors`' self time. The profile's share for the publish
+`deepcopy` (9 %) is higher than its stage cost (0.26 ms of 14.9 ms): many small calls, which the profiler
+slows down most. The Raspberry Pi profiles are not used (see Method).
 
 ## Table 3 — requests (1 client, per request)
 
@@ -171,14 +182,16 @@ everything but 0.04-0.07 % (Orin) and 0.07-0.27 % (Raspberry Pi), e.g. Orin B0 o
 
 ## Table 4 — candidates
 
-At most three; the first is the one proposed for the next PR. Savings are upper bounds (the measured
-cost of the step), not predictions: any replacement costs something too.
+At most three; the first is the one proposed for the next PR. "Room" is the instrumented stage cost and
+its conversion at 1 s: a reference value, not a guaranteed upper bound of the saving in the
+uninstrumented service and not a prediction (a replacement costs something too). The Orin's 7.9 % total
+instrumentation cost does not bound the error of each stage; the Raspberry Pi values are diagnostic.
 
-| candidate | direct evidence | both boards? | improvement room (upper bound) | contracts to keep | unknown |
+| candidate | direct evidence | both boards? | room (instrumented stage cost) | contracts to keep | unknown |
 | --- | --- | --- | --- | --- | --- |
-| **1. Resolve sysfs path identities once, not every collection** (`sysfs.canonical` from `thermal_zones`, `chip_identities`, `jetson.gpu`; `chip_identities` twice per Jetson collection) | stage timing: 17 calls, 3.7 ms (Orin, quality ok); 3 calls, 1.3 ms (Raspberry Pi, diagnostic); profiler: Python path handling, not `lstat` | yes (25 % / 15 % of a collection) | ≤ 3.7 / 1.3 ms per collection, ≤ 0.37 / 0.13 pp at 1 s | source ids unchanged (same descriptor, same basis); hotplug, a renumbered `hwmonN`, a chip appearing or going away, aliases and test trees still resolve as today; chips still listed every collection | how much a cache check costs; how to notice that a path now resolves elsewhere without resolving it |
-| 2. Copy less per request (`Sampler.read` deep-copies stats and sensor_meta for every request) | 0.60 / 0.98 ms per request, the largest step of a request; most of B1's increase | yes | ≤ 0.06 / 0.10 pp per client polling at 1 s | `read()` returns new objects callers may change; age, status and metadata stay per request; no cached JSON | what a cheaper copy would cost; the server's own use of the result |
-| 3. Hash each source descriptor once (`sysfs.source`: JSON + SHA-256 of an unchanged descriptor, every collection) | 20 calls 1.2 ms (Orin), 5 calls 0.8 ms (Raspberry Pi) | yes | ≤ 0.12 / 0.08 pp at 1 s | same id for the same descriptor (a pure function of it), unresolved stays `id: null` | lookup cost of a memo |
+| **1. Reuse sysfs path identities between collections** (`sysfs.canonical` from `thermal_zones`, `chip_identities`, `jetson.gpu`; `chip_identities` twice per Jetson collection) | stage timing: 17 calls, 3.7 ms (Orin, quality ok); 3 calls, 1.3 ms (Raspberry Pi, diagnostic); Orin profile hint: Python path handling rather than `lstat` | yes (25 % / 15 % of a collection) | 3.7 / 1.3 ms per collection, converted 0.37 / 0.13 pp at 1 s | source ids unchanged (same descriptor, same basis); hotplug, a renumbered `hwmonN`, a chip appearing or going away, aliases and test trees still resolve as today; chips still listed every collection | when to resolve again: the same chip listing does not mean the same devices (a symlink can point elsewhere under unchanged names); what a check costs; not "resolve once and keep forever" |
+| 2. Copy less per request (`Sampler.read` deep-copies stats and sensor_meta for every request) | 0.60 / 0.98 ms per request, the largest step of a request; most of B1's increase | yes | 0.60 / 0.98 ms per request, converted 0.06 / 0.10 pp per client polling at 1 s | `read()` returns new objects callers may change; age, status and metadata stay per request; no cached JSON | what a cheaper copy would cost; the server's own use of the result |
+| 3. Compute each source id once per descriptor (`sysfs.source`: descriptor, JSON, SHA-256 and result for an unchanged descriptor, every collection) | 20 calls 1.2 ms (Orin), 5 calls 0.8 ms (Raspberry Pi) | yes | 1.2 / 0.8 ms, converted 0.12 / 0.08 pp at 1 s | same id for the same descriptor (a pure function of it), unresolved stays `id: null` | lookup cost of a memo |
 
 Not candidates: the reads themselves (the observation; the elapsed/CPU gap is not explained),
 excluding sensors or interfaces, caching values (freshness), caching whole responses (age and status
@@ -193,8 +206,9 @@ existing fixture trees, including renumbered and removed chips.
 
 - Kernel-level costs of the reads (syscall counts, time in the sysfs drivers): no strace/perf run.
 - Why the Raspberry Pi's instrumentation stays above 10 % with stages-lite.
-- The Raspberry Pi request profile reports a negative total time (cProfile with a thread-CPU timer on
-  Python 3.13); its per-function numbers were only read for their order, not used.
+- Profiles on the Raspberry Pi: both of its profile runs (Python 3.13) are excluded, including the
+  collect profile whose total was positive; a valid per-thread profile there would need another method
+  (not attempted). Their text is kept with the raw records, marked as not for analysis.
 - WSL: only B0 with one and no client (stages); the profile, three-client and B1 runs and one
   reference window were skipped by its 20 min budget. Supplementary only, not averaged with the boards.
 - D0's other intervals, RSSI, statvfs probes, RTT, PSI kernels, containers: out of scope here.
