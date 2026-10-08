@@ -58,8 +58,10 @@ and have no sample metadata.
     that were not used, and names, labels and other text. `data_age_ms <= cycle_age_ms`.
   - `cycle_start_upper_bound`: from the start of the collection (`data_age_ms = cycle_age_ms`). Used for
     a collect function that keeps no read records (a plain dict, as from a direct `collector.collect()`),
-    and as a fallback when the service's records are incomplete or do not fit the collection (a read
-    outside it, a reversed span, another clock); the service log says why, once per change.
+    and as a fallback when the service's records do not check out: a required read (CPU, memory, disk,
+    uptime) missing, a sensor value without its read, a record for a value that is not in the snapshot
+    (never published), a read outside the collection or reversed, another clock, or records of the wrong
+    shape. The values are published either way; the service log says why, once per change.
 
   Either way these are the times platmon read the files, not when a sensor measured: a driver may cache
   values, and hardware may convert earlier. CPU usage averages back to the previous reading (see CPU
@@ -116,7 +118,8 @@ row, not the CPU id). A value left out has no pointer; a `null` value can have o
     renumbered `hwmonN` keeps its id; a CPU clock by the CPU id. Only when no other hwmon node of the
     same device is listed.
   - `resolved_path`: the path inside `/sys` once symlinks are resolved (thermal zones, the GPU, a device
-    with several hwmon nodes, `devices/virtual`): the same id only while that path stays the same.
+    with several hwmon nodes, anything under `devices/virtual`): the same id only while that path stays
+    the same.
   - `unresolved`: the path did not resolve; `id` is `null`, the value is kept and its group is not
     degraded for it.
 
