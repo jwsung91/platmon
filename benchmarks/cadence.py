@@ -248,6 +248,14 @@ def serve(a):
             local.read = (mono() - t0, tcpu() - c0, (out[0] or {}).get("sample", {}).get("sequence", 0))
             return out
 
+        if hasattr(Sampler, "_stats_json"):  # product code that serializes /api/stats without read()
+            def _stats_json(self, timeout=0.0):  # timed as "read": the snapshot step of a request
+                t0, c0 = mono(), tcpu()
+                out = super()._stats_json(timeout)
+                local.read = (mono() - t0, tcpu() - c0,
+                              (out[1]["sample"] or {}).get("sequence", 0) if out[0] is not None else 0)
+                return out
+
     sampler = BenchSampler(collect, a.interval, clock=clock)
     base = server.make_handler(sampler, True)
 
