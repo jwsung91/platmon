@@ -6,13 +6,16 @@ tracks the latest attempt, so readers can tell a repeated read of the same sampl
 fresh sample from the last good one while collection fails. See docs/api.md.
 """
 import copy
+import dataclasses
 import sys
 import threading
 import time
 import uuid
 
+from .sysfs import pointer
+
 SCHEMA_VERSION = 1
-METADATA_KEYS = ("schema_version", "sample", "collectors")  # added to the stats dict by read()
+METADATA_KEYS = ("schema_version", "sample", "collectors", "sensor_meta")  # added to the stats dict by read()
 BAD = ("partial", "error")  # optional collector states that make a fresh snapshot "degraded"
 
 
@@ -25,6 +28,48 @@ def pick_clock():
     except (AttributeError, OSError):
         return time.monotonic_ns, {"source": "monotonic", "suspend_aware": False}
     return (lambda: time.clock_gettime_ns(boottime)), {"source": "boottime", "suspend_aware": True}
+
+
+REQUIRED_READS = ("cpu", "memory", "disk", "uptime")  # the reads every recorded collection must time
+
+
+@dataclasses.dataclass
+class Collected:
+    """What a recording collect() returns instead of a plain dict (collector.collect_recorded): the stats
+    and, for the Sampler to check, {JSON Pointer: sensor metadata with "span"} and the (start, end) of each
+    of REQUIRED_READS by name (None if not timed), all on clock. Spans are elapsed ns; only the Sampler turns
+    them into offsets. Which values need a record comes from the stats (sensor_values), not from here."""
+    stats: dict
+    sensors: dict
+    required: dict
+    clock: object
+
+
+def sensor_values(stats):
+    """(JSON Pointer, kind, key, value) of every value of recorded stats that needs a read record:
+    temperature and power values, fan rpm/percent, CPU freq, GPU usage/freq/max_freq. The collector attaches
+    its records by these, and the Sampler checks that none is missing, so both use the same list."""
+    for table in ("temperature", "power"):
+        values = stats.get(table)
+        for key, value in (values.items() if isinstance(values, dict) else ()):
+            yield pointer(table, key), table, key, value
+    fans = stats.get("fans")
+    for i, fan in enumerate(fans if isinstance(fans, list) else ()):
+        for field in ("rpm", "percent"):
+            if isinstance(fan, dict) and field in fan:
+                yield pointer("fans", i, field), "fans", (i, field), fan[field]
+    cpus = stats.get("cpu")
+    for i, c in enumerate(cpus if isinstance(cpus, list) else ()):  # i is the row, c["id"] the CPU
+        if isinstance(c, dict) and "freq" in c:
+            yield pointer("cpu", i, "freq"), "cpu", c.get("id"), c["freq"]
+    gpu = stats.get("gpu")
+    for field in ("usage", "freq", "max_freq"):
+        if isinstance(gpu, dict) and field in gpu:
+            yield pointer("gpu", field), "gpu", field, gpu[field]
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def ms(ns):
@@ -51,6 +96,7 @@ class Sampler:
         self._collecting_since = None  # elapsed ns the running attempt started, None between attempts
         self._sequence = 0
         self._failures = 0
+        self._provenance_problem = None  # last logged reason for falling back to the cycle start
         self._ready = threading.Event()
         self._stop = threading.Event()
         self._thread = None
@@ -82,9 +128,13 @@ class Sampler:
         started_at, started = self._wall(), self._elapsed()
         with self._lock:
             self._collecting_since = started
-        reason = None
+        reason, recorded = None, None
         try:
-            stats = copy.deepcopy(self.collect())
+            stats = self.collect()
+            if isinstance(stats, Collected):  # only this type carries read records; dict keys never do
+                stats, recorded = stats.stats, stats
+            stats = copy.deepcopy(stats)
+            stats.pop("sensor_meta", None)  # the Sampler's to add, from records
         except Exception as e:  # one bad read must not stop the core; the last snapshot serves until stale
             print(f"platmon: collect failed: {e!r}", file=sys.stderr)
             reason = "collection_failed"
@@ -94,6 +144,9 @@ class Sampler:
             print(f"platmon: collect took {duration / 1e9:.1f} s, longer than stale_after "
                   f"({self.stale_after:g} s); result dropped", file=sys.stderr)
             reason = "collection_too_slow"
+        sensor_meta = oldest = None
+        if reason is None:  # checked and converted before the lock: the lock is only held to publish
+            sensor_meta, oldest = self._provenance(recorded, stats, started, completed)
         with self._lock:
             self._collecting_since = None
             self._failures = 0 if reason is None else self._failures + 1
@@ -103,9 +156,69 @@ class Sampler:
             if reason is None:
                 self._sequence += 1
                 self._record = {"stats": stats, "sequence": self._sequence, "started_at": started_at,
-                                "completed_at": completed_at, "started": started, "completed": completed}
+                                "completed_at": completed_at, "started": started, "completed": completed,
+                                "sensor_meta": sensor_meta, "oldest_read": oldest}
                 self._ready.set()
         return started
+
+    def _provenance(self, recorded, stats, started, completed):
+        """(sensor_meta, start of the oldest current read or None), outside the state lock. The data age
+        counts from that read only if every record checks out (see _check); otherwise from the collection's
+        start, as for a plain dict. The values are published either way; a record that does not hold is
+        left out or gets read: null. Never raises for bad records: they are not the data."""
+        if recorded is None:
+            return None, None
+        try:
+            meta, oldest, problem = self._check(recorded, stats, started, completed)
+        except Exception as e:  # records of an unexpected shape; the collected values are not affected
+            meta, oldest, problem = None, None, f"unusable read records ({type(e).__name__})"
+        if problem != self._provenance_problem:  # logged when it changes, not every collection
+            if problem:
+                print(f"platmon: data age counts from the collection start: {problem}", file=sys.stderr)
+            self._provenance_problem = problem
+        return meta, oldest
+
+    def _check(self, recorded, stats, started, completed):
+        """Exactly the REQUIRED_READS, each with a valid span; every record at a sensor value of these stats
+        (its pointer as sensor_values writes it, so only RFC 6901 pointers to values that are there); every
+        such value that is a number with a valid read; all on this Sampler's clock, in whole ns, inside this
+        collection. The current reads (required ones and the values' own) are collected here, once."""
+        problems = []
+
+        def valid(span):
+            return (isinstance(span, tuple) and len(span) == 2 and all(type(t) is int for t in span)
+                    and started <= span[0] <= span[1] <= completed)
+
+        same_clock = recorded.clock is self._elapsed
+        if not same_clock:
+            problems.append("read records on another clock")
+        required = recorded.required if isinstance(recorded.required, dict) else {}
+        if set(required) != set(REQUIRED_READS) or not all(valid(s) for s in required.values()):
+            problems.append("a required read is missing or invalid")
+        reads = [s for s in required.values() if valid(s)]
+        sensors = recorded.sensors if isinstance(recorded.sensors, dict) else {}
+        if sensors is not recorded.sensors:
+            problems.append("sensor records of the wrong type")
+        expected = {ptr: value for ptr, _, _, value in sensor_values(stats)}  # from the values, not the records
+        meta, timed = {}, set()
+        for ptr, info in sensors.items():
+            if ptr not in expected or not isinstance(info, dict):
+                problems.append("a record for a value that is not there")
+                continue  # never published: no pointer to nothing, nor a non-standard one
+            value, span = expected[ptr], info.get("span")
+            good = _number(value) and same_clock and valid(span)
+            if _number(value) and not good:
+                problems.append("a value without a valid read")
+            meta[ptr] = {**{k: info.get(k) for k in ("id", "provider", "identity_basis", "unit")},
+                         "read": {"started_offset_ms": ms(span[0] - started), "completed_offset_ms": ms(span[1] - started)}
+                         if good else None}
+            if good:
+                reads.append(span)
+                timed.add(ptr)
+        if any(_number(value) and ptr not in timed for ptr, value in expected.items()):
+            problems.append("a value without its record")
+        problem = problems[0] if problems else None
+        return meta, None if problem or not reads else min(s[0] for s in reads), problem
 
     def read(self, timeout=0.0):
         """(stats, status) from one capture of the state, so both describe the same moment.
@@ -117,7 +230,9 @@ class Sampler:
         with self._lock:
             now = self._elapsed()
             record, attempt, since = self._record, self._attempt_result, self._collecting_since
-        fresh = record is not None and now - record["started"] <= self._stale_ns
+        # data age: from the oldest current read when the records allow it, else from the collection start
+        basis = record and (record["oldest_read"] if record["oldest_read"] is not None else record["started"])
+        fresh = record is not None and now - basis <= self._stale_ns
         if fresh:
             optional = record["stats"].get("collectors")
             unreadable = isinstance(optional, dict) and any(
@@ -130,7 +245,8 @@ class Sampler:
         status = {
             "schema_version": SCHEMA_VERSION, "instance_id": self.instance_id, "state": state, "ready": fresh,
             "sample": record and {"sequence": record["sequence"], "age_ms": ms(now - record["completed"]),
-                                  "data_age_ms": ms(now - record["started"])},
+                                  "cycle_age_ms": ms(now - record["started"]), "data_age_ms": ms(now - basis),
+                                  "data_age_basis": self._basis(record)},
             "last_attempt": attempt and {"state": attempt["state"], "reason": attempt["reason"],
                                          "completed_at": attempt["completed_at"],
                                          "duration_ms": ms(attempt["duration_ns"]),
@@ -148,14 +264,20 @@ class Sampler:
             "sample": {"instance_id": self.instance_id, "sequence": record["sequence"],
                        "started_at": record["started_at"], "completed_at": record["completed_at"],
                        "duration_ms": ms(record["completed"] - record["started"]),
-                       "age_ms": ms(now - record["completed"]), "data_age_ms": ms(now - record["started"]),
-                       "data_age_basis": "cycle_start_upper_bound",
+                       "age_ms": ms(now - record["completed"]), "cycle_age_ms": ms(now - record["started"]),
+                       "data_age_ms": ms(now - basis), "data_age_basis": self._basis(record),
                        "interval_ms": ms(round(self.interval * 1e9)), "stale_after_ms": ms(self._stale_ns)},
             # this snapshot's own state when it was made; later failures show in status, not here. core is
             # the Sampler's (the snapshot was built); optional groups come from collect() as they were
             "collectors": {"core": {"state": "ok", "reason": None}, **optional},
         })
+        if record["sensor_meta"] is not None:
+            stats["sensor_meta"] = copy.deepcopy(record["sensor_meta"])
         return stats, status
+
+    @staticmethod
+    def _basis(record):
+        return "oldest_current_read_start" if record["oldest_read"] is not None else "cycle_start_upper_bound"
 
     def latest(self, timeout=5.0):
         """Most recent snapshot as collect() returned it (no metadata); waits up to timeout for the first one.

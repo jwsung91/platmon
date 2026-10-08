@@ -111,7 +111,8 @@ def test_metadata_is_added_and_stats_are_unchanged():
     assert stats["sample"] == {
         "instance_id": s.instance_id, "sequence": 1,
         "started_at": 1_700_000_000.0, "completed_at": 1_700_000_000.25,  # completed after collect returned
-        "duration_ms": 250.0, "age_ms": 100.0, "data_age_ms": 350.0, "data_age_basis": "cycle_start_upper_bound",
+        "duration_ms": 250.0, "age_ms": 100.0, "cycle_age_ms": 350.0, "data_age_ms": 350.0,
+        "data_age_basis": "cycle_start_upper_bound",  # a plain dict: no read records
         "interval_ms": 1000.0, "stale_after_ms": 5000.0}
     sample = stats["sample"]
     assert sample["data_age_ms"] == sample["age_ms"] + sample["duration_ms"]
@@ -466,7 +467,7 @@ def test_broken_cpu_reading_fails_the_collection(tmp_path, monkeypatch):
     assert good_stats["sample"]["sequence"] == 2 and [x["usage"] for x in good_stats["cpu"]] == [50.0]
     stats, status = attempt()  # broken again: last good values, times and sequence stay
     assert status["state"] == "degraded" and stats == {**good_stats, "sample": {
-        **good_stats["sample"], "age_ms": 1000.0, "data_age_ms": 1000.0}}
+        **good_stats["sample"], "age_ms": 1000.0, "cycle_age_ms": 1000.0, "data_age_ms": 1000.0}}
     stats = attempt()[0]
     assert stats["sample"]["sequence"] == 3 and stats["cpu"] == []
     assert stats["cpu_sampling"]["unavailable"] == [{"id": 0, "reason": "warmup"}]

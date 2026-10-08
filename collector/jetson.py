@@ -22,23 +22,38 @@ def gpu(root="/sys", group=None):
     listing = sysfs.Group("gpu")
     devices = entries(f"{root}/class/devfreq", listing)
     g.merge(listing)
-    tried = sysfs.Group("gpu")  # load candidates that failed: reported only if none gives the load
+    tried = sysfs.Group("gpu", g.trace)  # load candidates that failed: reported only if none gives the load
     devfreq = next((f"{root}/class/devfreq/{n}" for pattern in GPU_DEVFREQ for n in devices
                     if fnmatch.fnmatchcase(n, pattern)), None)
     loads = ([f"{devfreq}/device/load"] if devfreq else []) + [f"{root}/{p}" for p in GPU_LOAD]
-    load = next((v for v in (tried.read(p, "load") for p in loads) if v is not None), None)
+    load = used = None
+    for path in loads:
+        load = tried.read(path, "load")
+        if load is not None:
+            used = path
+            break
     if load is None:
         g.merge(tried)
         return None
 
-    def clock(name):
-        return None if devfreq is None else g.read(f"{devfreq}/{name}", name, found=devfreq)
+    def src(unit, path):
+        """The file this value came from (resolved, so two paths to the same attribute share it); GPU paths
+        differ per BSP, so it is identified by path only."""
+        if g.trace is None:
+            return None
+        rel = sysfs.canonical(path, root)
+        return sysfs.source("gpu", unit, "resolved_path" if rel else "unresolved", path=rel)
 
-    out = {"usage": g.got(load / 10), "freq": clock("cur_freq"), "max_freq": clock("max_freq")}
-    for k in ("freq", "max_freq"):
-        if out[k] is not None:
-            g.got(out[k])
-    return out
+    g.sensor("usage", src("percent", used), tried.span)  # only the candidate that gave the load
+
+    def clock(name):
+        if devfreq is None:
+            return None
+        value = g.read(f"{devfreq}/{name}", name, found=devfreq)
+        g.sensor(name.replace("cur_", ""), src("hertz", f"{devfreq}/{name}"), g.span)
+        return None if value is None else g.got(value)
+
+    return {"usage": g.got(load / 10), "freq": clock("cur_freq"), "max_freq": clock("max_freq")}
 
 
 def pmode(text):
@@ -75,11 +90,17 @@ def tach_fans(root="/sys/class/hwmon", group=None):
     g = group or sysfs.Group("fans")
     fans = []
     with guard(g):
-        for d, chip in hwmon_chips(root, g):
+        chips = hwmon_chips(root, g)
+        ids = sysfs.chip_identities(chips, os.path.dirname(os.path.dirname(root))) if g.trace else {}
+        for d, chip in chips:
             if not os.path.exists(f"{d}/rpm"):
                 continue
             rpm = g.read(f"{d}/rpm", f"{os.path.basename(d)}.rpm", found=f"{d}/rpm")
-            fans.append({"name": chip, "rpm": None if rpm is None else g.got(rpm), "percent": None})
+            fan = {"name": chip, "rpm": None if rpm is None else g.got(rpm), "percent": None}
+            fans.append(fan)
+            if g.trace:
+                basis, where = ids.get(d, ("unresolved", {}))
+                g.sensor((id(fan), "rpm"), sysfs.source("hwmon", "rpm", basis, **where, attr="rpm"), g.span)
     return fans
 
 
