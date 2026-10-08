@@ -12,6 +12,9 @@
 Usage, see docs/performance/low-overhead-cadence.md:
   python3 benchmarks/cadence.py run --out DIR --alias orin --phase matrix --intervals 0.5,1,2,5
   python3 benchmarks/cadence.py report DIR/results.jsonl
+Passive off/on in one tree, see docs/performance/passive-cost-rebaseline.md:
+  python3 benchmarks/cadence.py run --out DIR --alias orin --phase passive-rebaseline --budget-min 60 --max-windows 24
+  python3 benchmarks/cadence.py run --out DIR --alias orin --phase passive-parts --budget-min 60 --max-windows 24
 """
 import argparse
 import array
@@ -37,7 +40,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 mono = time.monotonic_ns
 tcpu = time.thread_time_ns
-INSTRUMENTATION = ("reference", "stages", "stages-lite", "profile-collect", "profile-request")
+INSTRUMENTATION = ("reference", "stages", "stages-lite", "profile-collect", "profile-request", "passive-parts")
+PARTS = ("network", "disk", "pressure.cpu", "pressure.memory", "pressure.io")  # codes 0-4 in the parts table
+PART_STATES = {"ok": 1, "unsupported": 2, "error": 3}
 LOCAL_FS = ("ext4", "ext3", "ext2", "xfs", "btrfs", "f2fs", "vfat", "exfat")  # statvfs allowlist by type
 
 
@@ -178,6 +183,25 @@ def scope_of(stats, passive):
     }
 
 
+def time_parts(probe, table):
+    """passive-parts: times each of Passive's guarded calls (network, disk, each PSI file) on the instance,
+    error conversion included, with the same calls, reads and results. Nothing is read twice."""
+    guarded = probe._guarded
+
+    def timed(fn):
+        part = PARTS.index(fn.__name__ if fn.__name__ != "<lambda>" else f"pressure.{fn.__defaults__[0]}")
+        reads, t0, c0 = probe.reads, mono(), tcpu()
+        out = None
+        try:
+            out = guarded(fn)
+            return out
+        finally:  # also when it raises: the time is recorded either way
+            state = PART_STATES.get(out.get("state"), 0) if isinstance(out, dict) else 0
+            table.add(t0, part, mono() - t0, tcpu() - c0, state, probe.reads - reads)
+    probe._guarded = timed
+    return probe
+
+
 # ---- serve ----
 
 def serve(a):
@@ -198,6 +222,8 @@ def serve(a):
     req_cap = int((a.warmup + a.measure + 10) * max(a.expect_rps, 1)) + 64
     t_http = Table(["t", "elapsed_ns", "cpu_ns", "read_ns", "read_cpu_ns", "bytes", "code", "sequence"], req_cap)
     t_mem = Table(["t", "rss_bytes"], int((a.warmup + a.measure) / 10) + 8)
+    t_parts = Table(["t", "part", "elapsed_ns", "cpu_ns", "state", "reads"],
+                    cap * len(PARTS) if a.instrumentation == "passive-parts" else 0)
 
     rec = prof = cost = None
     if a.instrumentation.startswith("stages"):
@@ -216,6 +242,8 @@ def serve(a):
     cpu = CpuCounters(clock[0], max_gap=max(3 * a.interval, 5.0))
     product = functools.partial(collect_recorded, cpu, {}, clock[0])
     probe = Passive() if a.variant == "B1" else (lambda: None)
+    if a.instrumentation == "passive-parts" and a.variant == "B1":
+        time_parts(probe, t_parts)
 
     def collect():  # same wrapper in B0 and B1; only the callback differs
         t0, c0 = mono(), tcpu()
@@ -335,10 +363,10 @@ def serve(a):
         "cpu_pct_all_cores": cpu_pct_one_core(start["self"], end["self"], elapsed) / os.cpu_count(),
         "children_cpu_s": (end["children"]["ru_utime"] + end["children"]["ru_stime"])
                           - (start["children"]["ru_utime"] + start["children"]["ru_stime"]),
-        "buffer_bytes": sum(t.nbytes() for t in (t_collect, t_attempt, t_http, t_mem)),
+        "buffer_bytes": sum(t.nbytes() for t in (t_collect, t_attempt, t_http, t_mem, t_parts)),
         "scope": scope, "passive_io": {k: getattr(probe, k, None) for k in ("reads", "read_bytes", "lookups")},
         "tables": {"collect": t_collect.dump(), "attempt": t_attempt.dump(), "http": t_http.dump(),
-                   "mem": t_mem.dump()},
+                   "mem": t_mem.dump(), "parts": t_parts.dump()},
         "python": platform.python_version(), "source_hash": source_hash(), "bench_hash": bench_hash(),
     }
     with open(a.out, "w") as f:
@@ -467,7 +495,7 @@ def probe(a):
 
 # ---- run (orchestrator) ----
 
-def plan(phase, intervals, final=None):
+def plan(phase, intervals, final=None, clients=(1, 0), blocks=2):
     """The conditions of one phase, in run order. B0 B1 B1 B0 per interval, so a drift over time does not
     favour one variant."""
     out = []
@@ -493,6 +521,14 @@ def plan(phase, intervals, final=None):
     elif phase == "breakdown-lite":  # the one retry with fewer stages, when stages cost >= 10 % over reference
         out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=1, poll=1.0, measure=120)
                 for m in ("reference", "stages-lite", "stages-lite", "reference")]
+    elif phase == "passive-rebaseline":  # B0/B1 = passive off/on in one tree; blocks alternate client counts
+        for b in range(blocks):
+            for n in clients:
+                out += [dict(kind="serve", variant=v, instr="reference", interval=1.0, clients=n, poll=1.0, measure=120,
+                             block=f"c{n}-{b + 1}") for v in ("B0", "B1", "B1", "B0")]
+    elif phase == "passive-parts":  # diagnostic only: B1 with each passive part timed, bracketed by reference
+        out += [dict(kind="serve", variant="B1", instr=m, interval=1.0, clients=0, poll=1.0, measure=120, block="parts-1")
+                for m in ("reference", "passive-parts", "passive-parts", "reference")]
     elif phase == "probes":
         out += [dict(kind="probe", feature="noop", period=1.0, measure=120)]
         out += [dict(kind="probe", feature="wireless", period=p, measure=120) for p in (1.0, 2.0, 5.0)]
@@ -618,7 +654,8 @@ def run(a):
         done.append(manifest(a.alias))
         with open(results, "a") as f:
             f.write(json.dumps(done[-1]) + "\n")
-    conds = plan(a.phase, [float(x) for x in a.intervals.split(",")] if a.intervals else [], a.final)
+    conds = plan(a.phase, [float(x) for x in a.intervals.split(",")] if a.intervals else [], a.final,
+                 tuple(int(x) for x in a.clients.split(",")), a.blocks)
     for c in conds:
         c["measure"] = a.measure or c["measure"]  # a shorter window is for smoke tests only
     me = sys.executable
@@ -792,7 +829,8 @@ def summarize_serve(rec):
     st, en = s["start"]["self"], s["end"]["self"]
     return {
         "run_id": rec["run_id"], "alias": rec["alias"], "phase": rec["cond"]["phase"], "variant": s["variant"],
-        "instr": s.get("instrumentation", "reference"),
+        "instr": s.get("instrumentation", "reference"), "block": rec["cond"].get("block"),
+        "passive_calls": len(col), "parts": parts_summary(s, t0, t1),
         "interval_s": s["interval_s"], "clients": rec["cond"]["clients"], "poll_s": rec["cond"]["poll"],
         "valid": rec["valid"], "invalid": rec.get("invalid"), "order": rec["order"],
         "measured_elapsed_s": s["measured_elapsed_s"], "sample_count": sum(r["ok"] for r in att),
@@ -837,6 +875,33 @@ def summarize_serve(rec):
     }
 
 
+def parts_summary(s, t0, t1):
+    """passive-parts: per part, the window's calls, their CPU as % of one core over the window (the sum of
+    the calls' thread CPU, never a percentile times calls), mean, p50/p95 and the results' states."""
+    table = s["tables"].get("parts")
+    if not table or not table["rows"]:
+        return None
+    rs = rows(table, t0, t1)
+    out = {}
+    for code, name in enumerate(PARTS):
+        mine = [r for r in rs if r["part"] == code]
+        out[name] = {"calls": len(mine), "cpu_pct_one_core": 100 * sum(r["cpu_ns"] for r in mine) / 1e9 / s["measured_elapsed_s"],
+                     "cpu_ms": dist([r["cpu_ns"] / 1e6 for r in mine]), "elapsed_ms": dist([r["elapsed_ns"] / 1e6 for r in mine]),
+                     "states": {k: sum(1 for r in mine if r["state"] == v) for k, v in {**PART_STATES, "other": 0}.items()},
+                     "successful_reads": sum(r["reads"] for r in mine)}
+    return out
+
+
+def blocks(runs):
+    """Per block (one A B B A of one client count): mean B1 - mean B0 of that block's valid runs."""
+    out = {}
+    for r in runs:
+        if r["valid"] and r.get("block"):
+            out.setdefault(r["block"], {"B0": [], "B1": []})[r["variant"]].append(r["cpu_pct_one_core"])
+    return {b: {**v, "delta_pp": sum(v["B1"]) / len(v["B1"]) - sum(v["B0"]) / len(v["B0"]) if v["B0"] and v["B1"] else None}
+            for b, v in out.items()}
+
+
 def mismatches(runs):
     """Why runs compared as B0 vs B1 are not comparable (empty if they are)."""
     keys = ("alias", "interval_s", "clients", "poll_s", "python", "source_hash", "bench_hash", "scope")
@@ -855,13 +920,15 @@ def compare(runs):
     b0 = [r["cpu_pct_one_core"] for r in valid if r["variant"] == "B0"]
     b1 = [r["cpu_pct_one_core"] for r in valid if r["variant"] == "B1"]
     if not b0 or not b1:
-        return {"b0": b0, "b1": b1, "delta_pp": None, "verdict": "insufficient", "problems": mismatches(valid)}
+        return {"b0": b0, "b1": b1, "delta_pp": None, "verdict": "insufficient", "problems": mismatches(valid),
+                "blocks": blocks(valid)}
     delta = sum(b1) / len(b1) - sum(b0) / len(b0)  # kept negative if negative
     spread = max(max(b0) - min(b0), max(b1) - min(b1))
     repeats = len(b0) > 1 and len(b1) > 1
     return {"b0": b0, "b1": b1, "delta_pp": delta, "spread_pp": spread if repeats else None,
             "distinguishable": repeats and abs(delta) > spread,
-            "rel_pct": 100 * delta / (sum(b0) / len(b0)) if sum(b0) else None, "problems": mismatches(valid)}
+            "rel_pct": 100 * delta / (sum(b0) / len(b0)) if sum(b0) else None, "problems": mismatches(valid),
+            "blocks": blocks(valid)}
 
 
 def summarize_probe(rec):
@@ -988,6 +1055,24 @@ def markdown(out):
                 f"{f(s['elapsed_ms']['p50'], 3)}/{f(s['elapsed_ms']['p95'], 3)}",
                 f"{f(s['cpu_ms']['p50'], 3)}/{f(s['cpu_ms']['p95'], 3)}", str(s["failures"]), str(s["with_value"]),
                 f"{p['skipped_ticks']}/{p['pending_at_end']}", "yes" if p["valid"] else f"no: {p['invalid']}"]) + " |")
+    with_blocks = [c for c in out["comparisons"] if c.get("blocks")]
+    if with_blocks:
+        lines += ["", "| platform | phase | clients | block | B0 CPU % | B1 CPU % | B1-B0 pp |", "|" + "---|" * 7]
+        for c in with_blocks:
+            for name, v in c["blocks"].items():
+                lines.append(f"| {c['key'][0]} | {c['key'][1]} | {c['key'][3]} | {name} | {', '.join(f(x) for x in v['B0']) or '-'} "
+                             f"| {', '.join(f(x) for x in v['B1']) or '-'} | {f(v['delta_pp'], 3)} |")
+    with_parts = [r for r in out["runs"] if r.get("parts")]
+    if with_parts:
+        lines += ["", "| platform | run | CPU % (process) | part | calls | CPU % of one core (sum) | cpu mean ms "
+                  "| elapsed p50/p95 ms | states ok/unsupported/error/other | successful reads |", "|" + "---|" * 10]
+        for r in with_parts:
+            for name, p in r["parts"].items():
+                lines.append("| " + " | ".join([
+                    r["alias"], r["run_id"], f(r["cpu_pct_one_core"]), name, str(p["calls"]), f(p["cpu_pct_one_core"], 4),
+                    f(p["cpu_ms"]["mean"], 4), f"{f(p['elapsed_ms']['p50'], 4)}/{f(p['elapsed_ms']['p95'], 4)}",
+                    "/".join(str(p["states"][k]) for k in ("ok", "unsupported", "error", "other")),
+                    str(p["successful_reads"])]) + " |")
     if out["skipped"]:
         lines += ["", "Not run or invalid:"] + [f"- {s['run_id']}: {s['cond']} — {s['why']}" for s in out["skipped"]]
     return "\n".join(lines)
@@ -1022,9 +1107,12 @@ def main(argv=None):
     r = sub.add_parser("run")
     r.add_argument("--out", required=True)
     r.add_argument("--alias", required=True)
-    r.add_argument("--phase", choices=("matrix", "clients", "final", "probes", "breakdown", "breakdown-lite", "ab"), required=True)
+    r.add_argument("--phase", choices=("matrix", "clients", "final", "probes", "breakdown", "breakdown-lite", "ab",
+                                       "passive-rebaseline", "passive-parts"), required=True)
     r.add_argument("--intervals", default="1,2,0.5,5")
     r.add_argument("--final", type=float)
+    r.add_argument("--clients", default="1,0", help="passive-rebaseline: client counts, alternated per block")
+    r.add_argument("--blocks", type=int, default=2, help="passive-rebaseline: A B B A blocks per client count")
     r.add_argument("--warmup", type=float, default=30)
     r.add_argument("--measure", type=float, help="override every window length (smoke tests only)")
     r.add_argument("--port", type=int, default=19798)
