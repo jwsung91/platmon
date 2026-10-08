@@ -1,6 +1,9 @@
 """The bench tools' own arithmetic and bookkeeping (benchmarks/). No performance thresholds: those are judged
 from recorded device runs, not on CI."""
 import json
+import subprocess
+import sys
+import time
 
 import pytest
 
@@ -188,3 +191,128 @@ def test_report_roundtrip(tmp_path, capsys):
     cadence.main(["report", "--md", str(results)])
     md = capsys.readouterr().out
     assert "| t | matrix | 0.1 |" in md and "| B1 |" in md
+
+
+FAKE = r'''
+import json, os, sys, time
+args = sys.argv[1:]
+out = args[args.index("--out") + 1]
+mode = os.environ["FAKE_MODE"]
+if args[0] == "client":
+    json.dump({"rusage": {}, "table": {"fields": ["t"], "rows": []}}, open(out, "w"))
+elif args[0] == "probe":
+    json.dump({"pending_at_end": mode == "pending", "skipped_ticks": 3 if mode == "pending" else 0}, open(out, "w"))
+elif mode == "silent":
+    time.sleep(60)  # alive, stdout open, never ready
+else:
+    print("ready", flush=True)
+    if mode == "hang":
+        time.sleep(60)
+    elif mode == "ok":
+        json.dump({"clock_jump": False}, open(out, "w"))
+    # mode "noresult": exits 0 without writing a result
+'''
+
+
+@pytest.fixture
+def fake_child(tmp_path, monkeypatch):
+    script = tmp_path / "fake_child.py"
+    script.write_text(FAKE)
+    started = []
+    real = subprocess.Popen
+
+    def popen(*args, **kw):
+        started.append(real(*args, **kw))
+        return started[-1]
+    monkeypatch.setattr(cadence, "child_cmd", lambda me, *args: [me, str(script), *args])
+    monkeypatch.setattr(cadence.subprocess, "Popen", popen)
+    args = type("A", (), {"out": str(tmp_path), "warmup": 0.0, "port": 1, "ready_timeout": 0.5})()
+
+    def execute(mode, **cond):
+        monkeypatch.setenv("FAKE_MODE", mode)
+        c = {"kind": "serve", "variant": "B0", "interval": 1.0, "clients": 1, "poll": 1.0, "measure": 0.1, **cond}
+        return cadence.execute(sys.executable, "r", c, args)
+    return execute, started, real
+
+
+def test_execute_normal_path(fake_child):
+    execute, started, real = fake_child
+    out = execute("ok")
+    assert out["valid"] and out["serve"] == {"clock_jump": False} and len(out["clients"]) == 1
+
+
+def test_execute_server_never_ready_is_bounded_and_reaped(fake_child):
+    execute, started, real = fake_child
+    t0 = time.monotonic()
+    out = execute("silent")
+    assert time.monotonic() - t0 < 15 and not out["valid"] and "not ready" in out["invalid"]
+    assert "timeout" not in out and all(p.poll() is not None for p in started)
+
+
+def test_execute_timeout_kills_and_reaps(fake_child, monkeypatch):
+    execute, started, real = fake_child
+    monkeypatch.setattr(real, "wait", _short_wait(real.wait))
+    out = execute("hang")
+    assert out["timeout"] and "server timeout" in out["invalid"] and "unreaped" not in out
+    assert all(p.poll() is not None for p in started)
+
+
+def _short_wait(wait):
+    """Popen.wait with the runner's long deadlines cut to 1 s, so a hanging child times out quickly."""
+    def short(self, timeout=None):
+        return wait(self, timeout=None if timeout is None else min(timeout, 1.0))
+    return short
+
+
+def test_execute_child_without_result_does_not_raise(fake_child):
+    execute, _, _ = fake_child
+    out = execute("noresult")
+    assert not out["valid"] and "no result" in out["invalid"]
+
+
+def test_unreaped_process_is_reported():
+    class Stuck:
+        pid = 42
+
+        def poll(self):
+            return None
+
+        def kill(self):
+            pass
+
+        def wait(self, timeout=None):
+            raise cadence.subprocess.TimeoutExpired("x", timeout)
+    out = cadence.failed("server timeout", [Stuck()], timeout=True)
+    assert out["timeout"] and out["unreaped"] == [42] and "still running" in out["invalid"]
+
+
+def test_pending_probe_is_not_valid(fake_child):
+    execute, _, _ = fake_child
+    out = execute("pending", kind="probe", feature="statvfs", period=30.0)
+    assert out["valid"] is False and out["incomplete"] and out["probe"]["skipped_ticks"] == 3
+    assert execute("done", kind="probe", feature="statvfs", period=30.0)["valid"]
+
+
+def test_pooled_p95_differs_from_max_of_per_run_p95():
+    def rec(values):
+        rows = [[i, 0, 0, int(v * 1e6), 0] for i, v in enumerate(values, 1)]
+        return {"valid": True, "serve": {"variant": "B1", "start": {"mono": 0}, "end": {"mono": 10**9},
+                "tables": {"collect": {"fields": ["t", "prod_ns", "prod_cpu_ns", "passive_ns", "passive_cpu_ns"],
+                                       "rows": rows},
+                           "attempt": {"fields": ["t", "elapsed_ns"], "rows": []}}}}
+    p = cadence.pooled([rec([1] * 94 + [100] * 6), rec([2] * 100)])["B1"]
+    assert p["runs"] == 2 and p["passive_ms"]["n"] == 200
+    assert p["passive_ms"]["p95"] == 2 and p["passive_ms"]["per_run_max_p95"] == 100
+
+
+def test_pending_and_skipped_reach_the_report():
+    probe = {"feature": "statvfs", "period_s": 30.0, "cpu_pct_one_core": 0.1, "skipped_ticks": 3,
+             "pending_at_end": True, "mounts": 1,
+             "table": {"fields": ["t", "step", "elapsed_ns", "cpu_ns", "count", "value_x1000", "ok"],
+                       "rows": [[1, 0, 10**6, 10**6, 1, -10**12, 1]]}}
+    rec = {"run_id": "r", "alias": "x", "valid": False, "invalid": "a probe call was still running at the end",
+           "probe": probe}
+    s = cadence.summarize_probe(rec)
+    assert s["skipped_ticks"] == 3 and s["pending_at_end"] and not s["valid"]
+    md = cadence.markdown({"comparisons": [], "runs": [], "probes": [s], "skipped": []})
+    assert "| 3/True | no: a probe call was still running at the end |" in md

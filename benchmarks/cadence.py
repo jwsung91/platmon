@@ -23,6 +23,7 @@ import math
 import os
 import platform
 import resource
+import select
 import shutil
 import subprocess
 import sys
@@ -575,63 +576,99 @@ def run(a):
             f.write(json.dumps(rec) + "\n")
 
 
+def child_cmd(me, *args):
+    """The command line of a bench child process (replaced in tests)."""
+    return [me, __file__, *args]
+
+
+def stop_process(p, grace=10.0):
+    """Kills p (a process this runner started) and waits up to grace s for it to end. True if it ended."""
+    if p.poll() is None:
+        p.kill()
+    try:
+        p.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        return False
+    return True
+
+
+def wait_line(p, timeout):
+    """The first stdout line of p, or None if none came within timeout s (the child may hold stdout open)."""
+    ready, _, _ = select.select([p.stdout], [], [], timeout)
+    return p.stdout.readline() if ready else None
+
+
+def load(path):
+    """A child's result file, or None if it is missing or unreadable (the child failed before writing it)."""
+    try:
+        with open(path) as f:
+            out = json.load(f)
+    except (OSError, ValueError):
+        return None
+    os.remove(path)
+    return out
+
+
+def failed(why, procs, **extra):
+    """An invalid result after stopping procs. If one of them does not end, the result says so and the
+    runner starts no further run (timeout)."""
+    alive = [p.pid for p in procs if not stop_process(p)]
+    out = {"valid": False, "invalid": why, **extra}
+    if alive:
+        out.update(timeout=True, unreaped=alive, invalid=f"{why}; still running after kill: {alive}")
+    return out
+
+
 def execute(me, run_id, c, a):
-    """One condition: the server (or probe) and its clients as separate processes; returns their results."""
+    """One condition: the server (or probe) and its clients as separate processes; returns their results.
+    Every wait has a deadline, from the start (ready line) to the processes' end."""
     tmp = os.path.join(a.out, "tmp")
     os.makedirs(tmp, exist_ok=True)
     out = {"valid": True}
     if c["kind"] == "probe":
         path = f"{tmp}/{run_id}.json"
-        p = subprocess.Popen([me, __file__, "probe", "--feature", c["feature"], "--period", str(c["period"]),
-                              "--duration", str(c["measure"]), "--out", path, "--run-id", run_id,
-                              "--burst", "100" if c["feature"] == "statvfs" else "0"])
+        p = subprocess.Popen(child_cmd(me, "probe", "--feature", c["feature"], "--period", str(c["period"]),
+                                       "--duration", str(c["measure"]), "--out", path, "--run-id", run_id,
+                                       "--burst", "100" if c["feature"] == "statvfs" else "0"))
         try:
             p.wait(timeout=c["measure"] + 60)
         except subprocess.TimeoutExpired:
-            p.kill()
-            return {"valid": False, "invalid": "probe timeout", "timeout": True}
-        if p.returncode:
-            return {"valid": False, "invalid": f"probe exit {p.returncode}"}
-        with open(path) as f:
-            out["probe"] = json.load(f)
-        os.remove(path)
+            return failed("probe timeout", [p], timeout=True)
+        result = None if p.returncode else load(path)
+        if result is None:
+            return {"valid": False, "invalid": f"probe exit {p.returncode}, no result"}
+        out["probe"] = result
+        if result["pending_at_end"]:  # the slowest call never finished: its time is not in the samples
+            out.update(valid=False, incomplete=True, invalid="a probe call was still running at the end")
         return out
     path = f"{tmp}/{run_id}.serve.json"
-    srv = subprocess.Popen([me, __file__, "serve", "--variant", c["variant"], "--interval", str(c["interval"]),
-                            "--warmup", str(a.warmup), "--measure", str(c["measure"]), "--port", str(a.port),
-                            "--out", path, "--run-id", run_id, "--expect-rps", str(c["clients"] / c["poll"])],
+    srv = subprocess.Popen(child_cmd(me, "serve", "--variant", c["variant"], "--interval", str(c["interval"]),
+                                     "--warmup", str(a.warmup), "--measure", str(c["measure"]), "--port", str(a.port),
+                                     "--out", path, "--run-id", run_id, "--expect-rps", str(c["clients"] / c["poll"])),
                            stdout=subprocess.PIPE, text=True)
-    ready = srv.stdout.readline()
-    if not ready.startswith("ready"):
-        srv.kill()
-        return {"valid": False, "invalid": f"server did not start: {ready!r}"}
-    clients = [subprocess.Popen([me, __file__, "client", "--url", f"http://127.0.0.1:{a.port}/api/stats",
-                                 "--period", str(c["poll"]), "--duration", str(a.warmup + c["measure"] + 2),
-                                 "--out", f"{tmp}/{run_id}.client{k}.json"]) for k in range(c["clients"])]
+    ready = wait_line(srv, a.ready_timeout)
+    if not ready or not ready.startswith("ready"):
+        return failed(f"server not ready: {ready!r}", [srv])
+    clients = [subprocess.Popen(child_cmd(me, "client", "--url", f"http://127.0.0.1:{a.port}/api/stats",
+                                          "--period", str(c["poll"]), "--duration", str(a.warmup + c["measure"] + 2),
+                                          "--out", f"{tmp}/{run_id}.client{k}.json")) for k in range(c["clients"])]
     try:
         srv.wait(timeout=a.warmup + c["measure"] + 60)
     except subprocess.TimeoutExpired:
-        srv.kill()
-        for p in clients:
-            p.kill()
-        return {"valid": False, "invalid": "server timeout", "timeout": True}
+        return failed("server timeout", [srv, *clients], timeout=True)
     for p in clients:
         try:
             p.wait(timeout=30)
         except subprocess.TimeoutExpired:
-            p.kill()
-            out.update(valid=False, invalid="client timeout")
-    if srv.returncode:
-        return {"valid": False, "invalid": f"server exit {srv.returncode}"}
-    with open(path) as f:
-        out["serve"] = json.load(f)
-    os.remove(path)
-    out["clients"] = []
-    for k in range(c["clients"]):
-        p = f"{tmp}/{run_id}.client{k}.json"
-        with open(p) as f:
-            out["clients"].append(json.load(f))
-        os.remove(p)
+            return failed("client timeout", clients, timeout=True)
+    result = None if srv.returncode else load(path)
+    if result is None:
+        return {"valid": False, "invalid": f"server exit {srv.returncode}, no result"}
+    out["serve"] = result
+    out["clients"] = [load(f"{tmp}/{run_id}.client{k}.json") for k in range(c["clients"])]
+    if None in out["clients"]:
+        out.update(valid=False, invalid="a client wrote no result")
+        out["clients"] = [x for x in out["clients"] if x is not None]
     if out["serve"]["clock_jump"]:
         out.update(valid=False, invalid="clock jump (suspend?) during the window")
     return out
@@ -730,7 +767,7 @@ def summarize_probe(rec):
     t = rows(p["table"])
     periodic = [r for r in t if r["step"] < 10]
     out = {"run_id": rec["run_id"], "alias": rec["alias"], "feature": p["feature"], "period_s": p["period_s"],
-           "valid": rec["valid"], "cpu_pct_one_core": p["cpu_pct_one_core"], "skipped_ticks": p["skipped_ticks"],
+           "valid": rec["valid"], "invalid": rec.get("invalid"), "cpu_pct_one_core": p["cpu_pct_one_core"], "skipped_ticks": p["skipped_ticks"],
            "pending_at_end": p["pending_at_end"], "mounts": p["mounts"], "steps": {}}
     for step in sorted({r["step"] for r in t}):
         rs = [r for r in t if r["step"] == step]
@@ -743,20 +780,46 @@ def summarize_probe(rec):
     return out
 
 
+def window_samples(rec):
+    """Per-collection values of one run's measured window, for pooling across runs."""
+    s = rec["serve"]
+    t0, t1 = s["start"]["mono"], s["end"]["mono"]
+    col = rows(s["tables"]["collect"], t0, t1)
+    return {"passive_ms": [r["passive_ns"] / 1e6 for r in col], "passive_cpu_ms": [r["passive_cpu_ns"] / 1e6 for r in col],
+            "attempt_ms": [r["elapsed_ns"] / 1e6 for r in rows(s["tables"]["attempt"], t0, t1)]}
+
+
+def pooled(recs):
+    """Per variant: distributions over the samples of all valid runs of one condition taken together
+    (pooled), next to the largest of the runs' own p95 (per_run_max_p95). The two are different numbers."""
+    out = {}
+    for variant in ("B0", "B1"):
+        runs = [r for r in recs if r["valid"] and r["serve"]["variant"] == variant]
+        per_run = [window_samples(r) for r in runs]
+        out[variant] = {"runs": len(runs), **{
+            k: {**dist([x for w in per_run for x in w[k]]),
+                "per_run_max_p95": max((percentile(w[k], 95) for w in per_run if w[k]), default=None)}
+            for k in ("passive_ms", "passive_cpu_ms", "attempt_ms")}}
+    return out
+
+
 def report(a):
     recs = []
     for path in a.results:
         with open(path) as f:
             recs += [json.loads(l) for l in f if l.strip()]
-    serves = [summarize_serve(r) for r in recs if r["kind"] == "run" and "serve" in r]
-    groups = {}
-    for s in serves:
-        groups.setdefault((s["alias"], s["phase"], s["interval_s"], s["clients"], s["poll_s"]), []).append(s)
+    with_serve = [r for r in recs if r["kind"] == "run" and "serve" in r]
+    serves = [summarize_serve(r) for r in with_serve]
+    groups, raw = {}, {}
+    for s, r in zip(serves, with_serve):
+        key = (s["alias"], s["phase"], s["interval_s"], s["clients"], s["poll_s"])
+        groups.setdefault(key, []).append(s)
+        raw.setdefault(key, []).append(r)
     out = {"manifests": [r for r in recs if r["kind"] == "manifest"],
            "skipped": [{"run_id": r["run_id"], "cond": r["cond"], "why": r.get("skipped") or r.get("invalid")}
                        for r in recs if r["kind"] == "run" and not r.get("valid")],
            "runs": serves,
-           "comparisons": [{"key": list(k), **compare(v)} for k, v in groups.items()],
+           "comparisons": [{"key": list(k), **compare(v), "pooled": pooled(raw[k])} for k, v in groups.items()],
            "probes": [summarize_probe(r) for r in recs if r["kind"] == "run" and "probe" in r]}
     if a.md:
         print(markdown(out))
@@ -779,22 +842,22 @@ def markdown(out):
         return sum(v) / len(v) if v else None
 
     lines = ["| platform | phase | interval s | clients/poll s | B0 CPU % (runs) | B1 CPU % (runs) | B1-B0 pp | spread pp "
-             "| passive p95 ms (elapsed/cpu, n) | attempt p95 ms B0/B1 | RSS end B1-B0 MiB | RSS 2nd-half growth KiB B0/B1 "
-             "| failed/overrun | actual interval p50/max ms | problems |", "|" + "---|" * 15]
+             "| B1 passive p95 ms: pooled elapsed/cpu (samples, runs) | B1 passive: max of per-run p95 ms | attempt p95 ms pooled B0/B1 | RSS end B1-B0 MiB | RSS 2nd-half growth KiB B0/B1 "
+             "| failed/overrun | actual interval p50/max ms | problems |", "|" + "---|" * 16]
     for c in out["comparisons"]:
         rs = runs_of(c["key"])
         b0 = [r for r in rs if r["variant"] == "B0"]
         b1 = [r for r in rs if r["variant"] == "B1"]
-        p95 = [r["passive_ms"]["p95"] for r in b1]
-        p95c = [r["passive_cpu_ms"]["p95"] for r in b1]
+        pb0, pb1 = c["pooled"]["B0"], c["pooled"]["B1"]
         rss = None if not b0 or not b1 else (mean([r["rss_end"] for r in b1]) - mean([r["rss_end"] for r in b0])) / 2**20
         lines.append("| " + " | ".join([
             c["key"][0], c["key"][1], f(c["key"][2], 1), f"{c['key'][3]}/{f(c['key'][4], 0)}",
             ", ".join(f(x) for x in c["b0"]) or "-", ", ".join(f(x) for x in c["b1"]) or "-",
             f(c.get("delta_pp"), 3), f(c.get("spread_pp"), 3) + ("" if c.get("distinguishable") else " (no repeats)" if c.get("spread_pp") is None
                                        else " (indistinguishable)"),
-            f"{f(max(p95) if p95 else None)}/{f(max(p95c) if p95c else None)}, {sum(r['passive_ms']['n'] for r in b1)}",
-            f"{f(mean([r['attempt_ms']['p95'] for r in b0]))}/{f(mean([r['attempt_ms']['p95'] for r in b1]))}",
+            f"{f(pb1['passive_ms']['p95'])}/{f(pb1['passive_cpu_ms']['p95'])} ({pb1['passive_ms']['n']}, {pb1['runs']})",
+            f(pb1["passive_ms"]["per_run_max_p95"]),
+            f"{f(pb0['attempt_ms']['p95'])}/{f(pb1['attempt_ms']['p95'])}",
             f(rss), f"{f(max((r['rss_second_half_kib'] for r in b0), default=None), 0)}/{f(max((r['rss_second_half_kib'] for r in b1), default=None), 0)}",
             f"{sum(r['failed_attempts'] for r in rs)}/{sum(r['overrun_count'] for r in rs)}",
             f"{f(mean([r['actual_interval_ms']['p50'] for r in rs]), 1)}/{f(max((r['actual_interval_ms']['max'] or 0) for r in rs), 1)}",
@@ -811,7 +874,7 @@ def markdown(out):
             str(r["client_failures"]), f((r["response_bytes"]["mean"] or 0) / 1024 if r["response_bytes"]["n"] else None, 1),
             str(r["distinct_sequences_served"])]) + " |")
     lines += ["", "| platform | feature | period s | step | n | CPU % (process) | elapsed p50/p95 ms | cpu p50/p95 ms "
-              "| failures | with value | skipped/pending |", "|" + "---|" * 11]
+              "| failures | with value | skipped/pending | valid |", "|" + "---|" * 12]
     names = {"noop": ["noop"], "wireless": ["/proc/net/wireless"], "statvfs": ["mountinfo", "statvfs"]}
     for p in out["probes"]:
         for step, s in p["steps"].items():
@@ -822,7 +885,7 @@ def markdown(out):
                 f(p["cpu_pct_one_core"], 3) if i < 10 else "-",
                 f"{f(s['elapsed_ms']['p50'], 3)}/{f(s['elapsed_ms']['p95'], 3)}",
                 f"{f(s['cpu_ms']['p50'], 3)}/{f(s['cpu_ms']['p95'], 3)}", str(s["failures"]), str(s["with_value"]),
-                f"{p['skipped_ticks']}/{p['pending_at_end']}"]) + " |")
+                f"{p['skipped_ticks']}/{p['pending_at_end']}", "yes" if p["valid"] else f"no: {p['invalid']}"]) + " |")
     if out["skipped"]:
         lines += ["", "Not run or invalid:"] + [f"- {s['run_id']}: {s['cond']} — {s['why']}" for s in out["skipped"]]
     return "\n".join(lines)
@@ -861,6 +924,7 @@ def main(argv=None):
     r.add_argument("--warmup", type=float, default=30)
     r.add_argument("--measure", type=float, help="override every window length (smoke tests only)")
     r.add_argument("--port", type=int, default=19798)
+    r.add_argument("--ready-timeout", type=float, default=30, help="seconds to wait for a bench server to start")
     r.add_argument("--budget-min", type=float, default=90)
     r.add_argument("--max-windows", type=int, default=32)
     r.add_argument("--watch-url", help="a running service that must keep answering between runs")
