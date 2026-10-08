@@ -366,6 +366,9 @@ def serve_pair(tmp_path_factory):
         cadence.main(["serve", "--variant", "B0", "--instrumentation", mode, "--interval", "0.1",
                       "--warmup", "0.3", "--measure", "0.6", "--port", "0", "--out", str(path)])
         out[mode] = json.loads(path.read_text())
+    # two real runs on a shared host may see a different scope (a sensor coming or going); these tests
+    # are about which runs the report compares, so the pair starts out equal in every condition
+    out["stages"]["scope"] = out["reference"]["scope"]
     return out
 
 
