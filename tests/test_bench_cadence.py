@@ -204,6 +204,10 @@ elif args[0] == "probe":
     json.dump({"pending_at_end": mode == "pending", "skipped_ticks": 3 if mode == "pending" else 0}, open(out, "w"))
 elif mode == "silent":
     time.sleep(60)  # alive, stdout open, never ready
+elif mode == "partial":
+    sys.stdout.write("rea")  # part of the ready line, no newline, then stays alive
+    sys.stdout.flush()
+    time.sleep(60)
 else:
     print("ready", flush=True)
     if mode == "hang":
@@ -316,3 +320,76 @@ def test_pending_and_skipped_reach_the_report():
     assert s["skipped_ticks"] == 3 and s["pending_at_end"] and not s["valid"]
     md = cadence.markdown({"comparisons": [], "runs": [], "probes": [s], "skipped": []})
     assert "| 3/True | no: a probe call was still running at the end |" in md
+
+
+WRITER = r'''
+import os, sys, time
+# argv: pieces of stdout, each "<delay s>:<text>"; then stays alive with stdout open until killed
+for piece in sys.argv[1:]:
+    delay, text = piece.split(":", 1)
+    time.sleep(float(delay))
+    os.write(1, text.encode().replace(b"\\n", b"\n"))
+time.sleep(30)
+'''
+
+
+@pytest.fixture
+def writer(tmp_path):
+    script = tmp_path / "writer.py"
+    script.write_text(WRITER)
+    procs = []
+
+    def start(*pieces):
+        procs.append(subprocess.Popen([sys.executable, str(script), *pieces], stdout=subprocess.PIPE))
+        return procs[-1]
+    yield start
+    for p in procs:
+        assert cadence.stop_process(p)
+        p.stdout.close()
+
+
+def timed(fn):
+    t0 = time.monotonic()
+    out = fn()
+    return out, time.monotonic() - t0
+
+
+# The child's start-up (an interpreter launch) happens before its first delay, so every deadline below
+# leaves it time: timeouts are 2 s and more, the quiet periods well past them.
+
+def test_wait_line_no_output_times_out(writer):
+    out, took = timed(lambda: cadence.wait_line(writer(), 2.0))
+    assert out is None and 1.9 < took < 4
+
+
+def test_wait_line_partial_line_does_not_block(writer):
+    p = writer("0:rea", "6:dy\\n")  # no newline within the deadline
+    out, took = timed(lambda: cadence.wait_line(p, 2.0))
+    assert out is None and took < 4
+
+
+def test_wait_line_pieces_within_deadline(writer):
+    p = writer("0:re", "0.2:ad", "0.2:y 1\\nmore")
+    assert cadence.wait_line(p, 5.0) == "ready 1\n"
+
+
+def test_wait_line_trickle_does_not_extend_deadline(writer):
+    p = writer(*["0.3:x"] * 30)  # a byte every 0.3 s, never a newline
+    out, took = timed(lambda: cadence.wait_line(p, 2.0))
+    assert out is None and took < 4
+
+
+def test_wait_line_eof_without_newline(tmp_path):
+    p = subprocess.Popen([sys.executable, "-c", "import os; os.write(1, b'ready')"], stdout=subprocess.PIPE)
+    try:
+        assert cadence.wait_line(p, 5.0) is None
+    finally:
+        assert cadence.stop_process(p)
+        p.stdout.close()
+
+
+def test_execute_partial_ready_is_bounded_and_reaped(fake_child, monkeypatch):
+    execute, started, _ = fake_child
+    out, took = timed(lambda: execute("partial"))
+    assert not out["valid"] and "not ready" in out["invalid"] and took < 15
+    assert all(p.poll() is not None for p in started)

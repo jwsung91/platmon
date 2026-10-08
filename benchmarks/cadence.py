@@ -592,10 +592,21 @@ def stop_process(p, grace=10.0):
     return True
 
 
-def wait_line(p, timeout):
-    """The first stdout line of p, or None if none came within timeout s (the child may hold stdout open)."""
-    ready, _, _ = select.select([p.stdout], [], [], timeout)
-    return p.stdout.readline() if ready else None
+def wait_line(p, timeout, limit=4096):
+    """The first stdout line of p (a binary pipe), or None unless a whole line came within timeout s: one
+    deadline for the whole line, so output without a newline does not extend it (nor does EOF or a line
+    longer than limit count as one)."""
+    deadline, buf, fd = time.monotonic() + timeout, b"", p.stdout.fileno()
+    while b"\n" not in buf and len(buf) < limit:
+        left = deadline - time.monotonic()
+        if left <= 0 or not select.select([fd], [], [], left)[0]:
+            return None
+        chunk = os.read(fd, limit - len(buf))  # returns what is there; never waits for a newline
+        if not chunk:
+            break
+        buf += chunk
+    line, newline, _ = buf.partition(b"\n")
+    return line.decode(errors="replace") + "\n" if newline else None
 
 
 def load(path):
@@ -645,7 +656,7 @@ def execute(me, run_id, c, a):
     srv = subprocess.Popen(child_cmd(me, "serve", "--variant", c["variant"], "--interval", str(c["interval"]),
                                      "--warmup", str(a.warmup), "--measure", str(c["measure"]), "--port", str(a.port),
                                      "--out", path, "--run-id", run_id, "--expect-rps", str(c["clients"] / c["poll"])),
-                           stdout=subprocess.PIPE, text=True)
+                           stdout=subprocess.PIPE)
     ready = wait_line(srv, a.ready_timeout)
     if not ready or not ready.startswith("ready"):
         return failed(f"server not ready: {ready!r}", [srv])
