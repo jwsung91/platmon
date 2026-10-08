@@ -17,8 +17,9 @@ service starts; `/api/status` never waits.
 ## `/api/stats`
 
 The metrics (`cpu`, `gpu`, `memory`, `disk`, `temperature`, `power`, `fans`, `time`, ...) keep their
-keys, units and types. Schema version 1 adds three keys next to them; answers without `schema_version`
-come from an older platmon (legacy) and have no sample metadata.
+keys, units and types. Schema version 1 adds `schema_version`, `sample`, `collectors` and, from the
+service, `sensor_meta` next to them; answers without `schema_version` come from an older platmon (legacy)
+and have no sample metadata.
 
 ```json
 {
@@ -30,8 +31,9 @@ come from an older platmon (legacy) and have no sample metadata.
     "completed_at": 1791345600.25,
     "duration_ms": 250.0,
     "age_ms": 100.0,
-    "data_age_ms": 350.0,
-    "data_age_basis": "cycle_start_upper_bound",
+    "cycle_age_ms": 350.0,
+    "data_age_ms": 349.8,
+    "data_age_basis": "oldest_current_read_start",
     "interval_ms": 1000.0,
     "stale_after_ms": 5000.0
   },
@@ -46,13 +48,24 @@ come from an older platmon (legacy) and have no sample metadata.
   starts over.
 - `started_at`, `completed_at`: wall-clock Unix seconds when the collection began and ended. Shown for
   people; if the system clock is stepped they can be off, even `completed_at < started_at`.
-- `duration_ms`, `age_ms`, `data_age_ms`: measured on an elapsed clock (see Clock), not the wall clock.
-  `duration_ms` is how long the collection took, `age_ms` the time since it completed and `data_age_ms`
-  the time since it started, both as of this answer: `data_age_ms = age_ms + duration_ms` (up to rounding).
-- `data_age_basis`: always `cycle_start_upper_bound`. platmon does not know when each value inside a
-  collection was read, so it uses the start of the collection: the readings taken in this collection are
-  at most this old. CPU usage is an average that reaches back further, to the previous reading (see
-  CPU usage); its window is not part of this age.
+- `duration_ms`, `age_ms`, `cycle_age_ms`, `data_age_ms`: measured on an elapsed clock (see Clock), not
+  the wall clock, as of this answer. `duration_ms` is how long the collection took, `age_ms` the time
+  since it completed, `cycle_age_ms` the time since it started (`cycle_age_ms = age_ms + duration_ms` up
+  to rounding), and `data_age_ms` how old the data is, counted as `data_age_basis` says:
+  - `oldest_current_read_start` (the service): from the start of the earliest read this snapshot's data
+    comes from: the CPU reading of this collection, memory, disk, uptime, and every sensor value in it.
+    Not counted: the CPU baseline (the start of `cpu_sampling.window_ms`), failed reads, load candidates
+    that were not used, and names, labels and other text. `data_age_ms <= cycle_age_ms`.
+  - `cycle_start_upper_bound`: from the start of the collection (`data_age_ms = cycle_age_ms`). Used for
+    a collect function that keeps no read records (a plain dict, as from a direct `collector.collect()`),
+    and as a fallback when the service's records are incomplete or do not fit the collection (a read
+    outside it, a reversed span, another clock); the service log says why, once per change.
+
+  Either way these are the times platmon read the files, not when a sensor measured: a driver may cache
+  values, and hardware may convert earlier. CPU usage averages back to the previous reading (see CPU
+  usage); that window is not part of the data age. Schema version 1 is unchanged, but `data_age_ms` of the
+  service now counts from its oldest read instead of the collection start: it is a little lower, and a
+  snapshot goes stale correspondingly later.
 - `interval_ms`: the configured collection interval. It is not the window CPU usage is averaged over:
   that is `cpu_sampling.window_ms`.
 - `stale_after_ms`: when the snapshot stops counting as current: 3 intervals, at least 5 s.
@@ -62,7 +75,53 @@ come from an older platmon (legacy) and have no sample metadata.
   later failure does not change it: see `/api/status`.
 
 A snapshot is current while `data_age_ms <= stale_after_ms`. A collection that already took longer than
-`stale_after` is dropped (`collection_too_slow`) instead of being served as new data.
+`stale_after` (its whole `duration`, however recent its last read) is dropped (`collection_too_slow`)
+instead of being served as new data.
+
+### Sensor sources and read times
+
+`sensor_meta` (from the service) describes the sensor values of this snapshot, keyed by a JSON Pointer
+(RFC 6901: `~` is written `~0`, `/` is `~1`) to the value it describes. It does not repeat the values.
+
+```json
+"temperature": {"cpu": 51.2},
+"sensor_meta": {
+  "/temperature/cpu": {
+    "id": "src1:9c1f…(64 hex digits)",
+    "provider": "thermal",
+    "identity_basis": "resolved_path",
+    "unit": "celsius",
+    "read": {"started_offset_ms": 4.2, "completed_offset_ms": 4.7}
+  }
+}
+```
+
+Covered: every value in `temperature` and `power`, `rpm` and `percent` of every fan, `freq` of every CPU
+(CPU usage has `cpu_sampling`), and the GPU's `usage`, `freq` and `max_freq`. A pointer names a position in
+this snapshot only: labels and the order of `fans` and `cpu` can change (the index in `/cpu/1/freq` is the
+row, not the CPU id). A value left out has no pointer; a `null` value can have one, with `read: null`.
+
+- `read`: when platmon read the value, as offsets from the collection's start (`sample.started_at`): from
+  the start of the first read it took to the end of the last. A power rail computed from voltage × current
+  spans both reads (they are not one instant). Label and name reads are not part of it. `null` for a
+  value that was not read, or whose record does not fit the collection.
+- `unit`: `celsius`, `watt`, `rpm`, `percent` or `hertz`; the value's unit as reported (`freq` in Hz).
+- `id`: `src1:` and the SHA-256 of a canonical JSON descriptor (sorted keys, no spaces: version,
+  provider, unit, basis, where): the source, not the label, value, position, host or reading time. Two
+  values with the same id came from the same source; renaming a label does not change it. It is not a
+  hardware serial: a replaced device at the same place keeps the id, and readings across a restart or a
+  gap are not promised to be one series (use it together with `sample.instance_id`).
+- `identity_basis`, how far the id holds:
+  - `device_channel`: the device and attribute, e.g. a hwmon chip by the device it sits on, so a
+    renumbered `hwmonN` keeps its id; a CPU clock by the CPU id. Only when no other hwmon node of the
+    same device is listed.
+  - `resolved_path`: the path inside `/sys` once symlinks are resolved (thermal zones, the GPU, a device
+    with several hwmon nodes, `devices/virtual`): the same id only while that path stays the same.
+  - `unresolved`: the path did not resolve; `id` is `null`, the value is kept and its group is not
+    degraded for it.
+
+Where `/sys` is reached through another path (a container, a test tree), only the part inside `/sys`
+counts, so the id is the same. No hardware ids, host names or full paths are in the API.
 
 ### CPU usage
 
@@ -186,11 +245,13 @@ When there is no current snapshot (none yet, or collection keeps failing), the a
   "schema_version": 1,
   "code": "no_current_data",
   "instance_id": "8dfad9fa-9bf0-4d61-91e0-ef22aebd2b91",
-  "sample": {"sequence": 42, "age_ms": 6000.0, "data_age_ms": 6250.0}
+  "sample": {"sequence": 42, "age_ms": 6000.0, "cycle_age_ms": 6250.0, "data_age_ms": 6249.8,
+             "data_age_basis": "oldest_current_read_start"}
 }
 ```
 
-`sample` describes the last good snapshot (null if there was none); its values are not included.
+`sample` describes the last good snapshot (null if there was none); its values and `sensor_meta` are not
+included.
 `/text` answers 503 with the `error` text only.
 
 ## `/api/status`
@@ -204,7 +265,8 @@ check uses `/api/stats` for that reason).
   "instance_id": "8dfad9fa-9bf0-4d61-91e0-ef22aebd2b91",
   "state": "degraded",
   "ready": true,
-  "sample": {"sequence": 42, "age_ms": 1100.0, "data_age_ms": 1350.0},
+  "sample": {"sequence": 42, "age_ms": 1100.0, "cycle_age_ms": 1350.0, "data_age_ms": 1349.8,
+             "data_age_basis": "oldest_current_read_start"},
   "last_attempt": {
     "state": "error",
     "reason": "collection_failed",
