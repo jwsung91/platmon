@@ -58,7 +58,7 @@ collections has to notice them.
 | A | share within one collection: one `hwmon_chips` + `chip_identities` result for `hwmon_sensors` and Jetson `tach_fans` | the duplicate: 8 of the Orin's 17 calls are the same 4 chips twice; nothing on the Raspberry Pi (no duplicate) | the two parts note listing and name errors in their own groups; a shared result must keep both reports | not needed after D (see below) |
 | B | reuse across collections after a check | resolution, but each path still needs a check that sees a retargeted link: at least `stat` + `readlink` | links further up the path, inode reuse after hotplug, a test tree; the check alone costs about half of D | not adopted |
 | C | resolve once at start and keep | everything | breaks the last three rows above | rejected |
-| D | resolve on every call, but let the kernel do it | most of the cost (measured below) | none for the meaning: same answer, same moment; falls back to the portable way where the kernel cannot answer | **chosen** |
+| D | resolve on every call, but let the kernel do it | most of the cost (measured below) | same answers where verified (see "What is and is not the same"); falls back to the portable way where the kernel cannot answer | **chosen** |
 
 The Orin profile in the breakdown pointed at Python's path handling inside `os.path.realpath` (one
 `join`/`normpath`/`lstat` per component, plus `relpath`), not at the system calls. D removes that work
@@ -79,26 +79,41 @@ the cost in the service (the stage timing measured 217 µs per call on the Orin 
 
 B would still pay about half of D per path for its check, plus whatever it takes to see a link further up
 a path change, and it adds a cache with invalidation rules. A would remove at most the Orin's 8 duplicate
-calls, at D's lower price per call. D keeps the semantics by construction, so it is the change.
+calls, at D's lower price per call. D resolves every time, as today, and needs no invalidation rules,
+so it is the change.
 
 ## The change
 
 `collector/sysfs.py`:
 
-- `canonical` resolves `path` and `sysroot` with `_kernel_path` (`os.open(path, O_PATH | O_CLOEXEC)`,
+- `canonical` resolves `sysroot`, then `path`, with `_kernel_path` (`os.open(path, O_PATH | O_CLOEXEC)`,
   `os.readlink(/proc/self/fd/N)`, close). Equal paths give `.`, a path under the root gives the part after
   `root/`, anything else `None`.
-- Wherever that cannot answer, the old algorithm (now `_canonical_portable`) gives the result: no
+- The path is resolved last, so it is the latest observation, as the portable way's final
+  `os.path.exists(real)` is. A node removed or a link retargeted before it gives `None` or the new
+  target, never the path seen a moment earlier (a first version resolved the path first and got this
+  wrong; found in review, covered by tests now).
+- Wherever the kernel cannot answer, the old algorithm (now `_canonical_portable`) gives the result: no
   `O_PATH` (not Linux), any `OSError` (missing path, dangling link, loop, a file in place of a directory,
-  no permission, `/proc` not mounted), a path deleted in between (`" (deleted)"`) or a non-absolute
-  answer. So every error case keeps exactly its old result.
+  no permission, `/proc` not mounted), a path deleted between open and readlink (`" (deleted)"`) or a
+  non-absolute answer.
 - Nothing is cached; callers are unchanged.
+
+### What is and is not the same
+
+| case | status |
+| --- | --- |
+| ordinary sysfs paths (class aliases, device paths, links in the path, `.`/`..`, a symlinked root) and test trees | same answers: tested, and checked on every path of a real collection on both boards |
+| the kernel cannot answer (not Linux, no `/proc`, the errors above) | the old algorithm answers, so the old result |
+| the tree changes during the call | neither way is a snapshot. The order keeps the path as the last observation in both; a change after it is seen by the next collection |
+| paths across mount changes, procfs links and other special files | not verified: the `/proc/self/fd` text is the kernel's view of an open file and can differ from a lexical `realpath` there. platmon resolves only sysfs paths, but no test covers these cases |
 
 Tests (`tests/test_provenance.py`): the new and the portable way agree for aliases, a link in the middle
 of a path, a root given through a symlink, `.`/`..` in the path, missing, dangling, looping,
 file-as-directory, outside the root; the same answers without `O_PATH` or `/proc`; a retargeted link
 resolves to its new device; an unresolved path recovers; a second node on a device switches both to
-path identity and back when it goes. The existing identity tests (label change keeps the id, a
+path identity and back when it goes; a node removed, or a link retargeted, between the two resolutions
+gives `None` / the new target. The existing identity tests (label change keeps the id, a
 renumbered `hwmonN` keeps its device id, virtual devices are path-based) pass unchanged. On the boards
 themselves, every path of a real collection resolved the same both ways (Orin 34 calls over two
 collections, Raspberry Pi 6), and the Orin ran `tests/test_provenance.py` (73 passed; the Raspberry Pi has
