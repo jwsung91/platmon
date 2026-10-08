@@ -474,6 +474,7 @@ def test_parts_run_reports_apart(tmp_path, capsys):
     cadence.main(["report", str(results)])
     run = json.loads(capsys.readouterr().out)["runs"][0]
     assert run["instr"] == "passive-parts" and run["block"] == "parts-1" and run["passive_calls"] > 0
-    assert all(p["calls"] == run["passive_calls"] for p in run["parts"].values())
+    # parts are windowed by their own start, collections by theirs: one call can fall either side of an edge
+    assert all(abs(p["calls"] - run["passive_calls"]) <= 1 for p in run["parts"].values())
     cadence.main(["report", "--md", str(results)])
     assert "| pressure.io |" in capsys.readouterr().out
