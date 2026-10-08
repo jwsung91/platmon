@@ -23,7 +23,11 @@ def make_handler(sampler, web=True):
             if self.path == "/api/status":  # never waits for the first snapshot; 200 even when not ready
                 body, ctype = json.dumps(sampler.read()[1]).encode(), "application/json"
             elif self.path in ("/api/stats", "/text"):
-                stats, status = sampler.read(timeout=5.0)  # code and body from the same capture
+                # code and body from the same capture; /api/stats serializes the snapshot without copying it
+                if self.path == "/api/stats":
+                    stats, status = sampler._stats_json(timeout=5.0)
+                else:
+                    stats, status = sampler.read(timeout=5.0)
                 if stats is None:  # JSON for the API, text for /text, so clients need not parse an HTML page
                     why = "no current data (not collected yet, or collection keeps failing)"
                     if self.path == "/api/stats":  # the last good sample's identity and age, never its values
@@ -34,7 +38,7 @@ def make_handler(sampler, web=True):
                         self.reply(503, (why + "\n").encode(), "text/plain; charset=utf-8")
                     return
                 if self.path == "/api/stats":
-                    body, ctype = json.dumps(stats).encode(), "application/json"
+                    body, ctype = stats, "application/json"  # already the JSON bytes
                 else:  # same screen as the platmon command: watch -n1 curl -s host:9797/text
                     body, ctype = (render(stats) + "\n").encode(), "text/plain; charset=utf-8"
             elif web and self.path in ("/", "/index.html"):
