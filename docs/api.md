@@ -59,8 +59,8 @@ and have no sample metadata.
   - `cycle_start_upper_bound`: from the start of the collection (`data_age_ms = cycle_age_ms`). Used for
     a collect function that keeps no read records (a plain dict, as from a direct `collector.collect()`),
     and as a fallback when the service's records do not check out: a required read (CPU, memory, disk,
-    uptime) missing, a sensor value without its read, a record for a value that is not in the snapshot
-    (never published), a read outside the collection or reversed, another clock, or records of the wrong
+    uptime) missing, a sensor value without its read, a record for a value that is not in the snapshot or
+    at a pointer other than the one platmon writes for it (never published), a read outside the collection or reversed, another clock, or records of the wrong
     shape. The values are published either way; the service log says why, once per change.
 
   Either way these are the times platmon read the files, not when a sensor measured: a driver may cache
