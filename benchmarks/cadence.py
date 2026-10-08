@@ -205,6 +205,10 @@ def serve(a):
         rec = breakdown.Recorder(Table)
         rec.allocate(rows=cap * 40 + req_cap * 12, units=cap + 2 * req_cap)
     elif a.instrumentation.startswith("profile"):
+        why = breakdown.profile_support()
+        if why:  # before any work: the runner records the run as unsupported, not as a measurement
+            print(f"unsupported: {why}", flush=True)
+            sys.exit(3)
         prof = breakdown.Profiles()
     profiled = (prof.profiled if prof else contextlib.nullcontext)
 
@@ -614,6 +618,17 @@ def run(a):
         rec = {"kind": "run", "run_id": run_id, "alias": a.alias, "cond": c, "source_sha": a.source_sha,
                "order": i, "counted": False}
         why = stop or budget_left([r for r in done if r["kind"] == "run"], c, a.warmup, a.budget_min * 60, a.max_windows)
+        if not why and c.get("instr", "").startswith("profile"):
+            sys.path.insert(0, ROOT)
+            from benchmarks import breakdown
+            unsupported = breakdown.profile_support()
+            if unsupported:  # skipped, not a failure: the other runs go on
+                rec.update(valid=False, unsupported=True, skipped=f"unsupported: {unsupported}")
+                print(f"{run_id}: skipped: unsupported profile mode", flush=True)
+                done.append(rec)
+                with open(results, "a") as f:
+                    f.write(json.dumps(rec) + "\n")
+                continue
         before = device_state()
         why = why or guard(before, a.out, a.watch_url)
         if why:
@@ -721,6 +736,8 @@ def execute(me, run_id, c, a):
                                      "--out", path, "--run-id", run_id, "--expect-rps", str(c["clients"] / c["poll"])),
                            stdout=subprocess.PIPE)
     ready = wait_line(srv, a.ready_timeout)
+    if ready and ready.startswith("unsupported"):
+        return failed(ready.strip(), [srv], unsupported=True)
     if not ready or not ready.startswith("ready"):
         return failed(f"server not ready: {ready!r}", [srv])
     clients = [subprocess.Popen(child_cmd(me, "client", "--url", f"http://127.0.0.1:{a.port}/api/stats",

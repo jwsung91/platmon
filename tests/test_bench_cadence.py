@@ -204,6 +204,9 @@ elif args[0] == "probe":
     json.dump({"pending_at_end": mode == "pending", "skipped_ticks": 3 if mode == "pending" else 0}, open(out, "w"))
 elif mode == "silent":
     time.sleep(60)  # alive, stdout open, never ready
+elif mode == "unsupported":
+    print("unsupported: profile modes unsupported here", flush=True)
+    sys.exit(3)
 elif mode == "partial":
     sys.stdout.write("rea")  # part of the ready line, no newline, then stays alive
     sys.stdout.flush()
@@ -393,3 +396,10 @@ def test_execute_partial_ready_is_bounded_and_reaped(fake_child, monkeypatch):
     out, took = timed(lambda: execute("partial"))
     assert not out["valid"] and "not ready" in out["invalid"] and took < 15
     assert all(p.poll() is not None for p in started)
+
+
+def test_execute_unsupported_mode_is_not_a_measurement(fake_child):
+    execute, started, _ = fake_child
+    out = execute("unsupported")
+    assert out["valid"] is False and out["unsupported"] and "unsupported" in out["invalid"]
+    assert "timeout" not in out and all(p.poll() is not None for p in started)

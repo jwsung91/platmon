@@ -255,22 +255,97 @@ def test_wrapper_cost_is_measured():
     assert c["calls"] == 2000 and c["clock_calls_per_wrapped_call"] == 4
 
 
-def test_profiles_merge_per_thread():
-    p = breakdown.Profiles()
-    with p.profiled():  # off: nothing recorded
-        sum(range(10))
-    p.on.set()
+SUPPORTED = breakdown.profile_support() is None
 
-    def work():
+
+def test_profile_support_by_version():
+    assert breakdown.profile_support((3, 11)) is None
+    assert "sys.monitoring" in breakdown.profile_support((3, 12)) and breakdown.profile_support((3, 13, 5))
+
+
+@pytest.mark.skipif(SUPPORTED, reason="per-thread cProfile works on this Python")
+def test_profiles_refused_where_threads_mix():
+    with pytest.raises(RuntimeError, match="unsupported"):
+        breakdown.Profiles()
+
+
+def only_on_main_thread_xyz():
+    return sum(i * i for i in range(20000))
+
+
+def only_on_worker_thread_abc(n):
+    return sorted(range(n), key=lambda x: -x)
+
+
+@pytest.mark.skipif(not SUPPORTED, reason="profile modes are refused on this Python")
+def test_profile_records_only_its_thread_while_others_run():
+    """A: the worker's profile is enabled while the main thread runs a function of its own."""
+    p = breakdown.Profiles()
+    p.on.set()
+    enabled, release = threading.Event(), threading.Event()
+
+    def worker():
         with p.profiled():
-            sorted(range(1000), key=lambda x: -x)
-    threads = [threading.Thread(target=work) for _ in range(2)]
+            only_on_worker_thread_abc(100)
+            enabled.set()
+            release.wait(5)
+
+    t = threading.Thread(target=worker)
+    t.start()
+    try:
+        assert enabled.wait(5)
+        only_on_main_thread_xyz()
+    finally:
+        release.set()
+        t.join()
+    r = p.report(top=50)
+    assert r["units"] == 1 and r["total_s"] >= 0
+    assert "only_on_worker_thread_abc" in r["text"] and "only_on_main_thread_xyz" not in r["text"]
+
+
+@pytest.mark.skipif(not SUPPORTED, reason="profile modes are refused on this Python")
+def test_overlapping_profiles_keep_their_own_threads():
+    """B: two profiles active at the same time, each thread's functions only in its own."""
+    p = breakdown.Profiles()
+    p.on.set()
+    both, release, errors = threading.Barrier(3), threading.Event(), []
+
+    def worker(fn):
+        try:
+            with p.profiled():
+                fn()
+                both.wait(5)
+                release.wait(5)
+        except Exception as e:  # noqa: BLE001 - reported below
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(f,))
+               for f in (only_on_main_thread_xyz, lambda: only_on_worker_thread_abc(100))]
     for t in threads:
         t.start()
-    for t in threads:
-        t.join()
-    r = p.report(top=5)
-    assert r["units"] == 2 and "thread_time_ns" in r["timer"] and "sorted by tottime" in r["text"]
+    try:
+        both.wait(5)  # both profiles are enabled here
+    finally:
+        release.set()
+        for t in threads:
+            t.join()
+    assert not errors and len(p.done) == 2
+    texts = []
+    for prof in p.done:
+        out = breakdown.io.StringIO()
+        breakdown.pstats.Stats(prof, stream=out).print_stats()
+        texts.append(out.getvalue())
+    assert sum("only_on_main_thread_xyz" in t for t in texts) == 1
+    assert sum("only_on_worker_thread_abc" in t for t in texts) == 1
+
+
+def test_invalid_profiles_are_marked_not_ranked():
+    """C: a profile from an unsupported Python or with a negative total is kept but not usable."""
+    good = {"python": "3.10.12", "profile": {"total_s": 1.5, "text": "x"}}
+    assert breakdown.profile_validity(good) is None
+    assert "sys.monitoring" in breakdown.profile_validity({**good, "python": "3.13.5"})
+    old = {"python": "3.10.12", "profile": {"text": "  123 function calls in -1.616 seconds"}}
+    assert "not a valid" in breakdown.profile_validity(old)
 
 
 def test_lite_install_leaves_frequent_calls_unwrapped():
@@ -279,3 +354,78 @@ def test_lite_install_leaves_frequent_calls_unwrapped():
         assert not hasattr(sysfs.Group.__dict__["read"], "__wrapped_stage__")
         assert hasattr(sysfs.canonical, "__wrapped_stage__") and hasattr(common.collect, "__wrapped_stage__")
     assert not hasattr(sysfs.canonical, "__wrapped_stage__")
+
+
+@pytest.fixture(scope="module")
+def serve_pair(tmp_path_factory):
+    """One short real reference run and one stages run (no clients), as the report reads them."""
+    d = tmp_path_factory.mktemp("serve")
+    out = {}
+    for mode in ("reference", "stages"):
+        path = d / f"{mode}.json"
+        cadence.main(["serve", "--variant", "B0", "--instrumentation", mode, "--interval", "0.1",
+                      "--warmup", "0.3", "--measure", "0.6", "--port", "0", "--out", str(path)])
+        out[mode] = json.loads(path.read_text())
+    return out
+
+
+def record(serve, run_id, phase="breakdown", poll=1.0, **change):
+    serve = copy.deepcopy(serve)
+    serve.update(change)
+    return {"kind": "run", "run_id": run_id, "alias": "t", "valid": True, "order": 0, "serve": serve,
+            "cond": {"phase": phase, "clients": 0, "poll": poll}, "before": {"temps_mC": {}, "cpufreq_khz": {}},
+            "after": {"temps_mC": {}, "cpufreq_khz": {}}}
+
+
+def impact(tmp_path, recs):
+    path = tmp_path / "results.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in recs))
+    return json.loads(breakdown.report([str(path)]))["impact"]
+
+
+def test_report_compares_matching_runs(tmp_path, serve_pair):
+    rows_ = impact(tmp_path, [record(serve_pair["reference"], "r1"), record(serve_pair["stages"], "s1")])
+    assert len(rows_) == 1 and rows_[0]["problems"] == [] and rows_[0]["delta_pp"] is not None
+    assert rows_[0]["reference"] == [serve_pair["reference"]["cpu_pct_one_core"]]
+
+
+@pytest.mark.parametrize("field, ref_change, staged_change", [
+    ("source_hash", {"source_hash": "A"}, {"source_hash": "B"}),
+    ("bench_hash", {"bench_hash": "A"}, {"bench_hash": "B"}),
+    ("python", {"python": "3.10.12"}, {"python": "3.13.5"}),
+    ("interval_s", {"interval_s": 1.0}, {"interval_s": 2.0}),
+    ("scope", {}, {"scope": {"cpu_rows": 999}}),
+])
+def test_report_refuses_runs_that_differ(tmp_path, serve_pair, field, ref_change, staged_change):
+    rows_ = impact(tmp_path, [record(serve_pair["reference"], "r1", **ref_change),
+                              record(serve_pair["stages"], "s1", **staged_change)])
+    staged = [r for r in rows_ if r["mode"] == "stages"]
+    assert len(staged) == 1 and staged[0]["delta_pp"] is None
+    assert any(field in p for p in staged[0]["problems"])
+    md = breakdown.markdown({"impact": staged, "collection": [], "request": [], "accounting": [],
+                             "profiles": [], "invalid": []})
+    assert "not comparable" in md and "| ok |" not in md
+
+
+def test_report_refuses_different_poll(tmp_path, serve_pair):
+    rows_ = impact(tmp_path, [record(serve_pair["reference"], "r1", poll=1.0),
+                              record(serve_pair["stages"], "s1", poll=2.0)])
+    assert [r["delta_pp"] for r in rows_] == [None] and "poll_s" in rows_[0]["problems"][0]
+
+
+def test_report_keeps_stages_and_lite_apart(tmp_path, serve_pair):
+    lite = record(serve_pair["stages"], "l1", instrumentation="stages-lite")
+    rows_ = impact(tmp_path, [record(serve_pair["reference"], "r1"), record(serve_pair["stages"], "s1"), lite])
+    assert sorted(r["mode"] for r in rows_) == ["stages", "stages-lite"]
+    assert all(len(r["stages"]) == 1 and r["problems"] == [] for r in rows_)
+
+
+def test_report_skips_invalid_runs_and_profiles(tmp_path, serve_pair):
+    bad = record(serve_pair["stages"], "s2")
+    bad["valid"] = False
+    prof = record(serve_pair["reference"], "p1", instrumentation="profile-collect",
+                  profile={"units": 1, "timer": "t", "total_s": -1.0, "text": "x"})
+    rows_ = impact(tmp_path, [record(serve_pair["reference"], "r1"), record(serve_pair["stages"], "s1"), bad, prof])
+    assert len(rows_) == 1 and len(rows_[0]["stages"]) == 1 and len(rows_[0]["reference"]) == 1
+    out = json.loads(breakdown.report([str(tmp_path / "results.jsonl")]))
+    assert out["profiles"][0]["valid"] is False

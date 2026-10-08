@@ -13,7 +13,10 @@ import cProfile
 import functools
 import io
 import itertools
+import json
 import pstats
+import re
+import sys
 import threading
 import time
 import types
@@ -213,12 +216,28 @@ def wrapper_cost(n=20000):
             "cpu_ns_per_call": (out[1][1] - out[0][1]) / n, "clock_calls_per_wrapped_call": 4}
 
 
+PROFILE_UNSUPPORTED = (
+    "cProfile records every thread on Python 3.12+ (it uses sys.monitoring, whose events are global), so a "
+    "per-thread profile on the thread CPU clock mixes threads (functions of other threads, negative times) "
+    "and a second profile cannot be enabled while one is active")
+
+
+def profile_support(version=sys.version_info):
+    """None if per-thread cProfile works on this Python (3.11 and older: one profile function per thread),
+    else why not. Only the profile modes depend on it; reference and stages do not use cProfile."""
+    return None if tuple(version[:2]) < (3, 12) else PROFILE_UNSUPPORTED
+
+
 class Profiles:
     """cProfile for the profile modes: one Profile per thread (never shared), on the thread CPU clock,
-    enabled only while the window is open; merged when the run ends."""
+    enabled only while the window is open; merged when the run ends. Refuses to start where per-thread
+    profiling does not hold (profile_support)."""
     timer = "time.thread_time_ns (thread CPU), timeunit 1e-9"
 
     def __init__(self):
+        why = profile_support()
+        if why:
+            raise RuntimeError(f"profile modes unsupported on Python {sys.version.split()[0]}: {why}")
         self.on = threading.Event()
         self.done, self.lock = [], threading.Lock()
 
@@ -249,7 +268,7 @@ class Profiles:
             stats.sort_stats(key).print_stats(top)
         out.write("\n==== callers of the top 10 by tottime ====\n")
         stats.sort_stats("tottime").print_callers(10)
-        return {"units": len(self.done), "timer": self.timer, "text": out.getvalue()}
+        return {"units": len(self.done), "timer": self.timer, "total_s": stats.total_tt, "text": out.getvalue()}
 
 
 # ---- report ----
@@ -315,10 +334,50 @@ def staged_run(r):
     return r["serve"].get("instrumentation", "").startswith("stages")
 
 
+def profile_validity(serve):
+    """None if a profile run's result can be read, else why not: a Python where per-thread profiling does
+    not hold, or a negative total time (records of several threads on one thread's clock)."""
+    p = serve["profile"]
+    why = profile_support(tuple(int(x) for x in serve["python"].split(".")[:2]))
+    if why:
+        return why
+    total = p.get("total_s")
+    if total is None:  # results from before total_s was recorded: read it from the text
+        m = re.search(r"in (-?[\d.]+) seconds", p["text"])
+        total = float(m.group(1)) if m else None
+    if total is None or total < 0:
+        return f"total time {total} s is not a valid CPU total"
+    return None
+
+
+def comparison_sets(valid, summaries):
+    """Reference and staged runs that may be compared: equal in every condition (cadence.mismatches:
+    interval, poll, clients, Python, product and bench hash, scope) and in phase and variant; staged runs
+    split by mode. Yields (key, mode, references, staged runs, problems); problems explain a staged set
+    with no matching reference (it is then not compared, never matched with other references)."""
+    from benchmarks.cadence import mismatches
+    sets = {}
+    for r in valid:
+        s = summaries[r["run_id"]]
+        key = (r["alias"], r["cond"]["phase"], r["serve"]["variant"], s["clients"], s["interval_s"], s["poll_s"],
+               s["python"], s["source_hash"], s["bench_hash"], json.dumps(s["scope"], sort_keys=True))
+        sets.setdefault(key, []).append(r)
+    for key, rs in sets.items():
+        refs = [r for r in rs if r["serve"]["instrumentation"] == "reference"]
+        for mode in sorted({r["serve"]["instrumentation"] for r in rs if staged_run(r)}):
+            staged = [r for r in rs if r["serve"]["instrumentation"] == mode]
+            problems = []
+            if not refs:
+                nearby = [r for r in valid if r["serve"]["instrumentation"] == "reference" and r["alias"] == key[0]
+                          and r["cond"]["phase"] == key[1] and r["serve"]["variant"] == key[2]]
+                problems = (mismatches([summaries[r["run_id"]] for r in nearby + staged]) if nearby else []) \
+                    or ["no reference run with the same conditions"]
+            yield key, mode, refs, staged, problems
+
+
 def report(paths, md=False, profiles=None):
     """Tables of docs/performance/collection-response-breakdown.md from cadence results.jsonl files.
-    profiles: a directory to write each profile run's cProfile text to."""
-    import json
+    profiles: a directory to write each profile run's cProfile text to (marked when it is not valid)."""
     import os
 
     from benchmarks.cadence import dist, summarize_serve
@@ -330,51 +389,47 @@ def report(paths, md=False, profiles=None):
     out = {"invalid": [{"run_id": r["run_id"], "cond": r["cond"], "why": r.get("invalid") or r.get("skipped")}
                        for r in recs if r["kind"] == "run" and not r.get("valid")],
            "impact": [], "collection": [], "request": [], "accounting": [], "profiles": []}
-    valid = [r for r in runs if r["valid"]]
-    groups = {}
-    for r in valid:
-        groups.setdefault((r["alias"], r["cond"]["phase"], r["serve"]["variant"], r["cond"]["clients"]), []).append(r)
-    for (alias, phase, variant, clients), rs in groups.items():
-        mode = next((r["serve"]["instrumentation"] for r in rs if staged_run(r)), "stages")
-        sums = {"reference": [summarize_serve(r) for r in rs if r["serve"].get("instrumentation") == "reference"],
-                "stages": [summarize_serve(r) for r in rs if staged_run(r)]}
+    valid = [r for r in runs if r["valid"] and not r["serve"].get("profile")]  # profiles are never compared
+    summaries = {r["run_id"]: summarize_serve(r) for r in valid}
+    mean = (lambda v: sum(v) / len(v) if v else None)
+    for key, mode, refs, staged_runs, problems in comparison_sets(valid, summaries):
+        alias, phase, variant, clients = key[:4]
+        sums = {"reference": [summaries[r["run_id"]] for r in refs],
+                "stages": [summaries[r["run_id"]] for r in staged_runs]}
         ref = [s["cpu_pct_one_core"] for s in sums["reference"]]
         stg = [s["cpu_pct_one_core"] for s in sums["stages"]]
-        mean = (lambda v: sum(v) / len(v) if v else None)
-        delta = None if not ref or not stg else mean(stg) - mean(ref)
+        delta = None if problems else mean(stg) - mean(ref)
+        common = {"alias": alias, "phase": phase, "mode": mode, "variant": variant, "clients": clients,
+                  "bench_hash": key[8]}
         out["impact"].append({
-            "alias": alias, "phase": phase, "mode": mode, "variant": variant, "clients": clients,
-            "reference": ref, "stages": stg,
+            **common, "reference": ref, "stages": stg, "problems": problems,
             "delta_pp": delta, "delta_pct": None if delta is None or not mean(ref) else 100 * delta / mean(ref),
             "interval_p50_ms": {m: [s["actual_interval_ms"]["p50"] for s in v] for m, v in sums.items()},
             "interval_max_ms": {m: [s["actual_interval_ms"]["max"] for s in v] for m, v in sums.items()},
-            "wrapper_cost": [r["serve"]["wrapper_cost"] for r in rs if r["serve"].get("wrapper_cost")][:1]})
-        staged = [r["serve"] for r in rs if staged_run(r)]
-        if not staged:
-            continue
+            "wrapper_cost": [r["serve"]["wrapper_cost"] for r in staged_runs if r["serve"].get("wrapper_cost")][:1]})
+        staged = [r["serve"] for r in staged_runs]
         table, n = stage_table(staged, "collection")
-        out["collection"].append({"alias": alias, "mode": mode, "variant": variant, "clients": clients, "units": n,
-                                  "runs": len(staged), "stages": table})
+        out["collection"].append({**common, "units": n, "runs": len(staged), "stages": table})
         if clients:
             table, n = stage_table(staged, "request")
-            http = [summarize_serve(r) for r in rs if staged_run(r)]
-            out["request"].append({"alias": alias, "mode": mode, "variant": variant, "clients": clients, "units": n,
-                                   "runs": len(staged), "stages": table,
+            http = sums["stages"]
+            out["request"].append({**common, "units": n, "runs": len(staged), "stages": table,
                                    "bytes_per_request": dist([h["response_bytes"]["mean"] for h in http])["mean"],
                                    "requests": sum(h["requests"] for h in http)})
-        for r, s in zip([r for r in rs if staged_run(r)], staged):
-            out["accounting"].append({"run_id": r["run_id"], "alias": alias, "mode": mode, "variant": variant,
-                                      "clients": clients,
-                                      **accounting(s)})
-    for r in valid:
+        for r in staged_runs:
+            out["accounting"].append({"run_id": r["run_id"], **common, **accounting(r["serve"])})
+    for r in runs:
         p = r["serve"].get("profile")
-        if p:
-            out["profiles"].append({"run_id": r["run_id"], "alias": r["alias"],
-                                    "mode": r["serve"]["instrumentation"], "units": p["units"], "timer": p["timer"]})
-            if profiles:
-                os.makedirs(profiles, exist_ok=True)
-                with open(os.path.join(profiles, f"{r['alias']}-{r['serve']['instrumentation']}.txt"), "w") as f:
-                    f.write(p["text"])
+        if not (p and r["valid"]):
+            continue
+        why = profile_validity(r["serve"])
+        out["profiles"].append({"run_id": r["run_id"], "alias": r["alias"], "python": r["serve"]["python"],
+                                "mode": r["serve"]["instrumentation"], "units": p["units"], "timer": p["timer"],
+                                "valid": why is None, "invalid": why})
+        if profiles:
+            os.makedirs(profiles, exist_ok=True)
+            with open(os.path.join(profiles, f"{r['alias']}-{r['serve']['instrumentation']}.txt"), "w") as f:
+                f.write((f"INVALID, not for analysis: {why}\n\n" if why else "") + p["text"])
     if md:
         return markdown(out)
     return json.dumps(out, indent=1, default=str)
@@ -387,7 +442,8 @@ def markdown(out):
              "| actual interval p50 ms ref / stages | max ms ref / stages | wrapper cost ns/call (cpu) | quality |",
              "|" + "---|" * 11]
     for i in out["impact"]:
-        q = "-" if i["delta_pct"] is None else ("ok" if i["delta_pct"] < 10 else "attribution less reliable (>= 10 %)")
+        q = (f"not comparable: {'; '.join(i['problems'])}" if i["problems"] else
+             "ok" if i["delta_pct"] < 10 else "attribution less reliable (>= 10 %)")
         wc = i["wrapper_cost"][0]["cpu_ns_per_call"] if i["wrapper_cost"] else None
         lines.append("| " + " | ".join([
             i["alias"], i["mode"], i["variant"], str(i["clients"]), ", ".join(f(x) for x in i["reference"]) or "-",
@@ -418,6 +474,10 @@ def markdown(out):
             f(100 * p["collection"]["cpu_s"] / e), f"{f(100 * p['request']['cpu_s'] / e)} ({p['request']['units']})",
             f(100 * p["listener"]["cpu_s"] / e), f(a["unattributed_pct_one_core"], 3),
             str(sum(x["straddling"] for x in p.values()))]) + " |")
+    if out["profiles"]:
+        lines += ["", "| profile run | platform | Python | mode | units | usable |", "|" + "---|" * 6]
+        lines += [f"| {p['run_id'][-6:]} | {p['alias']} | {p['python']} | {p['mode']} | {p['units']} | "
+                  f"{'yes' if p['valid'] else 'no: ' + p['invalid']} |" for p in out["profiles"]]
     if out["invalid"]:
         lines += ["", "Not run or invalid:"] + [f"- {x['run_id']}: {x['cond']} — {x['why']}" for x in out["invalid"]]
     return "\n".join(lines)
