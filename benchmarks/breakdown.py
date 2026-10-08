@@ -161,10 +161,17 @@ def targets():
     ]
 
 
+# stages-lite: the frequent per-value calls left out (each wrapper call costs clock reads), keeping the
+# parts, the Sampler and HTTP stages and the identity work (canonical, chip_identities, source)
+LITE_SKIP = ("work.Group.read", "work.Group.sensor", "work.Group.status", "work.entries", "work.hwmon_chips")
+
+
 @contextlib.contextmanager
-def install(rec):
-    """Wraps the targets in place; restores every original on exit, also after an exception."""
+def install(rec, skip=()):
+    """Wraps the targets (except the stage names in skip) in place; restores every original on exit, also
+    after an exception."""
     plain, shims = targets()
+    plain = [t for t in plain if t[2] not in skip]
     undo = []
     try:
         for owner, attr, name in plain:
@@ -304,6 +311,10 @@ def accounting(serve):
             "unattributed_pct_one_core": 100 * left / elapsed}
 
 
+def staged_run(r):
+    return r["serve"].get("instrumentation", "").startswith("stages")
+
+
 def report(paths, md=False, profiles=None):
     """Tables of docs/performance/collection-response-breakdown.md from cadence results.jsonl files.
     profiles: a directory to write each profile run's cProfile text to."""
@@ -322,35 +333,38 @@ def report(paths, md=False, profiles=None):
     valid = [r for r in runs if r["valid"]]
     groups = {}
     for r in valid:
-        groups.setdefault((r["alias"], r["serve"]["variant"], r["cond"]["clients"]), []).append(r)
-    for (alias, variant, clients), rs in groups.items():
-        sums = {m: [summarize_serve(r) for r in rs if r["serve"].get("instrumentation") == m]
-                for m in ("reference", "stages")}
+        groups.setdefault((r["alias"], r["cond"]["phase"], r["serve"]["variant"], r["cond"]["clients"]), []).append(r)
+    for (alias, phase, variant, clients), rs in groups.items():
+        mode = next((r["serve"]["instrumentation"] for r in rs if staged_run(r)), "stages")
+        sums = {"reference": [summarize_serve(r) for r in rs if r["serve"].get("instrumentation") == "reference"],
+                "stages": [summarize_serve(r) for r in rs if staged_run(r)]}
         ref = [s["cpu_pct_one_core"] for s in sums["reference"]]
         stg = [s["cpu_pct_one_core"] for s in sums["stages"]]
         mean = (lambda v: sum(v) / len(v) if v else None)
         delta = None if not ref or not stg else mean(stg) - mean(ref)
         out["impact"].append({
-            "alias": alias, "variant": variant, "clients": clients, "reference": ref, "stages": stg,
+            "alias": alias, "phase": phase, "mode": mode, "variant": variant, "clients": clients,
+            "reference": ref, "stages": stg,
             "delta_pp": delta, "delta_pct": None if delta is None or not mean(ref) else 100 * delta / mean(ref),
             "interval_p50_ms": {m: [s["actual_interval_ms"]["p50"] for s in v] for m, v in sums.items()},
             "interval_max_ms": {m: [s["actual_interval_ms"]["max"] for s in v] for m, v in sums.items()},
             "wrapper_cost": [r["serve"]["wrapper_cost"] for r in rs if r["serve"].get("wrapper_cost")][:1]})
-        staged = [r["serve"] for r in rs if r["serve"].get("instrumentation") == "stages"]
+        staged = [r["serve"] for r in rs if staged_run(r)]
         if not staged:
             continue
         table, n = stage_table(staged, "collection")
-        out["collection"].append({"alias": alias, "variant": variant, "clients": clients, "units": n,
+        out["collection"].append({"alias": alias, "mode": mode, "variant": variant, "clients": clients, "units": n,
                                   "runs": len(staged), "stages": table})
         if clients:
             table, n = stage_table(staged, "request")
-            http = [summarize_serve(r) for r in rs if r["serve"].get("instrumentation") == "stages"]
-            out["request"].append({"alias": alias, "variant": variant, "clients": clients, "units": n,
+            http = [summarize_serve(r) for r in rs if staged_run(r)]
+            out["request"].append({"alias": alias, "mode": mode, "variant": variant, "clients": clients, "units": n,
                                    "runs": len(staged), "stages": table,
                                    "bytes_per_request": dist([h["response_bytes"]["mean"] for h in http])["mean"],
                                    "requests": sum(h["requests"] for h in http)})
-        for r, s in zip([r for r in rs if r["serve"].get("instrumentation") == "stages"], staged):
-            out["accounting"].append({"run_id": r["run_id"], "alias": alias, "variant": variant, "clients": clients,
+        for r, s in zip([r for r in rs if staged_run(r)], staged):
+            out["accounting"].append({"run_id": r["run_id"], "alias": alias, "mode": mode, "variant": variant,
+                                      "clients": clients,
                                       **accounting(s)})
     for r in valid:
         p = r["serve"].get("profile")
@@ -369,14 +383,14 @@ def report(paths, md=False, profiles=None):
 def markdown(out):
     def f(v, nd=2):
         return "-" if v is None else f"{v:.{nd}f}"
-    lines = ["| platform | variant | clients | reference CPU % | stages CPU % | stages - reference pp (%) "
+    lines = ["| platform | mode | variant | clients | reference CPU % | stages CPU % | stages - reference pp (%) "
              "| actual interval p50 ms ref / stages | max ms ref / stages | wrapper cost ns/call (cpu) | quality |",
-             "|" + "---|" * 10]
+             "|" + "---|" * 11]
     for i in out["impact"]:
         q = "-" if i["delta_pct"] is None else ("ok" if i["delta_pct"] < 10 else "attribution less reliable (>= 10 %)")
         wc = i["wrapper_cost"][0]["cpu_ns_per_call"] if i["wrapper_cost"] else None
         lines.append("| " + " | ".join([
-            i["alias"], i["variant"], str(i["clients"]), ", ".join(f(x) for x in i["reference"]) or "-",
+            i["alias"], i["mode"], i["variant"], str(i["clients"]), ", ".join(f(x) for x in i["reference"]) or "-",
             ", ".join(f(x) for x in i["stages"]) or "-",
             f"{f(i['delta_pp'], 3)} ({f(i['delta_pct'], 1)} %)",
             " / ".join(", ".join(f(x, 1) for x in i["interval_p50_ms"][m]) or "-" for m in ("reference", "stages")),
@@ -386,7 +400,7 @@ def markdown(out):
         for t in out[key]:
             extra = (f", {f(t['bytes_per_request'] / 1024, 1)} KiB/request, {t['requests']} requests"
                      if key == "request" else "")
-            lines += ["", f"**{t['alias']} {t['variant']}, {t['clients']} client(s): per {title}** "
+            lines += ["", f"**{t['alias']} {t['variant']}, {t['clients']} client(s), {t['mode']}: per {title}** "
                           f"({t['units']} {title}s, {t['runs']} stages runs{extra})", "",
                       "| stage | calls / unit | CPU ms / unit (inclusive) | self CPU ms / unit | elapsed p50 / p95 ms "
                       "| CPU % of one core |", "|" + "---|" * 6]
@@ -394,13 +408,13 @@ def markdown(out):
                 lines.append(f"| {s['stage']} | {f(s['calls_per_unit'], 1)} | {f(s['cpu_ms_per_unit'], 3)} | "
                              f"{f(s['self_cpu_ms_per_unit'], 3)} | {f(s['elapsed_p50_ms'], 3)} / {f(s['elapsed_p95_ms'], 3)} | "
                              f"{f(s['cpu_pct_one_core'], 3)} |")
-    lines += ["", "| run | platform | variant | clients | process CPU % | collections CPU % | request workers CPU % "
-              "(n) | listener CPU % | unattributed CPU % | units across the window end |", "|" + "---|" * 10]
+    lines += ["", "| run | platform | mode | variant | clients | process CPU % | collections CPU % | request workers CPU % "
+              "(n) | listener CPU % | unattributed CPU % | units across the window end |", "|" + "---|" * 11]
     for a in out["accounting"]:
         e = a["elapsed_s"]
         p = a["parts"]
         lines.append("| " + " | ".join([
-            a["run_id"][-6:], a["alias"], a["variant"], str(a["clients"]), f(100 * a["process_cpu_s"] / e),
+            a["run_id"][-6:], a["alias"], a["mode"], a["variant"], str(a["clients"]), f(100 * a["process_cpu_s"] / e),
             f(100 * p["collection"]["cpu_s"] / e), f"{f(100 * p['request']['cpu_s'] / e)} ({p['request']['units']})",
             f(100 * p["listener"]["cpu_s"] / e), f(a["unattributed_pct_one_core"], 3),
             str(sum(x["straddling"] for x in p.values()))]) + " |")

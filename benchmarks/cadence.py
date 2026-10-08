@@ -37,7 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 mono = time.monotonic_ns
 tcpu = time.thread_time_ns
-INSTRUMENTATION = ("reference", "stages", "profile-collect", "profile-request")
+INSTRUMENTATION = ("reference", "stages", "stages-lite", "profile-collect", "profile-request")
 LOCAL_FS = ("ext4", "ext3", "ext2", "xfs", "btrfs", "f2fs", "vfat", "exfat")  # statvfs allowlist by type
 
 
@@ -200,7 +200,7 @@ def serve(a):
     t_mem = Table(["t", "rss_bytes"], int((a.warmup + a.measure) / 10) + 8)
 
     rec = prof = cost = None
-    if a.instrumentation == "stages":
+    if a.instrumentation.startswith("stages"):
         cost = breakdown.wrapper_cost()
         rec = breakdown.Recorder(Table)
         rec.allocate(rows=cap * 40 + req_cap * 12, units=cap + 2 * req_cap)
@@ -285,7 +285,7 @@ def serve(a):
         Handler.reply = rec.wrap("http.reply (headers, write)", Handler.reply)
     installed = contextlib.ExitStack()
     if rec:
-        installed.enter_context(breakdown.install(rec))
+        installed.enter_context(breakdown.install(rec, breakdown.LITE_SKIP if a.instrumentation == "stages-lite" else ()))
     httpd = Server(("127.0.0.1", a.port), Handler)
     sampler.start()
     threading.Thread(target=httpd.serve_forever, name="http", daemon=True).start()
@@ -476,6 +476,9 @@ def plan(phase, intervals, final=None):
                 for m in ("profile-collect", "profile-request")]
         out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=3, poll=1.0, measure=120) for m in rr]
         out += [dict(kind="serve", variant="B1", instr=m, interval=1.0, clients=1, poll=1.0, measure=120) for m in rr]
+    elif phase == "breakdown-lite":  # the one retry with fewer stages, when stages cost >= 10 % over reference
+        out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=1, poll=1.0, measure=120)
+                for m in ("reference", "stages-lite", "stages-lite", "reference")]
     elif phase == "probes":
         out += [dict(kind="probe", feature="noop", period=1.0, measure=120)]
         out += [dict(kind="probe", feature="wireless", period=p, measure=120) for p in (1.0, 2.0, 5.0)]
@@ -992,7 +995,7 @@ def main(argv=None):
     r = sub.add_parser("run")
     r.add_argument("--out", required=True)
     r.add_argument("--alias", required=True)
-    r.add_argument("--phase", choices=("matrix", "clients", "final", "probes", "breakdown"), required=True)
+    r.add_argument("--phase", choices=("matrix", "clients", "final", "probes", "breakdown", "breakdown-lite"), required=True)
     r.add_argument("--intervals", default="1,2,0.5,5")
     r.add_argument("--final", type=float)
     r.add_argument("--warmup", type=float, default=30)

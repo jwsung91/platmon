@@ -271,3 +271,11 @@ def test_profiles_merge_per_thread():
         t.join()
     r = p.report(top=5)
     assert r["units"] == 2 and "thread_time_ns" in r["timer"] and "sorted by tottime" in r["text"]
+
+
+def test_lite_install_leaves_frequent_calls_unwrapped():
+    rec = recorder(1000)
+    with breakdown.install(rec, breakdown.LITE_SKIP):
+        assert not hasattr(sysfs.Group.__dict__["read"], "__wrapped_stage__")
+        assert hasattr(sysfs.canonical, "__wrapped_stage__") and hasattr(common.collect, "__wrapped_stage__")
+    assert not hasattr(sysfs.canonical, "__wrapped_stage__")
