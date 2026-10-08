@@ -143,6 +143,130 @@ def test_class_alias_and_device_path_resolve_alike(tmp_path):
     assert sysfs.canonical("/etc/hostname", str(tmp_path)) is None  # outside the sysfs root
 
 
+def resolution_cases(root):
+    """Paths whose resolution differs in kind: aliases, a symlinked root, links inside the path, outside
+    the root, missing, dangling, a loop, a file in place of a directory."""
+    d = chip(root, "devices/platform/i2c/1-0040", 3, CHIP)
+    (root / "devices/virtual").mkdir(parents=True)
+    (root / "devices/virtual/alias").symlink_to(root / "devices/platform")  # a link in the middle of a path
+    (root / "class/dangling").symlink_to(root / "nowhere")
+    (root / "class/loop").symlink_to(root / "class/loop")
+    (root / "file").write_text("x")
+    outside = root.parent / f"{root.name}-outside"
+    outside.mkdir()
+    (root / "class/out").symlink_to(outside)
+    linked_root = root.parent / f"{root.name}-link"
+    linked_root.symlink_to(root)
+    paths = [str(root / "class/hwmon/hwmon3"), str(root / "class/hwmon/hwmon3/temp1_input"), str(d),
+             str(root / "devices/virtual/alias/i2c/1-0040/hwmon/hwmon3/name"), str(root), str(root / "."),
+             str(root / "class/../class/hwmon/hwmon3"), str(root / "missing"), str(root / "class/dangling"),
+             str(root / "class/loop"), str(root / "file/below"), str(root / "class/out"), "/etc/hostname"]
+    return paths, [str(root), str(linked_root)]
+
+
+def test_canonical_agrees_with_the_portable_way(tmp_path):
+    paths, roots = resolution_cases(tmp_path)
+    for root in roots:
+        for path in paths:
+            assert sysfs.canonical(path, root) == sysfs._canonical_portable(path, root), (path, root)
+    assert sysfs.canonical(paths[3], roots[1]) == "devices/platform/i2c/1-0040/hwmon/hwmon3/name"
+
+
+def test_canonical_without_kernel_resolution(tmp_path, monkeypatch):
+    """No O_PATH (not Linux), or /proc not mounted: the same answers, the portable way."""
+    paths, roots = resolution_cases(tmp_path)
+    expected = [sysfs.canonical(p, r) for r in roots for p in paths]
+    monkeypatch.setattr(sysfs, "_O_PATH", None)
+    assert [sysfs.canonical(p, r) for r in roots for p in paths] == expected
+
+    def no_proc(path):  # /proc/self/fd cannot be read (os.readlink itself stays: realpath needs it)
+        raise FileNotFoundError(f"/proc/self/fd for {path}")
+    monkeypatch.setattr(sysfs, "_O_PATH", getattr(os, "O_PATH", 0))
+    monkeypatch.setattr(sysfs, "_kernel_path", no_proc)
+    assert [sysfs.canonical(p, r) for r in roots for p in paths] == expected
+
+
+def between_resolutions(monkeypatch, change):
+    """Runs change() after the first _kernel_path call of each canonical(), i.e. between its two
+    resolutions."""
+    real = sysfs._kernel_path
+    calls = []
+
+    def hooked(p):
+        out = real(p)
+        calls.append(p)
+        if len(calls) % 2 == 1:
+            change()
+        return out
+    monkeypatch.setattr(sysfs, "_kernel_path", hooked)
+    return calls
+
+
+@pytest.mark.skipif(not hasattr(os, "O_PATH"), reason="kernel resolution is Linux-only")
+def test_a_node_removed_while_resolving_is_not_reported(tmp_path, monkeypatch):
+    """The path is the last thing resolved, so a node gone by then gives None, as the portable way's
+    final existence check does; never the path it had a moment earlier."""
+    import shutil
+    d = chip(tmp_path, "devices/platform/i2c/1-0040", 3, CHIP)
+    link = tmp_path / "class/hwmon/hwmon3"
+    calls = between_resolutions(monkeypatch, lambda: shutil.rmtree(d))
+    assert sysfs.canonical(str(link), str(tmp_path)) is None
+    assert calls == [str(tmp_path)]  # the root resolved first; the path, resolved last, was gone
+    assert sysfs._canonical_portable(str(link), str(tmp_path)) is None
+
+
+@pytest.mark.skipif(not hasattr(os, "O_PATH"), reason="kernel resolution is Linux-only")
+def test_a_link_retargeted_while_resolving_gives_the_new_target(tmp_path, monkeypatch):
+    chip(tmp_path, "devices/platform/i2c/1-0040", 3, CHIP)
+    other = tmp_path / "devices/platform/i2c/1-0041/hwmon/hwmon3"
+    other.mkdir(parents=True)
+    link = tmp_path / "class/hwmon/hwmon3"
+
+    def retarget():
+        link.unlink()
+        link.symlink_to(os.path.relpath(other, link.parent))
+    between_resolutions(monkeypatch, retarget)
+    assert sysfs.canonical(str(link), str(tmp_path)) == "devices/platform/i2c/1-0041/hwmon/hwmon3"
+
+
+def test_a_retargeted_link_resolves_to_its_new_device(tmp_path):
+    """Same name, new target: the next resolution follows it; nothing from before is reused."""
+    chip(tmp_path, "devices/platform/i2c/1-0040", 3, CHIP)
+    first = sysfs.chip_identities([(str(tmp_path / "class/hwmon/hwmon3"), "ina")], str(tmp_path))
+    other = tmp_path / "devices/platform/i2c/1-0041/hwmon/hwmon3"
+    other.mkdir(parents=True)
+    link = tmp_path / "class/hwmon/hwmon3"
+    link.unlink()
+    link.symlink_to(os.path.relpath(other, link.parent))
+    second = sysfs.chip_identities([(str(link), "ina")], str(tmp_path))
+    assert first[str(link)] == ("device_channel", {"device": "devices/platform/i2c/1-0040"})
+    assert second[str(link)] == ("device_channel", {"device": "devices/platform/i2c/1-0041"})
+
+
+def test_an_unresolved_path_recovers(tmp_path):
+    link = tmp_path / "class/hwmon/hwmon3"
+    link.parent.mkdir(parents=True)
+    target = tmp_path / "devices/platform/i2c/1-0040/hwmon/hwmon3"
+    link.symlink_to(os.path.relpath(target, link.parent))  # dangling for now
+    assert sysfs.chip_identities([(str(link), "ina")], str(tmp_path))[str(link)] == ("unresolved", {})
+    target.mkdir(parents=True)
+    assert sysfs.chip_identities([(str(link), "ina")], str(tmp_path))[str(link)][0] == "device_channel"
+
+
+def test_a_second_node_on_the_device_is_seen_when_it_comes_and_goes(tmp_path):
+    """The shared-device decision is made from the current listing every time."""
+    import shutil
+    a = chip(tmp_path, "devices/platform/i2c/1-0040", 3, CHIP)
+    chips = [(str(tmp_path / "class/hwmon/hwmon3"), "ina")]
+    assert sysfs.chip_identities(chips, str(tmp_path))[chips[0][0]][0] == "device_channel"
+    chip(tmp_path, "devices/platform/i2c/1-0040", 4, CHIP)
+    both = chips + [(str(tmp_path / "class/hwmon/hwmon4"), "ina")]
+    assert {v[0] for v in sysfs.chip_identities(both, str(tmp_path)).values()} == {"resolved_path"}
+    shutil.rmtree(a.parent / "hwmon4")
+    (tmp_path / "class/hwmon/hwmon4").unlink()
+    assert sysfs.chip_identities(chips, str(tmp_path))[chips[0][0]][0] == "device_channel"
+
+
 def test_unresolved_source_keeps_the_value(tmp_path, monkeypatch):
     chip(tmp_path, "devices/platform/i2c/1-0040", 3, CHIP)
     monkeypatch.setattr(sysfs, "canonical", lambda path, root: None)

@@ -480,6 +480,8 @@ def plan(phase, intervals, final=None):
                 for m in ("profile-collect", "profile-request")]
         out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=3, poll=1.0, measure=120) for m in rr]
         out += [dict(kind="serve", variant="B1", instr=m, interval=1.0, clients=1, poll=1.0, measure=120) for m in rr]
+    elif phase == "ab":  # one reference window; run from two trees in turn (A B B A) to compare product code
+        out += [dict(kind="serve", variant="B0", instr="reference", interval=1.0, clients=1, poll=1.0, measure=120)]
     elif phase == "breakdown-lite":  # the one retry with fewer stages, when stages cost >= 10 % over reference
         out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=1, poll=1.0, measure=120)
                 for m in ("reference", "stages-lite", "stages-lite", "reference")]
@@ -1012,7 +1014,7 @@ def main(argv=None):
     r = sub.add_parser("run")
     r.add_argument("--out", required=True)
     r.add_argument("--alias", required=True)
-    r.add_argument("--phase", choices=("matrix", "clients", "final", "probes", "breakdown", "breakdown-lite"), required=True)
+    r.add_argument("--phase", choices=("matrix", "clients", "final", "probes", "breakdown", "breakdown-lite", "ab"), required=True)
     r.add_argument("--intervals", default="1,2,0.5,5")
     r.add_argument("--final", type=float)
     r.add_argument("--warmup", type=float, default=30)

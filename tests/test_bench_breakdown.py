@@ -3,6 +3,7 @@ in place neither changes what it does nor stays behind. No performance threshold
 import copy
 import json
 import threading
+import time
 
 import pytest
 
@@ -187,7 +188,8 @@ def test_product_output_and_reads_are_the_same_with_stages(monkeypatch):
         ctx = breakdown.install(rec) if staged else breakdown.contextlib.nullcontext()
         with ctx:
             s._attempt()
-            s._attempt()  # the second collection has CPU rows, clocks and their records
+            time.sleep(0.2)  # ticks between the readings, so the second collection has CPU rows and clocks
+            s._attempt()
             stats = s.read()[0]
         return stats, list(paths)
 
@@ -211,8 +213,10 @@ def test_product_output_and_reads_are_the_same_with_stages(monkeypatch):
     a, b = ids(staged), ids(plain)
     assert {k: v for k, v in a.items() if not k.startswith("cpu ") or k in common_cores} == \
         {k: v for k, v in b.items() if not k.startswith("cpu ") or k in common_cores}
-    assert ({k: v["state"] for k, v in staged["collectors"].items()}
-            == {k: v["state"] for k, v in plain["collectors"].items()})
+    def states(stats):  # cpu_frequency is "unavailable" when no core had ticks between the two readings
+        return {k: v["state"] for k, v in stats["collectors"].items()
+                if k != "cpu_frequency" or (stats["cpu"] and plain["cpu"] and staged["cpu"])}
+    assert states(staged) == states(plain)
     assert staged["sample"]["data_age_basis"] == plain["sample"]["data_age_basis"]
 
 

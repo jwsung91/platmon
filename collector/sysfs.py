@@ -210,7 +210,41 @@ def source(provider, unit, basis, **where):
 
 def canonical(path, sysroot):
     """path relative to the sysfs root once symlinks are resolved, so /sys/class aliases and access prefixes
-    (a test tree) drop out; None if it does not resolve to something inside the root."""
+    (a test tree) drop out; None if it does not resolve to something inside the root.
+    Resolved anew on every call (a path can point elsewhere later under the same name). On Linux the
+    kernel resolves it (_kernel_path), which costs a few system calls instead of Python's step-by-step
+    realpath; wherever that cannot answer, the portable way gives the result. The path is resolved
+    last, so a node removed or a link retargeted before that is seen, as the portable way's final
+    existence check sees it; neither way is a snapshot of a tree that changes during the call."""
+    if _O_PATH is not None:
+        try:
+            base = _kernel_path(sysroot)
+            real = _kernel_path(path)
+        except OSError:  # missing, not permitted, no /proc, ...: the portable way decides
+            real = base = None
+        if real is not None and base is not None:
+            if real == base:
+                return os.curdir
+            prefix = base.rstrip(os.sep) + os.sep
+            return real[len(prefix):] if real.startswith(prefix) else None
+    return _canonical_portable(path, sysroot)
+
+
+_O_PATH = getattr(os, "O_PATH", None)  # Linux only
+
+
+def _kernel_path(path):
+    """The absolute path the kernel resolved an existing path to (open without reading, then the
+    /proc/self/fd link); None if it went away in between."""
+    fd = os.open(path, _O_PATH | os.O_CLOEXEC)
+    try:
+        real = os.readlink(f"/proc/self/fd/{fd}")
+    finally:
+        os.close(fd)
+    return None if real.endswith(" (deleted)") or not real.startswith(os.sep) else real
+
+
+def _canonical_portable(path, sysroot):
     try:
         real, base = os.path.realpath(path), os.path.realpath(sysroot)
         rel = os.path.relpath(real, base)
