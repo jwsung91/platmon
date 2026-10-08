@@ -12,7 +12,7 @@ import functools
 import signal
 import sys
 
-from collector import BOARD, PLATFORM, collect
+from collector import BOARD, PLATFORM, collect_recorded
 from collector.common import CpuCounters
 from collector.sampler import Sampler, pick_clock
 from frontends import server
@@ -95,8 +95,9 @@ def main(argv=None):
     # CPU usage over the time since the previous reading; a longer break is not averaged over. This limit
     # matches the Sampler's default stale_after, but it is a CPU window rule, not snapshot freshness.
     cpu = CpuCounters(clock[0], max_gap=max(3 * interval, 5.0))
-    # {} keeps what was logged about unreadable optional sensors, so a lasting failure is logged once
-    sampler = Sampler(functools.partial(collect, cpu, {}), interval, clock=clock).start()
+    # {} keeps what was logged about unreadable optional sensors, so a lasting failure is logged once.
+    # The same clock times the CPU readings, every sensor read and the Sampler's collections.
+    sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0]), interval, clock=clock).start()
     threads = [t for name, start in FRONTENDS.items()
                if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name]))]
     if not threads:

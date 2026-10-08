@@ -106,4 +106,9 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
   await next(() => Promise.reject(new TypeError('Failed to fetch')), 'collection_bad_then_down');
   await next(ok({...meta('c', 5, 100), collectors: {core: grp('ok'), temperature: grp('ok'), gpu: grp('unavailable')}}), 'collection_ok');
   await next(ok({...meta('c', 6, 100), collectors: 'odd'}), 'collection_odd');
+
+  // the read-based data age: shown as the server gives it, not as age + duration
+  const readBased = meta('c', 7, 2400);
+  readBased.sample = {...readBased.sample, age_ms: 200, duration_ms: 300, cycle_age_ms: 3500, data_age_basis: 'oldest_current_read_start'};
+  await next(ok(readBased), 'read_based_age');
 })();

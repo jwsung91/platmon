@@ -23,11 +23,18 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
     g = groups or sysfs.groups("temperature", "power", "fans")
     temp_g, power_g, fan_g = g["temperature"], g["power"], g["fans"]
     temps, power, fans = {}, {}, []
+    track = temp_g.trace is not None  # the service records each value's source and read span
     with guard(temp_g, power_g, fan_g):
-        for d, chip in hwmon_chips(root, temp_g, power_g, fan_g):
+        chips = hwmon_chips(root, temp_g, power_g, fan_g)
+        ids = sysfs.chip_identities(chips, os.path.dirname(os.path.dirname(root))) if track else {}
+        for d, chip in chips:
             if chip in skip:
                 continue
             dev = os.path.basename(d)
+            basis, where = ids.get(d, ("unresolved", {}))
+
+            def src(unit, **attr):
+                return sysfs.source("hwmon", unit, basis, **where, **attr) if track else None
             # one listing per chip for all its channels; if it cannot be listed, this chip is left out
             names = entries(d, temp_g, power_g, fan_g, listed=True)
 
@@ -38,36 +45,52 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
             for n in numbered(names, "temp", "_input"):
                 path = f"{d}/temp{n}_input"
                 t = temp_g.read(path, f"{dev}.temp{n}", found=path)
+                span = temp_g.span  # the number's read; the label read after it does not count
                 if t is not None:
                     key = unique_key(temps, f"{chip} {label(temp_g, 'temp', n, f'temp{n}')}", d)
                     temps[key] = temp_g.got(t / 1000)  # m°C
+                    temp_g.sensor(key, src("celsius", attr=f"temp{n}_input"), span)
             for n in numbered(names, "power", "_input"):
                 path = f"{d}/power{n}_input"
                 p = power_g.read(path, f"{dev}.power{n}", found=path)
+                span = power_g.span
                 if p is not None:
-                    power[unique_key(power, label(power_g, "power", n, f"{chip} power{n}"), d)] = power_g.got(round(p / 1e6, 2))  # µW
+                    key = unique_key(power, label(power_g, "power", n, f"{chip} power{n}"), d)
+                    power[key] = power_g.got(round(p / 1e6, 2))  # µW
+                    power_g.sensor(key, src("watt", attr=f"power{n}_input"), span)
             for n in numbered(names, "curr", "_input"):  # ina3221-style rails; label required, unlabeled are sums
                 lbl = power_g.read(f"{d}/in{n}_label", f"{dev}.in{n}_label", parse=str, found=d)
                 if not lbl:  # no label (a sum channel), or noted if it could not be read
                     continue
                 path = f"{d}/curr{n}_input"
                 ma = power_g.read(path, f"{dev}.curr{n}", found=path)
+                span_a = power_g.span
                 mv = power_g.read(f"{d}/in{n}_input", f"{dev}.in{n}", found=d)
+                span_v = power_g.span
                 if ma is not None and mv is not None:
-                    power[unique_key(power, lbl, d)] = power_g.got(round(mv * ma / 1e6, 2))  # mV*mA -> W
+                    key = unique_key(power, lbl, d)
+                    power[key] = power_g.got(round(mv * ma / 1e6, 2))  # mV*mA -> W
+                    # computed from two reads: from the earlier start to the later end, not one instant
+                    span = (min(span_a[0], span_v[0]), max(span_a[1], span_v[1])) if span_a and span_v else None
+                    power_g.sensor(key, src("watt", calc="product",
+                                            inputs=[["voltage", f"in{n}_input"], ["current", f"curr{n}_input"]]), span)
 
-            def percent(n, found):
+            def add_fan(name, n, rpm, rpm_span, found):
                 pwm = fan_g.read(f"{d}/pwm{n}", f"{dev}.pwm{n}", found=found)
-                return None if pwm is None else fan_g.got(round(pwm * 100 / 255))
+                fan = {"name": name, "rpm": rpm, "percent": None if pwm is None else fan_g.got(round(pwm * 100 / 255))}
+                fans.append(fan)
+                if rpm_span is not False:  # False: this fan has no rpm attribute at all
+                    fan_g.sensor((id(fan), "rpm"), src("rpm", attr=f"fan{n}_input"), rpm_span)
+                fan_g.sensor((id(fan), "percent"), src("percent", attr=f"pwm{n}"), fan_g.span)
 
             fan_idx = numbered(names, "fan", "_input")
             for n in fan_idx:
                 path = f"{d}/fan{n}_input"
                 rpm = fan_g.read(path, f"{dev}.fan{n}", found=path)  # None if unreadable, not 0
-                fans.append({"name": label(fan_g, "fan", n, f"{chip} fan{n}"), "rpm": None if rpm is None else fan_g.got(rpm),
-                             "percent": percent(n, d)})
+                span = fan_g.span
+                add_fan(label(fan_g, "fan", n, f"{chip} fan{n}"), n, None if rpm is None else fan_g.got(rpm), span, d)
             if not fan_idx and "pwm1" in names:  # pwm-fan without a tachometer
-                fans.append({"name": chip, "rpm": None, "percent": percent(1, f"{d}/pwm1")})
+                add_fan(chip, 1, None, False, f"{d}/pwm1")
     return temps, power, fans
 
 
@@ -76,6 +99,7 @@ def thermal_zones(root="/sys/class/thermal", group=None):
     group: the temperature sysfs.Group; inactive zones (ENODATA) count as no_data, not as errors."""
     g = group or sysfs.Group("temperature")
     temps, zone_types = {}, set()
+    sysroot = os.path.dirname(os.path.dirname(root))
     with guard(g):
         zones = sorted(numbered(entries(root, g), "thermal_zone", ""))
         for z in (f"{root}/thermal_zone{n}" for n in zones):
@@ -83,11 +107,16 @@ def thermal_zones(root="/sys/class/thermal", group=None):
             zt = g.read(f"{z}/type", f"{os.path.basename(z)}.type", parse=str, found=z) or os.path.basename(z)
             zone_types.add(zt.replace("-", "_"))
             t = g.read(f"{z}/temp", os.path.basename(z), found=z)
+            span = g.span
             if t is not None:
                 key = zt.removesuffix("-thermal")
                 if key in temps:  # e.g. several acpitz zones
                     key += f" ({os.path.basename(z)})"
                 temps[key] = g.got(t / 1000)
+                if g.trace:  # zones are numbered virtual devices: identified by their path only, not their type
+                    rel = sysfs.canonical(z, sysroot)
+                    g.sensor(key, sysfs.source("thermal", "celsius", "resolved_path" if rel else "unresolved",
+                                               path=rel, attr="temp"), span)
     return temps, zone_types
 
 
@@ -143,6 +172,7 @@ class CpuCounters:
         self._clock, self.mode = clock, mode
         self._max_gap = None if max_gap is None else round(max_gap * 1e9)
         self._last = None  # (elapsed ns when the reading began, cpu_times()) of the last successful reading
+        self.span = None   # (start, end) elapsed ns of the latest reading
 
     def sample(self):
         """({id: usage}, cpu_sampling). Every valid reading becomes the next baseline, also when it gives no
@@ -151,6 +181,7 @@ class CpuCounters:
         try:
             now = self._clock()
             times = cpu_times()
+            self.span = (now, self._clock())  # this reading, for the data age; the window starts at the last one
             last = self._last
             window = None if last is None else now - last[0]
             if last is None:
@@ -196,13 +227,14 @@ def system_info():
             "kernel": u.release, "arch": u.machine, "hostname": u.nodename}
 
 
-def collect(cpu=None, groups=None):
+def collect(cpu=None, groups=None, trace=None):
     """Fields every host has. gpu and power_mode stay None unless a board module fills them.
     cpu: the service's CpuCounters. Without one (a one-off call) the CPU usage comes from two readings
     250 ms apart with a baseline of its own.
     groups: sysfs.Group per optional group, for collectors; without them this call reports its own.
     CPU counters, memory, disk and identity are required: their failures raise. The optional parts
-    (CPU clocks, temperatures, power, fans) note what they could not read and the rest is kept."""
+    (CPU clocks, temperatures, power, fans) note what they could not read and the rest is kept.
+    trace: the service's sysfs.Trace (shares cpu's clock); it gets the required reads' spans."""
     own = groups is None
     if own:
         groups = sysfs.groups("cpu_frequency", "temperature", "power", "fans")
@@ -211,6 +243,8 @@ def collect(cpu=None, groups=None):
         cpu.sample()
         time.sleep(0.25)
     usage, sampling = cpu.sample()
+    if trace:
+        trace.required["cpu"] = cpu.span
 
     freq_g, freqs = groups["cpu_frequency"], {}
     if not usage:  # e.g. the service's first reading: no CPU rows to read clocks for (see cpu_sampling)
@@ -219,21 +253,26 @@ def collect(cpu=None, groups=None):
         for n in usage:
             f = freq_g.read(f"/sys/devices/system/cpu/cpu{n}/cpufreq/scaling_cur_freq", f"cpu{n}")
             freqs[n] = None if f is None else freq_g.got(f * 1000)  # kHz
+            if freq_g.trace:  # logical CPU n, not its position in the list
+                freq_g.sensor(n, sysfs.source("cpufreq", "hertz", "device_channel", cpu=n, attr="scaling_cur_freq"),
+                              freq_g.span)
 
     temps, zone_types = thermal_zones(group=groups["temperature"])
     # zones (acpitz, cpu-thermal, ...) also show up as hwmon chips; skip them to avoid duplicates
     hw_temps, power, fans = hwmon_sensors(skip=zone_types, groups=groups)
     temps.update(hw_temps)
 
-    mem = meminfo()
-    disk = shutil.disk_usage(HOST_ROOT)
+    timed = trace.timed if trace else (lambda name, fn, *args: fn(*args))
+    mem = timed("memory", meminfo)
+    disk = timed("disk", shutil.disk_usage, HOST_ROOT)
+    uptime = timed("uptime", read, "/proc/uptime")
 
     return {
         "time": time.time(),
         "model": (read(f"{DEVICE_TREE}/model") or read("/sys/class/dmi/id/product_name")
                   or os.uname().nodename).rstrip("\0"),
         "system": system_info(),
-        "uptime": float(read("/proc/uptime").split()[0]),
+        "uptime": float(uptime.split()[0]),
         "power_mode": None,
         "cpu": [{"id": n, "usage": u, "freq": freqs.get(n)} for n, u in usage.items()],
         "cpu_sampling": sampling,  # cores missing from cpu, and why

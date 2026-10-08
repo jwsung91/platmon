@@ -134,8 +134,9 @@ def test_503_metadata(web):
         s._attempt()
         clock[0] += 6 * 10**9  # past stale_after (5 s)
         code, _, body = get(base + "/api/stats")
-        assert code == 503 and json.loads(body)["sample"] == {"sequence": 1, "age_ms": 6000.0, "data_age_ms": 6000.0}
-        assert "cpu" not in json.loads(body)
+        assert code == 503 and json.loads(body)["sample"] == {"sequence": 1, "age_ms": 6000.0, "cycle_age_ms": 6000.0,
+                                                              "data_age_ms": 6000.0, "data_age_basis": "cycle_start_upper_bound"}
+        assert "cpu" not in json.loads(body) and "sensor_meta" not in json.loads(body)
         code, _, body = get(base + "/text")
         assert code == 503 and body.decode().startswith("no current data")
         code, _, body = get(base + "/api/status")  # 200 even when not ready: read "ready", not the code

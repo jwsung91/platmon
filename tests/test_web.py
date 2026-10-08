@@ -29,7 +29,8 @@ def test_every_step_ran(steps):
                            "tab_return_while_requesting", "old_answer_ignored", "tab_return_rechecked",
                            "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout",
                            "cpu_warmup", "cpu_partial", "cpu_odd_reason",
-                           "collection_bad", "collection_bad_then_down", "collection_ok", "collection_odd"]
+                           "collection_bad", "collection_bad_then_down", "collection_ok", "collection_odd",
+                           "read_based_age"]
     for s in steps.values():
         if s["step"] != "cpu_warmup":  # no CPU rows before the second reading, by design
             assert s["shows_data"], s     # the last good values stay on screen
@@ -125,3 +126,8 @@ def test_collection_note(steps):
     assert steps["collection_bad_then_down"]["coll"] == steps["collection_bad"]["coll"]  # belongs to the last good data
     assert steps["collection_ok"]["coll"] == "" and steps["collection_odd"]["coll"] == ""
     assert steps["ok"]["coll"] == ""  # legacy servers: no note
+
+
+def test_read_based_data_age(steps):
+    """data_age_ms is shown as given (2.4 s here), whatever age_ms + duration_ms or cycle_age_ms say."""
+    assert steps["read_based_age"]["age"] == "Sample #7 · data age 2 s"

@@ -1,6 +1,8 @@
 """Helpers for reading /proc and /sys, shared by the common and board-specific collectors."""
 import contextlib
 import errno
+import hashlib
+import json
 import os
 import re
 import sys
@@ -86,9 +88,12 @@ class Group:
     Only the reason codes and short targets (e.g. "hwmon2.temp1") reach the API; paths and exception text
     go to the service log."""
 
-    def __init__(self, name):
+    def __init__(self, name, trace=None):
         self.name, self.values, self.reasons = name, 0, set()
         self.issues, self.truncated, self.details = [], 0, []
+        self.trace = trace  # the service's per-collection Trace; None for a one-off collect()
+        self.span = None    # (start, end) elapsed ns of the last successful read(), with a trace
+        self.sensors = {}   # output slot -> sensor metadata (source and read span), with a trace
 
     def note(self, target, reason, detail=None):
         """Records why target has no value; returns None so a reader can return it."""
@@ -120,7 +125,11 @@ class Group:
     def read(self, path, target, parse=int, found=None):
         """parse(content of path), or None with the reason noted. found: what this collection discovered by
         listing (the file itself, or its device directory); if that is gone too the file disappeared,
-        otherwise the attribute is just not exposed."""
+        otherwise the attribute is just not exposed.
+        With a trace, self.span is the read's (start, end) on success and None otherwise."""
+        clock = self.trace.clock if self.trace else None
+        self.span = None
+        start = clock() if clock else None
         try:
             with open(path) as f:
                 text = f.read().strip()
@@ -132,9 +141,17 @@ class Group:
         except OSError as e:
             return self.note(target, reason_of(e), f"{path}: {e.strerror}")
         try:
-            return parse(text)
+            value = parse(text)
         except ValueError:  # int("") included: an empty number is not 0
             return self.note(target, "invalid_data", path)
+        if clock:
+            self.span = (start, clock())
+        return value
+
+    def sensor(self, slot, source, span):
+        """Records, with a trace, where the value in output slot came from and when it was read."""
+        if self.trace:
+            self.sensors[slot] = {**source, "span": span}
 
     def status(self):
         problems = [r for r in PROBLEMS if r in self.reasons]
@@ -158,8 +175,77 @@ def guard(*groups):
             g.note(g.name, "internal_error", traceback.format_exc(limit=3).strip().replace("\n", " | "))
 
 
-def groups(*names):
-    return {n: Group(n) for n in names or OPTIONAL}
+def groups(*names, trace=None):
+    return {n: Group(n, trace) for n in names or OPTIONAL}
+
+
+class Trace:
+    """What the service records in one collection besides the values (sensor_meta, data age): the elapsed
+    clock every read is timed with, and the (start, end) of the required reads. Made new for each
+    collection, never reused."""
+
+    def __init__(self, clock):
+        self.clock, self.required = clock, {}
+
+    def timed(self, name, fn, *args):
+        start = self.clock()
+        value = fn(*args)
+        self.required[name] = (start, self.clock())
+        return value
+
+
+# Sensor sources. The id is the SHA-256 of a canonical descriptor: provider, unit, how the source was
+# identified and where (device + attribute, or a resolved path), never a label, index, value or host name.
+# It names a source for as long as that device or path stays the same; it is not a hardware serial.
+
+def source(provider, unit, basis, **where):
+    """Sensor metadata without the read. basis: device_channel, resolved_path or unresolved (id None)."""
+    if basis == "unresolved":
+        return {"id": None, "provider": provider, "identity_basis": basis, "unit": unit}
+    descriptor = {"v": 1, "provider": provider, "unit": unit, "basis": basis, **where}
+    text = json.dumps(descriptor, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return {"id": "src1:" + hashlib.sha256(text.encode()).hexdigest(), "provider": provider,
+            "identity_basis": basis, "unit": unit}
+
+
+def canonical(path, sysroot):
+    """path relative to the sysfs root once symlinks are resolved, so /sys/class aliases and access prefixes
+    (a test tree) drop out; None if it does not resolve to something inside the root."""
+    try:
+        real, base = os.path.realpath(path), os.path.realpath(sysroot)
+        rel = os.path.relpath(real, base)
+    except (OSError, ValueError):
+        return None
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep) or not os.path.exists(real):
+        return None
+    return rel
+
+
+def chip_identities(chips, sysroot):
+    """{chip dir: (basis, where)} for hwmon chips. A chip under .../<device>/hwmon/hwmonN is identified by
+    its device when no other chip of this listing shares that device (then a renumbered hwmonN keeps the
+    id); otherwise by its resolved path; unresolved if the path does not resolve."""
+    rels = {d: canonical(d, sysroot) for d, _ in chips}
+    anchors = {}
+    for d, rel in rels.items():
+        m = rel and re.fullmatch(r"(.+)/hwmon/hwmon\d+", rel)
+        if m and os.path.basename(m.group(1)) != "virtual":  # devices/virtual is not a device
+            anchors[d] = m.group(1)
+    shared = {a for a in anchors.values() if list(anchors.values()).count(a) > 1}
+    out = {}
+    for d, rel in rels.items():
+        if d in anchors and anchors[d] not in shared:
+            out[d] = ("device_channel", {"device": anchors[d]})
+        elif rel:
+            out[d] = ("resolved_path", {"path": rel})
+        else:
+            out[d] = ("unresolved", {})
+    return out
+
+
+def pointer(*parts):
+    """JSON Pointer (RFC 6901) to a value of the response: ~ becomes ~0 and / becomes ~1."""
+    return "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in parts)
 
 
 def summarize(groups, logged=None):
