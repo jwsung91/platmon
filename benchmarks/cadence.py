@@ -15,6 +15,7 @@ Usage, see docs/performance/low-overhead-cadence.md:
 """
 import argparse
 import array
+import contextlib
 import errno
 import glob
 import hashlib
@@ -36,6 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 mono = time.monotonic_ns
 tcpu = time.thread_time_ns
+INSTRUMENTATION = ("reference", "stages", "stages-lite", "profile-collect", "profile-request")
 LOCAL_FS = ("ext4", "ext3", "ext2", "xfs", "btrfs", "f2fs", "vfat", "exfat")  # statvfs allowlist by type
 
 
@@ -183,6 +185,7 @@ def serve(a):
     import functools
     from http.server import ThreadingHTTPServer
 
+    from benchmarks import breakdown
     from benchmarks.passive import Passive
     from collector import BOARD, PLATFORM, collect_recorded
     from collector.common import CpuCounters
@@ -195,6 +198,19 @@ def serve(a):
     req_cap = int((a.warmup + a.measure + 10) * max(a.expect_rps, 1)) + 64
     t_http = Table(["t", "elapsed_ns", "cpu_ns", "read_ns", "read_cpu_ns", "bytes", "code", "sequence"], req_cap)
     t_mem = Table(["t", "rss_bytes"], int((a.warmup + a.measure) / 10) + 8)
+
+    rec = prof = cost = None
+    if a.instrumentation.startswith("stages"):
+        cost = breakdown.wrapper_cost()
+        rec = breakdown.Recorder(Table)
+        rec.allocate(rows=cap * 40 + req_cap * 12, units=cap + 2 * req_cap)
+    elif a.instrumentation.startswith("profile"):
+        why = breakdown.profile_support()
+        if why:  # before any work: the runner records the run as unsupported, not as a measurement
+            print(f"unsupported: {why}", flush=True)
+            sys.exit(3)
+        prof = breakdown.Profiles()
+    profiled = (prof.profiled if prof else contextlib.nullcontext)
 
     clock = pick_clock()
     cpu = CpuCounters(clock[0], max_gap=max(3 * a.interval, 5.0))
@@ -216,10 +232,14 @@ def serve(a):
 
     class BenchSampler(Sampler):
         def _attempt(self):
+            begun = rec and rec.begin()
             t0, c0 = mono(), tcpu()
-            started = super()._attempt()
+            with (profiled() if a.instrumentation == "profile-collect" else contextlib.nullcontext()):
+                started = super()._attempt()
             r = self._attempt_result
             t_attempt.add(t0, started, mono() - t0, tcpu() - c0, r["duration_ns"], r["state"] == "ok", self._sequence)
+            if rec:
+                rec.end("collection", begun)
             return started
 
         def read(self, timeout=0.0):
@@ -242,7 +262,35 @@ def serve(a):
             self._bytes, self._code = len(body), code
             super().reply(code, body, ctype)
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
+        def handle(self):
+            with (profiled() if a.instrumentation == "profile-request" else contextlib.nullcontext()):
+                super().handle()
+
+    class Server(ThreadingHTTPServer):
+        def process_request_thread(self, request, client_address):  # a request's whole worker thread
+            begun = rec and rec.begin()
+            try:
+                super().process_request_thread(request, client_address)
+            finally:
+                if rec:
+                    rec.end("request", begun)
+
+        def _handle_request_noblock(self):  # the listener thread's accept and dispatch of one request
+            begun = rec and rec.begin()
+            try:
+                super()._handle_request_noblock()
+            finally:
+                if rec:
+                    rec.end("listener", begun)
+
+    if rec:
+        Handler.handle = rec.wrap("http.handle (parse, do_GET)", Handler.handle)
+        Handler.do_GET = rec.wrap("http.do_GET", Handler.do_GET)
+        Handler.reply = rec.wrap("http.reply (headers, write)", Handler.reply)
+    installed = contextlib.ExitStack()
+    if rec:
+        installed.enter_context(breakdown.install(rec, breakdown.LITE_SKIP if a.instrumentation == "stages-lite" else ()))
+    httpd = Server(("127.0.0.1", a.port), Handler)
     sampler.start()
     threading.Thread(target=httpd.serve_forever, name="http", daemon=True).start()
     print(f"ready {PLATFORM} {BOARD.__name__ if BOARD else 'none'}", flush=True)
@@ -255,16 +303,23 @@ def serve(a):
     begin = mono()
     sleep_until(begin + int(a.warmup * 1e9))
     start = mark()
+    if prof:
+        prof.on.set()
     sleep_until(start["mono"] + int(a.measure * 1e9))
     end = mark()
+    if prof:
+        prof.on.clear()
     sampler.stop()
     httpd.shutdown()
+    installed.close()
     stats = sampler.read()[0] or {}
     scope = scope_of(stats, Passive()() if a.variant == "B0" else stats.get("_bench_passive", {}))
     elapsed = (end["mono"] - start["mono"]) / 1e9
     boot = None if start["boot"] is None else (end["boot"] - start["boot"]) / 1e9
     out = {
-        "kind": "serve", "run_id": a.run_id, "variant": a.variant, "interval_s": a.interval, "warmup_s": a.warmup,
+        "kind": "serve", "run_id": a.run_id, "variant": a.variant, "instrumentation": a.instrumentation,
+        "breakdown": rec and rec.dump(), "wrapper_cost": cost, "profile": prof and prof.report(),
+        "interval_s": a.interval, "warmup_s": a.warmup,
         "measure_s": a.measure, "platform": PLATFORM, "begin_mono": begin, "start": start, "end": end,
         "measured_elapsed_s": elapsed, "boottime_elapsed_s": boot,
         "clock_jump": boot is not None and abs(boot - elapsed) > 1.0,  # suspend or a large clock step
@@ -417,6 +472,17 @@ def plan(phase, intervals, final=None):
     elif phase == "final":
         measure = min(600, max(300, 120 * final))
         out += [dict(kind="serve", variant=v, interval=final, clients=1, poll=1.0, measure=measure) for v in ("B0", "B1")]
+    elif phase == "breakdown":  # interval 1 s, priority order; reference/stages pairs bracket each other
+        rr = ("reference", "stages", "stages", "reference")
+        out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=1, poll=1.0, measure=120) for m in rr]
+        out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=0, poll=1.0, measure=120) for m in rr]
+        out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=1, poll=1.0, measure=50)
+                for m in ("profile-collect", "profile-request")]
+        out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=3, poll=1.0, measure=120) for m in rr]
+        out += [dict(kind="serve", variant="B1", instr=m, interval=1.0, clients=1, poll=1.0, measure=120) for m in rr]
+    elif phase == "breakdown-lite":  # the one retry with fewer stages, when stages cost >= 10 % over reference
+        out += [dict(kind="serve", variant="B0", instr=m, interval=1.0, clients=1, poll=1.0, measure=120)
+                for m in ("reference", "stages-lite", "stages-lite", "reference")]
     elif phase == "probes":
         out += [dict(kind="probe", feature="noop", period=1.0, measure=120)]
         out += [dict(kind="probe", feature="wireless", period=p, measure=120) for p in (1.0, 2.0, 5.0)]
@@ -552,6 +618,17 @@ def run(a):
         rec = {"kind": "run", "run_id": run_id, "alias": a.alias, "cond": c, "source_sha": a.source_sha,
                "order": i, "counted": False}
         why = stop or budget_left([r for r in done if r["kind"] == "run"], c, a.warmup, a.budget_min * 60, a.max_windows)
+        if not why and c.get("instr", "").startswith("profile"):
+            sys.path.insert(0, ROOT)
+            from benchmarks import breakdown
+            unsupported = breakdown.profile_support()
+            if unsupported:  # skipped, not a failure: the other runs go on
+                rec.update(valid=False, unsupported=True, skipped=f"unsupported: {unsupported}")
+                print(f"{run_id}: skipped: unsupported profile mode", flush=True)
+                done.append(rec)
+                with open(results, "a") as f:
+                    f.write(json.dumps(rec) + "\n")
+                continue
         before = device_state()
         why = why or guard(before, a.out, a.watch_url)
         if why:
@@ -655,9 +732,12 @@ def execute(me, run_id, c, a):
     path = f"{tmp}/{run_id}.serve.json"
     srv = subprocess.Popen(child_cmd(me, "serve", "--variant", c["variant"], "--interval", str(c["interval"]),
                                      "--warmup", str(a.warmup), "--measure", str(c["measure"]), "--port", str(a.port),
+                                     "--instrumentation", c.get("instr", "reference"),
                                      "--out", path, "--run-id", run_id, "--expect-rps", str(c["clients"] / c["poll"])),
                            stdout=subprocess.PIPE)
     ready = wait_line(srv, a.ready_timeout)
+    if ready and ready.startswith("unsupported"):
+        return failed(ready.strip(), [srv], unsupported=True)
     if not ready or not ready.startswith("ready"):
         return failed(f"server not ready: {ready!r}", [srv])
     clients = [subprocess.Popen(child_cmd(me, "client", "--url", f"http://127.0.0.1:{a.port}/api/stats",
@@ -702,6 +782,7 @@ def summarize_serve(rec):
     st, en = s["start"]["self"], s["end"]["self"]
     return {
         "run_id": rec["run_id"], "alias": rec["alias"], "phase": rec["cond"]["phase"], "variant": s["variant"],
+        "instr": s.get("instrumentation", "reference"),
         "interval_s": s["interval_s"], "clients": rec["cond"]["clients"], "poll_s": rec["cond"]["poll"],
         "valid": rec["valid"], "invalid": rec.get("invalid"), "order": rec["order"],
         "measured_elapsed_s": s["measured_elapsed_s"], "sample_count": sum(r["ok"] for r in att),
@@ -823,7 +904,7 @@ def report(a):
     serves = [summarize_serve(r) for r in with_serve]
     groups, raw = {}, {}
     for s, r in zip(serves, with_serve):
-        key = (s["alias"], s["phase"], s["interval_s"], s["clients"], s["poll_s"])
+        key = (s["alias"], s["phase"], s["interval_s"], s["clients"], s["poll_s"], s["instr"])
         groups.setdefault(key, []).append(s)
         raw.setdefault(key, []).append(r)
     out = {"manifests": [r for r in recs if r["kind"] == "manifest"],
@@ -845,7 +926,7 @@ def markdown(out):
         return "-" if v is None else f"{v:.{nd}f}"
 
     def runs_of(key):
-        return [r for r in out["runs"] if [r["alias"], r["phase"], r["interval_s"], r["clients"], r["poll_s"]] == key
+        return [r for r in out["runs"] if [r["alias"], r["phase"], r["interval_s"], r["clients"], r["poll_s"], r["instr"]] == key
                 and r["valid"]]
 
     def mean(v):
@@ -907,6 +988,8 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve")
     s.add_argument("--variant", choices=("B0", "B1"), required=True)
+    s.add_argument("--instrumentation", choices=INSTRUMENTATION, default="reference",
+                   help="reference: the coarse timers only; stages: benchmarks/breakdown.py; profile-*: cProfile")
     s.add_argument("--interval", type=float, required=True)
     s.add_argument("--warmup", type=float, default=30)
     s.add_argument("--measure", type=float, default=120)
@@ -929,7 +1012,7 @@ def main(argv=None):
     r = sub.add_parser("run")
     r.add_argument("--out", required=True)
     r.add_argument("--alias", required=True)
-    r.add_argument("--phase", choices=("matrix", "clients", "final", "probes"), required=True)
+    r.add_argument("--phase", choices=("matrix", "clients", "final", "probes", "breakdown", "breakdown-lite"), required=True)
     r.add_argument("--intervals", default="1,2,0.5,5")
     r.add_argument("--final", type=float)
     r.add_argument("--warmup", type=float, default=30)
