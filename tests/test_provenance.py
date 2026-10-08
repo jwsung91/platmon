@@ -186,6 +186,49 @@ def test_canonical_without_kernel_resolution(tmp_path, monkeypatch):
     assert [sysfs.canonical(p, r) for r in roots for p in paths] == expected
 
 
+def between_resolutions(monkeypatch, change):
+    """Runs change() after the first _kernel_path call of each canonical(), i.e. between its two
+    resolutions."""
+    real = sysfs._kernel_path
+    calls = []
+
+    def hooked(p):
+        out = real(p)
+        calls.append(p)
+        if len(calls) % 2 == 1:
+            change()
+        return out
+    monkeypatch.setattr(sysfs, "_kernel_path", hooked)
+    return calls
+
+
+@pytest.mark.skipif(not hasattr(os, "O_PATH"), reason="kernel resolution is Linux-only")
+def test_a_node_removed_while_resolving_is_not_reported(tmp_path, monkeypatch):
+    """The path is the last thing resolved, so a node gone by then gives None, as the portable way's
+    final existence check does; never the path it had a moment earlier."""
+    import shutil
+    d = chip(tmp_path, "devices/platform/i2c/1-0040", 3, CHIP)
+    link = tmp_path / "class/hwmon/hwmon3"
+    calls = between_resolutions(monkeypatch, lambda: shutil.rmtree(d))
+    assert sysfs.canonical(str(link), str(tmp_path)) is None
+    assert calls == [str(tmp_path)]  # the root resolved first; the path, resolved last, was gone
+    assert sysfs._canonical_portable(str(link), str(tmp_path)) is None
+
+
+@pytest.mark.skipif(not hasattr(os, "O_PATH"), reason="kernel resolution is Linux-only")
+def test_a_link_retargeted_while_resolving_gives_the_new_target(tmp_path, monkeypatch):
+    chip(tmp_path, "devices/platform/i2c/1-0040", 3, CHIP)
+    other = tmp_path / "devices/platform/i2c/1-0041/hwmon/hwmon3"
+    other.mkdir(parents=True)
+    link = tmp_path / "class/hwmon/hwmon3"
+
+    def retarget():
+        link.unlink()
+        link.symlink_to(os.path.relpath(other, link.parent))
+    between_resolutions(monkeypatch, retarget)
+    assert sysfs.canonical(str(link), str(tmp_path)) == "devices/platform/i2c/1-0041/hwmon/hwmon3"
+
+
 def test_a_retargeted_link_resolves_to_its_new_device(tmp_path):
     """Same name, new target: the next resolution follows it; nothing from before is reused."""
     chip(tmp_path, "devices/platform/i2c/1-0040", 3, CHIP)

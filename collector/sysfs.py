@@ -213,10 +213,13 @@ def canonical(path, sysroot):
     (a test tree) drop out; None if it does not resolve to something inside the root.
     Resolved anew on every call (a path can point elsewhere later under the same name). On Linux the
     kernel resolves it (_kernel_path), which costs a few system calls instead of Python's step-by-step
-    realpath; wherever that cannot answer, the portable way gives the result, so both always agree."""
+    realpath; wherever that cannot answer, the portable way gives the result. The path is resolved
+    last, so a node removed or a link retargeted before that is seen, as the portable way's final
+    existence check sees it; neither way is a snapshot of a tree that changes during the call."""
     if _O_PATH is not None:
         try:
-            real, base = _kernel_path(path), _kernel_path(sysroot)
+            base = _kernel_path(sysroot)
+            real = _kernel_path(path)
         except OSError:  # missing, not permitted, no /proc, ...: the portable way decides
             real = base = None
         if real is not None and base is not None:
