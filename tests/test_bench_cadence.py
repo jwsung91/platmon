@@ -185,3 +185,6 @@ def test_report_roundtrip(tmp_path, capsys):
     all_attempts = len(serve["tables"]["attempt"]["rows"])
     assert 0 < run["sample_count"] < all_attempts  # warmup attempts are not counted
     assert run["passive_ms"]["n"] > 0 and run["scope"]["interfaces"] > 0
+    cadence.main(["report", "--md", str(results)])
+    md = capsys.readouterr().out
+    assert "| t | matrix | 0.1 |" in md and "| B1 |" in md

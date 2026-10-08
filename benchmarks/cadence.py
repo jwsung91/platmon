@@ -676,6 +676,9 @@ def summarize_serve(rec):
         "pss_start": s["start"]["smaps"].get("pss_bytes"), "pss_end": s["end"]["smaps"].get("pss_bytes"),
         "maxrss_kib": s["end"]["self"]["ru_maxrss"], "rss_slope_kib_per_min": (lambda v: v and v / 1024)(
             slope_per_min([(r["t"], r["rss_bytes"]) for r in mem])),
+        # growth over the window's second half: a one-off allocation step early on is not a trend
+        "rss_second_half_kib": (lambda pts: (pts[-1]["rss_bytes"] - min(pts, key=lambda r: abs(r["t"] - (t0 + t1) / 2))["rss_bytes"]) / 1024
+                                if len(pts) >= 3 else None)(mem),
         "buffer_bytes": s["buffer_bytes"],
         "ctx_voluntary": en["ru_nvcsw"] - st["ru_nvcsw"], "ctx_involuntary": en["ru_nivcsw"] - st["ru_nivcsw"],
         "minor_faults": en["ru_minflt"] - st["ru_minflt"], "major_faults": en["ru_majflt"] - st["ru_majflt"],
@@ -755,8 +758,74 @@ def report(a):
            "runs": serves,
            "comparisons": [{"key": list(k), **compare(v)} for k, v in groups.items()],
            "probes": [summarize_probe(r) for r in recs if r["kind"] == "run" and "probe" in r]}
-    json.dump(out, sys.stdout, indent=1, default=str)
-    print()
+    if a.md:
+        print(markdown(out))
+    else:
+        json.dump(out, sys.stdout, indent=1, default=str)
+        print()
+
+
+def markdown(out):
+    """Tables 1-3 of the report from report()'s output. Empty values stay '-', never 0."""
+    def f(v, nd=2):
+        return "-" if v is None else f"{v:.{nd}f}"
+
+    def runs_of(key):
+        return [r for r in out["runs"] if [r["alias"], r["phase"], r["interval_s"], r["clients"], r["poll_s"]] == key
+                and r["valid"]]
+
+    def mean(v):
+        v = [x for x in v if x is not None]
+        return sum(v) / len(v) if v else None
+
+    lines = ["| platform | phase | interval s | clients/poll s | B0 CPU % (runs) | B1 CPU % (runs) | B1-B0 pp | spread pp "
+             "| passive p95 ms (elapsed/cpu, n) | attempt p95 ms B0/B1 | RSS end B1-B0 MiB | RSS 2nd-half growth KiB B0/B1 "
+             "| failed/overrun | actual interval p50/max ms | problems |", "|" + "---|" * 15]
+    for c in out["comparisons"]:
+        rs = runs_of(c["key"])
+        b0 = [r for r in rs if r["variant"] == "B0"]
+        b1 = [r for r in rs if r["variant"] == "B1"]
+        p95 = [r["passive_ms"]["p95"] for r in b1]
+        p95c = [r["passive_cpu_ms"]["p95"] for r in b1]
+        rss = None if not b0 or not b1 else (mean([r["rss_end"] for r in b1]) - mean([r["rss_end"] for r in b0])) / 2**20
+        lines.append("| " + " | ".join([
+            c["key"][0], c["key"][1], f(c["key"][2], 1), f"{c['key'][3]}/{f(c['key'][4], 0)}",
+            ", ".join(f(x) for x in c["b0"]) or "-", ", ".join(f(x) for x in c["b1"]) or "-",
+            f(c.get("delta_pp"), 3), f(c.get("spread_pp"), 3) + ("" if c.get("distinguishable") else " (no repeats)" if c.get("spread_pp") is None
+                                       else " (indistinguishable)"),
+            f"{f(max(p95) if p95 else None)}/{f(max(p95c) if p95c else None)}, {sum(r['passive_ms']['n'] for r in b1)}",
+            f"{f(mean([r['attempt_ms']['p95'] for r in b0]))}/{f(mean([r['attempt_ms']['p95'] for r in b1]))}",
+            f(rss), f"{f(max((r['rss_second_half_kib'] for r in b0), default=None), 0)}/{f(max((r['rss_second_half_kib'] for r in b1), default=None), 0)}",
+            f"{sum(r['failed_attempts'] for r in rs)}/{sum(r['overrun_count'] for r in rs)}",
+            f"{f(mean([r['actual_interval_ms']['p50'] for r in rs]), 1)}/{f(max((r['actual_interval_ms']['max'] or 0) for r in rs), 1)}",
+            "; ".join(c["problems"]) or "-"]) + " |")
+    lines += ["", "| platform | phase | interval s | clients | poll s | variant | CPU % | server requests | handler p95 ms "
+              "(elapsed/cpu) | client latency p50/p95 ms (n) | client failures | response KiB | distinct samples served |",
+              "|" + "---|" * 13]
+    for r in out["runs"]:
+        lines.append("| " + " | ".join([
+            r["alias"], r["phase"], f(r["interval_s"], 1), str(r["clients"]), f(r["poll_s"], 0), r["variant"],
+            f(r["cpu_pct_one_core"]), str(r["requests"]),
+            f"{f(r['handler_ms']['p95'])}/{f(r['handler_cpu_ms']['p95'])}",
+            f"{f(r['client_latency_ms']['p50'])}/{f(r['client_latency_ms']['p95'])} ({r['client_latency_ms']['n']})",
+            str(r["client_failures"]), f((r["response_bytes"]["mean"] or 0) / 1024 if r["response_bytes"]["n"] else None, 1),
+            str(r["distinct_sequences_served"])]) + " |")
+    lines += ["", "| platform | feature | period s | step | n | CPU % (process) | elapsed p50/p95 ms | cpu p50/p95 ms "
+              "| failures | with value | skipped/pending |", "|" + "---|" * 11]
+    names = {"noop": ["noop"], "wireless": ["/proc/net/wireless"], "statvfs": ["mountinfo", "statvfs"]}
+    for p in out["probes"]:
+        for step, s in p["steps"].items():
+            i = int(step)
+            name = names[p["feature"]][i % 10] + (" (burst)" if i >= 10 else "")
+            lines.append("| " + " | ".join([
+                p["alias"], p["feature"], f(p["period_s"], 0), name, str(s["elapsed_ms"]["n"]),
+                f(p["cpu_pct_one_core"], 3) if i < 10 else "-",
+                f"{f(s['elapsed_ms']['p50'], 3)}/{f(s['elapsed_ms']['p95'], 3)}",
+                f"{f(s['cpu_ms']['p50'], 3)}/{f(s['cpu_ms']['p95'], 3)}", str(s["failures"]), str(s["with_value"]),
+                f"{p['skipped_ticks']}/{p['pending_at_end']}"]) + " |")
+    if out["skipped"]:
+        lines += ["", "Not run or invalid:"] + [f"- {s['run_id']}: {s['cond']} — {s['why']}" for s in out["skipped"]]
+    return "\n".join(lines)
 
 
 def main(argv=None):
@@ -798,6 +867,7 @@ def main(argv=None):
     r.add_argument("--source-sha", default="unknown")
     rp = sub.add_parser("report")
     rp.add_argument("results", nargs="+")
+    rp.add_argument("--md", action="store_true", help="Markdown tables instead of JSON")
     a = p.parse_args(argv)
     {"serve": serve, "client": client, "probe": probe, "run": run, "report": report}[a.cmd](a)
 
