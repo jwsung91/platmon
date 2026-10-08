@@ -12,6 +12,8 @@ import threading
 import time
 import uuid
 
+from .sysfs import pointer
+
 SCHEMA_VERSION = 1
 METADATA_KEYS = ("schema_version", "sample", "collectors", "sensor_meta")  # added to the stats dict by read()
 BAD = ("partial", "error")  # optional collector states that make a fresh snapshot "degraded"
@@ -28,33 +30,42 @@ def pick_clock():
     return (lambda: time.clock_gettime_ns(boottime)), {"source": "boottime", "suspend_aware": True}
 
 
+REQUIRED_READS = ("cpu", "memory", "disk", "uptime")  # the reads every recorded collection must time
+
+
 @dataclasses.dataclass
 class Collected:
     """What a recording collect() returns instead of a plain dict (collector.collect_recorded): the stats
-    and, for the Sampler to check, {JSON Pointer: sensor metadata with "span"}, the (start, end) of each
-    required read by name (None if it was not timed), the pointers of all values that need a record, and
-    the elapsed clock they were taken on. Spans are elapsed ns; only the Sampler turns them into offsets."""
+    and, for the Sampler to check, {JSON Pointer: sensor metadata with "span"} and the (start, end) of each
+    of REQUIRED_READS by name (None if not timed), all on clock. Spans are elapsed ns; only the Sampler turns
+    them into offsets. Which values need a record comes from the stats (sensor_values), not from here."""
     stats: dict
     sensors: dict
     required: dict
-    targets: list
     clock: object
 
 
-_MISSING = object()
-
-
-def _resolve(doc, ptr):
-    """The value at JSON Pointer ptr (RFC 6901) in doc, or _MISSING."""
-    if not isinstance(ptr, str) or not ptr.startswith("/"):
-        return _MISSING
-    for part in ptr.split("/")[1:]:
-        part = part.replace("~1", "/").replace("~0", "~")
-        try:
-            doc = doc[int(part)] if isinstance(doc, list) else doc[part]
-        except (KeyError, IndexError, TypeError, ValueError):
-            return _MISSING
-    return doc
+def sensor_values(stats):
+    """(JSON Pointer, kind, key, value) of every value of recorded stats that needs a read record:
+    temperature and power values, fan rpm/percent, CPU freq, GPU usage/freq/max_freq. The collector attaches
+    its records by these, and the Sampler checks that none is missing, so both use the same list."""
+    for table in ("temperature", "power"):
+        values = stats.get(table)
+        for key, value in (values.items() if isinstance(values, dict) else ()):
+            yield pointer(table, key), table, key, value
+    fans = stats.get("fans")
+    for i, fan in enumerate(fans if isinstance(fans, list) else ()):
+        for field in ("rpm", "percent"):
+            if isinstance(fan, dict) and field in fan:
+                yield pointer("fans", i, field), "fans", (i, field), fan[field]
+    cpus = stats.get("cpu")
+    for i, c in enumerate(cpus if isinstance(cpus, list) else ()):  # i is the row, c["id"] the CPU
+        if isinstance(c, dict) and "freq" in c:
+            yield pointer("cpu", i, "freq"), "cpu", c.get("id"), c["freq"]
+    gpu = stats.get("gpu")
+    for field in ("usage", "freq", "max_freq"):
+        if isinstance(gpu, dict) and field in gpu:
+            yield pointer("gpu", field), "gpu", field, gpu[field]
 
 
 def _number(value):
@@ -168,8 +179,9 @@ class Sampler:
         return meta, oldest
 
     def _check(self, recorded, stats, started, completed):
-        """Every required read has a valid span; every record points at a value of these stats; every
-        target with a value has a valid read; all on this Sampler's clock, in whole ns, inside this
+        """Exactly the REQUIRED_READS, each with a valid span; every record at a sensor value of these stats
+        (its pointer as sensor_values writes it, so only RFC 6901 pointers to values that are there); every
+        such value that is a number with a valid read; all on this Sampler's clock, in whole ns, inside this
         collection. The current reads (required ones and the values' own) are collected here, once."""
         problems = []
 
@@ -181,19 +193,19 @@ class Sampler:
         if not same_clock:
             problems.append("read records on another clock")
         required = recorded.required if isinstance(recorded.required, dict) else {}
-        if not required or not all(valid(s) for s in required.values()):
+        if set(required) != set(REQUIRED_READS) or not all(valid(s) for s in required.values()):
             problems.append("a required read is missing or invalid")
         reads = [s for s in required.values() if valid(s)]
         sensors = recorded.sensors if isinstance(recorded.sensors, dict) else {}
         if sensors is not recorded.sensors:
             problems.append("sensor records of the wrong type")
+        expected = {ptr: value for ptr, _, _, value in sensor_values(stats)}  # from the values, not the records
         meta, timed = {}, set()
         for ptr, info in sensors.items():
-            value = _resolve(stats, ptr)
-            if value is _MISSING or not isinstance(info, dict):
+            if ptr not in expected or not isinstance(info, dict):
                 problems.append("a record for a value that is not there")
-                continue  # never published: no pointer to nothing
-            span = info.get("span")
+                continue  # never published: no pointer to nothing, nor a non-standard one
+            value, span = expected[ptr], info.get("span")
             good = _number(value) and same_clock and valid(span)
             if _number(value) and not good:
                 problems.append("a value without a valid read")
@@ -203,13 +215,8 @@ class Sampler:
             if good:
                 reads.append(span)
                 timed.add(ptr)
-        targets = recorded.targets if isinstance(recorded.targets, list) else None
-        if targets is None:
-            problems.append("no list of values to check")
-        for ptr in targets or ():
-            value = _resolve(stats, ptr)
-            if value is _MISSING or (_number(value) and ptr not in timed):
-                problems.append("a value without its record")
+        if any(_number(value) and ptr not in timed for ptr, value in expected.items()):
+            problems.append("a value without its record")
         problem = problems[0] if problems else None
         return meta, None if problem or not reads else min(s[0] for s in reads), problem
 

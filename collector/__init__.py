@@ -6,10 +6,8 @@ if any, fills its own optional fields through extend(stats). Viewers never branc
 import os
 
 from . import common, jetson, sysfs
-from .sampler import Collected
-from .sysfs import DEVICE_TREE, pointer, read
-
-REQUIRED_READS = ("cpu", "memory", "disk", "uptime")
+from .sampler import REQUIRED_READS, Collected, sensor_values
+from .sysfs import DEVICE_TREE, read
 
 BOARDS = (  # (device-tree compatible match, display name, board module or None)
     ("nvidia,tegra234", "Jetson Orin", jetson),
@@ -42,34 +40,24 @@ def collect_recorded(cpu, logged, clock):
     when it and the required data were read (all on clock, the Sampler's and cpu's elapsed clock)."""
     trace = sysfs.Trace(clock)
     stats, groups = _collect(cpu, logged, trace)
-    sensors, targets = sensor_entries(stats, groups)
-    return Collected(stats, sensors, {name: trace.required.get(name) for name in REQUIRED_READS}, targets, clock)
+    return Collected(stats, sensor_entries(stats, groups), {name: trace.required.get(name) for name in REQUIRED_READS},
+                     clock)
 
 
 def sensor_entries(stats, groups):
-    """({JSON Pointer: metadata} for the sensor values in the final stats, [pointers of every value that
-    needs a record]). Pointers come from the output itself, so they follow label fallbacks, duplicate names
-    and the fan list as they ended up; a value left out gets no pointer, a null one no read. The Sampler
-    checks the two against each other and the stats."""
-    out, targets = {}, []
-
-    def add(ptr, info, value):
-        targets.append(ptr)
+    """{JSON Pointer: metadata} for the sensor values in the final stats (sampler.sensor_values). Pointers
+    come from the output itself, so they follow label fallbacks, duplicate names and the fan list as they
+    ended up; a value left out gets no pointer, a null one no read. The Sampler checks them."""
+    out = {}
+    for ptr, kind, key, value in sensor_values(stats):
+        if kind == "fans":  # the fan's records are kept by the fan object, its position is only known now
+            i, field = key
+            info = groups["fans"].sensors.get((id(stats["fans"][i]), field))
+        else:
+            info = groups["cpu_frequency" if kind == "cpu" else kind].sensors.get(key)
         if info is not None:
             out[ptr] = info if value is not None else {**info, "span": None}
-
-    for table in ("temperature", "power"):
-        for key, value in stats[table].items():
-            add(pointer(table, key), groups[table].sensors.get(key), value)
-    for i, fan in enumerate(stats["fans"]):
-        for field in ("rpm", "percent"):
-            add(pointer("fans", i, field), groups["fans"].sensors.get((id(fan), field)), fan[field])
-    for i, c in enumerate(stats["cpu"]):  # i is the position in this list, c["id"] the CPU
-        add(pointer("cpu", i, "freq"), groups["cpu_frequency"].sensors.get(c["id"]), c["freq"])
-    if isinstance(stats["gpu"], dict):
-        for field in ("usage", "freq", "max_freq"):
-            add(pointer("gpu", field), groups["gpu"].sensors.get(field), stats["gpu"].get(field))
-    return out, targets
+    return out
 
 
 def _collect(cpu, logged, trace):

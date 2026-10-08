@@ -12,7 +12,7 @@ import pytest
 import collector
 from collector import common, jetson, sysfs
 from collector.common import CpuCounters
-from collector.sampler import Collected, Sampler
+from collector.sampler import REQUIRED_READS, Collected, Sampler, sensor_values
 from test_common import Proc, idle_busy
 from test_sampler import Clock, fake
 
@@ -231,9 +231,17 @@ def test_opens_are_the_same_with_records(tmp_path, monkeypatch):
 # ---------- the recorded collection ----------
 
 def resolve(doc, ptr):
-    for part in ptr.split("/")[1:]:
-        part = part.replace("~1", "/").replace("~0", "~")
-        doc = doc[int(part)] if isinstance(doc, list) else doc[part]
+    """Strict RFC 6901: only ~0 and ~1 escapes, array indexes 0 or [1-9][0-9]* within range."""
+    import re
+    assert ptr.startswith("/"), ptr
+    for token in ptr.split("/")[1:]:
+        assert not re.search(r"~(?![01])", token), ptr
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(doc, list):
+            assert re.fullmatch(r"0|[1-9][0-9]*", token) and int(token) < len(doc), ptr
+            doc = doc[int(token)]
+        else:
+            doc = doc[token]
     return doc
 
 
@@ -275,8 +283,8 @@ def test_pointers_resolve_in_the_output(recorded):
     assert resolve(stats, "/cpu/1/freq") is None  # CPU 2 is the list's second row; its clock failed
     assert resolve(stats, "/fans/1/rpm") == 0 and result.sensors["/fans/1/rpm"]["span"]
     assert "/fans/1/percent" in result.sensors and resolve(stats, "/fans/1/percent") is None  # no pwm: null, no read
-    for ptr in result.targets:  # every value that needs a record has one with a read
-        if resolve(stats, ptr) is not None:
+    for ptr, _, _, value in sensor_values(stats):  # every value that needs a record has one with a read
+        if value is not None:
             assert result.sensors[ptr]["span"], ptr
     assert p.reads == 2  # one /proc/stat reading per collection, as before
 
@@ -307,10 +315,14 @@ MS = 10**6
 BASE = {"id": "src1:x", "provider": "hwmon", "identity_basis": "device_channel", "unit": "celsius"}
 
 
-def collected(c, required, sensors=(), values=None, clock=None, targets=None, extra=None):
-    """A Collected whose spans are ms offsets from the collection start (which takes 300 ms). sensors:
-    {name: span} for /temperature/<name> with value 1.0 in the stats; values: more temperatures without a
-    record; extra: records whose pointers are not in the stats. Targets are all temperatures unless given."""
+REQS = [(100, 110), (120, 130), (140, 150), (160, 170)]  # cpu, memory, disk, uptime
+
+
+def collected(c, required, sensors=(), values=None, clock=None, extra=None):
+    """A Collected whose spans are ms offsets from the collection start (which takes 300 ms). required: spans
+    for cpu, memory, disk, uptime in that order (fewer: the rest missing); sensors: {name: span} for
+    /temperature/<name> with value 1.0 in the stats; values: more temperatures without a record; extra:
+    records at pointers that are not in the stats."""
     def collect():
         start = c.ns
         at = lambda s: None if s is None else (start + s[0] * MS, start + s[1] * MS)  # noqa: E731
@@ -318,9 +330,8 @@ def collected(c, required, sensors=(), values=None, clock=None, targets=None, ex
         temps = {**{n: 1.0 for n in dict(sensors)}, **(values or {})}
         meta = {f"/temperature/{n}": {**BASE, "span": at(s)} for n, s in dict(sensors).items()}
         meta.update({p: {**BASE, "span": at(s)} for p, s in (extra or {}).items()})
-        req = {f"r{i}": at(s) for i, s in enumerate(required)}
-        tg = targets if targets is not None else [f"/temperature/{n}" for n in temps]
-        return Collected({"temperature": temps}, meta, req, tg, clock)
+        req = dict(zip(REQUIRED_READS, map(at, required)))
+        return Collected({"temperature": temps}, meta, req, clock)
     return collect
 
 
@@ -334,7 +345,7 @@ def recorded_sampler(c, required, **kw):
 def test_data_age_numbers():
     """Collection 0-300 ms, current reads from 100 ms, answer at 500 ms."""
     c = Clock()
-    s = recorded_sampler(c, [(100, 110), (290, 300)], sensors={"x": (150, 160)})
+    s = recorded_sampler(c, [(100, 110), (150, 160), (200, 210), (290, 300)], sensors={"x": (150, 160)})
     s._attempt()
     c.advance(0.2)
     stats, status = s.read()
@@ -359,7 +370,7 @@ def test_data_age_numbers():
 def test_a_sensor_read_before_the_required_ones_counts():
     """Sensor T read at 20-21 ms, required reads from 100 ms, answer at 500 ms: 480 ms, from T's read."""
     c = Clock()
-    s = recorded_sampler(c, [(100, 110), (250, 260)], sensors={"T": (20, 21)})
+    s = recorded_sampler(c, [(100, 110), (150, 160), (200, 210), (250, 260)], sensors={"T": (20, 21)})
     s._attempt()
     c.advance(0.2)
     stats = s.read()[0]
@@ -369,7 +380,7 @@ def test_a_sensor_read_before_the_required_ones_counts():
 
 def test_stale_boundary_on_read_basis():
     c = Clock()
-    s = recorded_sampler(c, [(100, 110)])
+    s = recorded_sampler(c, REQS)
     s._attempt()
     c.advance(4.8)  # collection took 0.3 s, the read started at 0.1 s: now exactly stale_after ago
     assert s.read()[0]["sample"]["data_age_ms"] == 5000.0
@@ -384,23 +395,23 @@ def test_stale_boundary_on_read_basis():
     ({"sensors": {"x": (400, 410)}}, "a value without a valid read"),   # after it ended
     ({"sensors": {"x": (160, 150)}}, "a value without a valid read"),   # reversed
     ({"sensors": {"x": (100, 110)}, "extra": {"/temperature/gone": (20, 21)}}, "a record for a value that is not there"),
-    ({"sensors": {"x": (100, 110)}, "targets": ["/temperature/x", "/power/VIN"]}, "a value without its record"),
+    ({"sensors": {"x": (100, 110)}, "extra": {"/memory/total": (20, 21)}}, "a record for a value that is not there"),
 ])
 def test_records_that_do_not_match_fall_back(kw, problem, capsys):
     c = Clock()
-    s = recorded_sampler(c, [(100, 110)], **kw)
+    s = recorded_sampler(c, REQS, **kw)
     s._attempt()
     stats = s.read()[0]
     sample, meta = stats["sample"], stats.get("sensor_meta", {})
     assert sample["data_age_basis"] == "cycle_start_upper_bound" and sample["data_age_ms"] == sample["cycle_age_ms"]
-    assert "/temperature/gone" not in meta  # never a pointer to nothing
+    assert "/temperature/gone" not in meta and "/memory/total" not in meta  # only sensor values, only there
     assert stats["temperature"]["x"] == 1.0  # the values are published as collected
     assert problem in capsys.readouterr().err
     s._attempt()
     assert capsys.readouterr().err == ""  # the same problem is logged once
 
 
-@pytest.mark.parametrize("required", [[None], [(100, 110), None], []])
+@pytest.mark.parametrize("required", [[None] * 4, REQS[:3] + [None], REQS[:3], []])
 def test_missing_required_reads_fall_back(required):
     c = Clock()
     s = recorded_sampler(c, required, sensors={"x": (150, 160)})
@@ -408,9 +419,97 @@ def test_missing_required_reads_fall_back(required):
     assert s.read()[0]["sample"]["data_age_basis"] == "cycle_start_upper_bound"
 
 
-@pytest.mark.parametrize("sensors, targets", [(None, []), ({"/temperature/T": None}, ["/temperature/T"]),
-                                              ({5: {}}, []), ({}, None), ("x", "y")])
-def test_malformed_records_keep_the_values(sensors, targets):
+def recorded_with(c, make):
+    """A Sampler whose collect() returns make(start, clock) on its own clock; the collection takes 300 ms."""
+    clock = lambda: c.ns  # noqa: E731
+
+    def collect():
+        start = c.ns
+        c.advance(0.3)
+        return make(start, clock)
+    return Sampler(collect, clock=(clock, {"source": "fake"}), wall=lambda: c.wall)
+
+
+def at(start, a, b):
+    return (start + a * MS, start + b * MS)
+
+
+def good_required(start):
+    return {name: at(start, *span) for name, span in zip(REQUIRED_READS, REQS)}
+
+
+@pytest.mark.parametrize("name", REQUIRED_READS)
+def test_a_deleted_required_read_falls_back(name):
+    """A: the key itself missing, not just None."""
+    c = Clock()
+
+    def make(start, clock):
+        required = good_required(start)
+        del required[name]
+        return Collected({"temperature": {}}, {}, required, clock)
+    s = recorded_with(c, make)
+    s._attempt()
+    assert s.read()[0]["sample"]["data_age_basis"] == "cycle_start_upper_bound"
+
+
+def test_other_names_cannot_stand_in_for_required_reads():
+    """B: {"r0": valid span} is not the four required reads."""
+    c = Clock()
+    s = recorded_with(c, lambda start, clock: Collected({"temperature": {}}, {}, {"r0": at(start, 100, 110)}, clock))
+    s._attempt()
+    assert s.read()[0]["sample"]["data_age_basis"] == "cycle_start_upper_bound"
+
+
+@pytest.mark.parametrize("with_record, age, basis", [
+    (False, 500.0, "cycle_start_upper_bound"),   # C/D: T is in the stats, its record is not: from the cycle start
+    (True, 480.0, "oldest_current_read_start"),  # E: everything there; T read at 20 ms
+])
+def test_values_are_checked_against_the_stats_not_a_list(with_record, age, basis):
+    """Cycle 0-300 ms, required reads from 100 ms, answer at 500 ms, temperature T = 42.0."""
+    c = Clock()
+
+    def make(start, clock):
+        sensors = {"/temperature/T": {**BASE, "span": at(start, 20, 21)}} if with_record else {}
+        return Collected({"temperature": {"T": 42.0}}, sensors, good_required(start), clock)
+    s = recorded_with(c, make)
+    s._attempt()
+    c.advance(0.2)
+    stats = s.read()[0]
+    assert (stats["sample"]["data_age_ms"], stats["sample"]["data_age_basis"]) == (age, basis)
+    assert stats["temperature"] == {"T": 42.0}
+
+
+@pytest.mark.parametrize("ptr, ok", [
+    ("/fans/-1/rpm", False), ("/fans/01/rpm", False), ("/fans/+0/rpm", False), ("/fans/ 0/rpm", False),
+    ("/fans/2/rpm", False),                          # out of range
+    ("/temperature/a~2b", False),                    # ~2 is not an escape
+    ("/temperature/a~02b", True),                    # the key "a~2b", escaped right
+    ("/fans/1/rpm", True), ("/temperature/x~1y z 온도", True), ("/temperature/01", True), ("/temperature/-1", True),
+])
+def test_only_rfc6901_pointers_to_sensor_values_are_published(ptr, ok):
+    """Records must sit at the pointer sensor_values writes; anything else is not published and falls back.
+    Dictionary keys like "01" or "-1" are fine; only list indexes follow the index rule."""
+    c = Clock()
+    stats = {"fans": [{"name": "a", "rpm": 1, "percent": None}, {"name": "b", "rpm": 2, "percent": None}],
+             "temperature": {"a~2b": 1.0, "x/y z 온도": 2.0, "01": 3.0, "-1": 4.0}}
+
+    def make(start, clock):
+        good = {p: {**BASE, "span": at(start, 20, 21)} for p, _, _, v in sensor_values(stats) if v is not None}
+        records = dict(good)
+        records[ptr] = {**BASE, "span": at(start, 30, 31)}
+        return Collected(stats, records, good_required(start), clock)
+    s = recorded_with(c, make)
+    s._attempt()
+    out = s.read()[0]
+    assert (ptr in out["sensor_meta"]) == ok
+    assert out["sample"]["data_age_basis"] == ("oldest_current_read_start" if ok else "cycle_start_upper_bound")
+    for published in out["sensor_meta"]:
+        resolve(out, published)  # strict RFC 6901
+
+
+@pytest.mark.parametrize("sensors, required", [(None, "ok"), ({"/temperature/T": None}, "ok"), ({5: {}}, "ok"),
+                                               ("x", "ok"), ({}, None), ({}, "x"), ({}, {"cpu": "not a span"})])
+def test_malformed_records_keep_the_values(sensors, required):
     """Records of the wrong shape: the snapshot is published with its values, from the cycle start."""
     c = Clock()
     clock = lambda: c.ns  # noqa: E731
@@ -418,7 +517,8 @@ def test_malformed_records_keep_the_values(sensors, targets):
     def collect():
         start = c.ns
         c.advance(0.3)
-        return Collected({"temperature": {"T": 43.0}}, sensors, {"cpu": (start + MS, start + 2 * MS)}, targets, clock)
+        req = good_required(start) if required == "ok" else required
+        return Collected({"temperature": {"T": 43.0}}, sensors, req, clock)
     s = Sampler(collect, clock=(clock, {"source": "fake"}), wall=lambda: c.wall)
     s._attempt()  # also the very first attempt
     stats, status = s.read()
@@ -441,12 +541,12 @@ def test_writer_survives_bad_records_and_recovers():
         start = c.ns
         c.advance(0.01)
         span = (start + 1000, start + 2000)
+        required = dict.fromkeys(REQUIRED_READS, span)
         if n[0] == 2:  # malformed records
-            return Collected({"temperature": {"T": float(n[0])}}, {"/temperature/T": None}, {"cpu": span}, None, clock)
+            return Collected({"temperature": {"T": float(n[0])}}, {"/temperature/T": None}, required, clock)
         if n[0] >= 3:
             published.set()
-        return Collected({"temperature": {"T": float(n[0])}}, {"/temperature/T": {**BASE, "span": span}},
-                         {"cpu": span}, ["/temperature/T"], clock)
+        return Collected({"temperature": {"T": float(n[0])}}, {"/temperature/T": {**BASE, "span": span}}, required, clock)
     s = Sampler(collect, interval=0.01, clock=(clock, {"source": "fake"}), wall=lambda: c.wall).start()
     try:
         assert published.wait(5)
@@ -478,7 +578,7 @@ def test_a_slow_log_write_does_not_block_status_or_stop(monkeypatch):
 
         def flush(self):
             pass
-    s = Sampler(collected(c, [None], clock=clock), clock=(clock, {"source": "fake"}), wall=lambda: c.wall)
+    s = Sampler(collected(c, [None] * 4, clock=clock), clock=(clock, {"source": "fake"}), wall=lambda: c.wall)
     monkeypatch.setattr(sys, "stderr", SlowErr())
     writer = threading.Thread(target=s._attempt)
     writer.start()
@@ -499,7 +599,7 @@ def test_a_slow_log_write_does_not_block_status_or_stop(monkeypatch):
 def test_records_on_another_clock_are_not_used():
     c = Clock()
     s = Sampler(None, clock=(lambda: c.ns, {"source": "fake"}), wall=lambda: c.wall)
-    s.collect = collected(c, [(100, 110)], sensors={"x": (100, 110)}, clock=lambda: c.ns)  # another function
+    s.collect = collected(c, REQS, sensors={"x": (100, 110)}, clock=lambda: c.ns)  # another function
     s._attempt()
     stats = s.read()[0]
     assert stats["sample"]["data_age_basis"] == "cycle_start_upper_bound"
@@ -508,7 +608,7 @@ def test_records_on_another_clock_are_not_used():
 
 def test_too_slow_still_counts_the_whole_collection():
     c = Clock()
-    s = recorded_sampler(c, [(100, 110)])
+    s = recorded_sampler(c, REQS)
     inner = s.collect
 
     def slow():
@@ -522,7 +622,7 @@ def test_too_slow_still_counts_the_whole_collection():
 
 def test_published_records_stay_and_plain_dicts_cannot_fake_them():
     c = Clock()
-    s = recorded_sampler(c, [(100, 110)], sensors={"x": (100, 110)})
+    s = recorded_sampler(c, REQS, sensors={"x": (100, 110)})
     s._attempt()
     first = s.read()[0]
     first["sensor_meta"]["/temperature/x"]["read"] = None  # changing a returned copy
@@ -543,7 +643,7 @@ def test_published_records_stay_and_plain_dicts_cannot_fake_them():
 @pytest.mark.parametrize("step", [-3600, 3600])
 def test_wall_clock_steps_do_not_move_read_offsets(step):
     c = Clock()
-    s = recorded_sampler(c, [(100, 110)], sensors={"x": (100, 110)})
+    s = recorded_sampler(c, REQS, sensors={"x": (100, 110)})
     s._attempt()
     c.advance(0.2, wall=step)
     stats = s.read()[0]
