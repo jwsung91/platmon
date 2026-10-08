@@ -403,3 +403,91 @@ def test_execute_unsupported_mode_is_not_a_measurement(fake_child):
     out = execute("unsupported")
     assert out["valid"] is False and out["unsupported"] and "unsupported" in out["invalid"]
     assert "timeout" not in out and all(p.poll() is not None for p in started)
+
+
+def test_passive_rebaseline_and_parts_plans():
+    conds = cadence.plan("passive-rebaseline", [])
+    assert len(conds) == 16 and {c["instr"] for c in conds} == {"reference"}
+    assert [c["block"] for c in conds[::4]] == ["c1-1", "c0-1", "c1-2", "c0-2"]
+    assert [c["variant"] for c in conds[:4]] == ["B0", "B1", "B1", "B0"]
+    assert all(c["clients"] == int(c["block"][1]) and c["interval"] == 1.0 and c["measure"] == 120 for c in conds)
+    one = cadence.plan("passive-rebaseline", [], clients=(1,), blocks=1)
+    assert [c["block"] for c in one] == ["c1-1"] * 4
+    parts = cadence.plan("passive-parts", [])
+    assert [c["instr"] for c in parts] == ["reference", "passive-parts", "passive-parts", "reference"]
+    assert {(c["variant"], c["clients"]) for c in parts} == {("B1", 0)}
+    assert all(c["phase"] == "passive-parts" for c in parts) and cadence.plan("ab", [])[0]["variant"] == "B0"
+    done = [{"wall_s": 150}] * 20
+    assert cadence.budget_left(done, conds[0], 30, 3600, 24) is None
+    assert "window" in cadence.budget_left([{"wall_s": 1}] * 24, conds[0], 30, 3600, 24)
+
+
+def test_parts_timing_keeps_reads_and_results(fake, tmp_path):
+    p, write, clock = fake
+    twin = Passive(p.proc, p.sys, clock)
+    table = cadence.Table(["t", "part", "elapsed_ns", "cpu_ns", "state", "reads"], 50)
+    cadence.time_parts(twin, table)
+    write(some=1000)
+    for t in (1, 1_000_000_001):
+        clock.t = t
+        assert twin() == p()
+    assert (twin.reads, twin.read_bytes, twin.lookups) == (p.reads, p.read_bytes, p.lookups)
+    got = cadence.rows(table.dump())
+    assert [r["part"] for r in got] == [0, 1, 2, 3, 4] * 2
+    assert [(r["state"], r["reads"]) for r in got[:5]] == [(1, 1), (1, 1), (1, 1), (2, 0), (2, 0)]  # memory/io absent
+    assert all(r["elapsed_ns"] >= 0 for r in got)
+    (tmp_path / "proc/pressure/cpu").write_text("some avg10=bad total=1\n")  # a parse error is not an OSError
+    with pytest.raises(ValueError):
+        twin()
+    last = cadence.rows(table.dump())[-1]  # network and disk, then the PSI cpu call that raised
+    assert table.n == 13 and (last["part"], last["state"]) == (2, 0)  # timed although it raised
+
+
+def test_block_deltas_and_parts_summary():
+    runs = [dict(base, variant=v, cpu_pct_one_core=x, block=b) for v, x, b in
+            (("B0", 1.0, "c1-1"), ("B1", 1.2, "c1-1"), ("B1", 1.3, "c1-1"), ("B0", 1.1, "c1-1"),
+             ("B0", 1.0, "c1-2"), ("B1", 1.05, "c1-2"))]
+    c = cadence.compare(runs)
+    assert c["blocks"]["c1-1"]["delta_pp"] == pytest.approx(0.2) and c["blocks"]["c1-2"]["delta_pp"] == pytest.approx(0.05)
+    s = {"measured_elapsed_s": 2.0, "tables": {"parts": {"fields": ["t", "part", "elapsed_ns", "cpu_ns", "state", "reads"],
+                                                         "rows": [[5, 0, 300, 200, 1, 1], [6, 0, 500, 400, 1, 1],
+                                                                  [7, 3, 90, 80, 2, 0], [99, 0, 9, 9, 1, 1]]}}}
+    out = cadence.parts_summary(s, 0, 10)  # the row at t=99 is outside the window
+    assert out["network"]["calls"] == 2 and out["network"]["cpu_pct_one_core"] == pytest.approx(100 * 600e-9 / 2)
+    assert out["pressure.memory"]["states"] == {"ok": 0, "unsupported": 1, "error": 0, "other": 0}
+    assert out["disk"]["calls"] == 0 and out["disk"]["cpu_ms"]["mean"] is None
+    assert cadence.parts_summary({"tables": {}}, 0, 1) is None
+
+
+def test_block_delta_refuses_runs_that_are_not_comparable():
+    runs = [dict(base, variant="B0", cpu_pct_one_core=1.0, block="c1-1"),
+            dict(base, variant="B1", cpu_pct_one_core=1.2, block="c1-1", source_hash="other"),
+            dict(base, variant="B0", cpu_pct_one_core=1.0, block="c1-2"),
+            dict(base, variant="B1", cpu_pct_one_core=1.1, block="c1-2", scope={"interfaces": 3}),
+            dict(base, variant="B0", cpu_pct_one_core=1.0, block="c1-3"),
+            dict(base, variant="B1", cpu_pct_one_core=1.1, block="c1-3")]
+    b = cadence.compare(runs)["blocks"]
+    assert b["c1-1"]["delta_pp"] is None and "source_hash" in b["c1-1"]["problems"][0]
+    assert b["c1-2"]["delta_pp"] is None and "scope" in b["c1-2"]["problems"][0]
+    assert b["c1-3"]["delta_pp"] == pytest.approx(0.1) and b["c1-3"]["problems"] == []
+
+
+def test_parts_run_reports_apart(tmp_path, capsys):
+    """A short real passive-parts serve run: parts are timed once per collection, inside the window only."""
+    out = tmp_path / "s.json"
+    cadence.main(["serve", "--variant", "B1", "--interval", "0.1", "--warmup", "0.3", "--measure", "0.6",
+                  "--port", "0", "--instrumentation", "passive-parts", "--out", str(out)])
+    serve = json.loads(out.read_text())
+    rec = {"kind": "run", "run_id": "r", "alias": "t", "valid": True, "order": 0, "serve": serve,
+           "cond": {"phase": "passive-parts", "clients": 0, "poll": 1.0, "block": "parts-1"},
+           "before": {"temps_mC": {}, "cpufreq_khz": {}}, "after": {"temps_mC": {}, "cpufreq_khz": {}}}
+    results = tmp_path / "results.jsonl"
+    results.write_text(json.dumps(rec) + "\n")
+    capsys.readouterr()
+    cadence.main(["report", str(results)])
+    run = json.loads(capsys.readouterr().out)["runs"][0]
+    assert run["instr"] == "passive-parts" and run["block"] == "parts-1" and run["passive_calls"] > 0
+    # parts are windowed by their own start, collections by theirs: one call can fall either side of an edge
+    assert all(abs(p["calls"] - run["passive_calls"]) <= 1 for p in run["parts"].values())
+    cadence.main(["report", "--md", str(results)])
+    assert "| pressure.io |" in capsys.readouterr().out
