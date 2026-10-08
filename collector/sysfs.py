@@ -229,7 +229,7 @@ def chip_identities(chips, sysroot):
     anchors = {}
     for d, rel in rels.items():
         m = rel and re.fullmatch(r"(.+)/hwmon/hwmon\d+", rel)
-        if m and os.path.basename(m.group(1)) != "virtual":  # devices/virtual is not a device
+        if m and rel.split(os.sep)[:2] != ["devices", "virtual"]:  # nothing under devices/virtual is hardware
             anchors[d] = m.group(1)
     shared = {a for a in anchors.values() if list(anchors.values()).count(a) > 1}
     out = {}

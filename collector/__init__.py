@@ -42,28 +42,21 @@ def collect_recorded(cpu, logged, clock):
     when it and the required data were read (all on clock, the Sampler's and cpu's elapsed clock)."""
     trace = sysfs.Trace(clock)
     stats, groups = _collect(cpu, logged, trace)
-    sensors, complete = sensor_entries(stats, groups)
-    required = [trace.required.get(name) for name in REQUIRED_READS]
-    reads = [s for s in required if s] + [i["span"] for i in sensors.values() if i["span"]]
-    return Collected(stats, sensors, reads, complete and all(required), clock)
+    sensors, targets = sensor_entries(stats, groups)
+    return Collected(stats, sensors, {name: trace.required.get(name) for name in REQUIRED_READS}, targets, clock)
 
 
 def sensor_entries(stats, groups):
-    """{JSON Pointer: metadata} for the sensor values in the final stats, and whether every value that is
-    there has its record. Pointers come from the output itself, so they follow label fallbacks, duplicate
-    names and the fan list as they ended up; a value left out gets no pointer, a null one no read."""
-    out, complete = {}, True
+    """({JSON Pointer: metadata} for the sensor values in the final stats, [pointers of every value that
+    needs a record]). Pointers come from the output itself, so they follow label fallbacks, duplicate names
+    and the fan list as they ended up; a value left out gets no pointer, a null one no read. The Sampler
+    checks the two against each other and the stats."""
+    out, targets = {}, []
 
     def add(ptr, info, value):
-        nonlocal complete
-        if info is None:
-            complete = complete and value is None  # a value without its record
-            return
-        if value is None:
-            info = {**info, "span": None}
-        elif info["span"] is None:
-            complete = False
-        out[ptr] = info
+        targets.append(ptr)
+        if info is not None:
+            out[ptr] = info if value is not None else {**info, "span": None}
 
     for table in ("temperature", "power"):
         for key, value in stats[table].items():
@@ -76,7 +69,7 @@ def sensor_entries(stats, groups):
     if isinstance(stats["gpu"], dict):
         for field in ("usage", "freq", "max_freq"):
             add(pointer("gpu", field), groups["gpu"].sensors.get(field), stats["gpu"].get(field))
-    return out, complete
+    return out, targets
 
 
 def _collect(cpu, logged, trace):

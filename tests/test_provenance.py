@@ -275,12 +275,15 @@ def test_pointers_resolve_in_the_output(recorded):
     assert resolve(stats, "/cpu/1/freq") is None  # CPU 2 is the list's second row; its clock failed
     assert resolve(stats, "/fans/1/rpm") == 0 and result.sensors["/fans/1/rpm"]["span"]
     assert "/fans/1/percent" in result.sensors and resolve(stats, "/fans/1/percent") is None  # no pwm: null, no read
-    assert result.complete and p.reads == 2  # one /proc/stat reading per collection, as before
+    for ptr in result.targets:  # every value that needs a record has one with a read
+        if resolve(stats, ptr) is not None:
+            assert result.sensors[ptr]["span"], ptr
+    assert p.reads == 2  # one /proc/stat reading per collection, as before
 
 
-def test_reads_count_the_current_cpu_reading_and_sensor_values(recorded):
+def test_required_reads_are_named_and_timed(recorded):
     result, tick, *_ = recorded
-    assert len(result.reads) == 4 + sum(1 for i in result.sensors.values() if i["span"])
+    assert set(result.required) == {"cpu", "memory", "disk", "uptime"} and all(result.required.values())
     assert result.clock is tick
 
 
@@ -301,39 +304,44 @@ def test_direct_collect_has_no_records():
 # ---------- data age in the Sampler ----------
 
 MS = 10**6
+BASE = {"id": "src1:x", "provider": "hwmon", "identity_basis": "device_channel", "unit": "celsius"}
 
 
-def collected(c, reads, sensors=None, complete=True, clock=None):
-    """A Collected whose read spans are offsets (ms) from the moment the Sampler starts the collection."""
+def collected(c, required, sensors=(), values=None, clock=None, targets=None, extra=None):
+    """A Collected whose spans are ms offsets from the collection start (which takes 300 ms). sensors:
+    {name: span} for /temperature/<name> with value 1.0 in the stats; values: more temperatures without a
+    record; extra: records whose pointers are not in the stats. Targets are all temperatures unless given."""
     def collect():
         start = c.ns
-        spans = [(start + a * MS, start + b * MS) for a, b in reads]
-        c.advance(0.3)  # the collection takes 300 ms
-        meta = {p: {"id": "src1:x", "provider": "hwmon", "identity_basis": "device_channel", "unit": "celsius",
-                    "span": None if s is None else (start + s[0] * MS, start + s[1] * MS)} for p, s in (sensors or {}).items()}
-        return Collected({"v": 1}, meta, spans, complete, clock or (lambda: c.ns))
+        at = lambda s: None if s is None else (start + s[0] * MS, start + s[1] * MS)  # noqa: E731
+        c.advance(0.3)
+        temps = {**{n: 1.0 for n in dict(sensors)}, **(values or {})}
+        meta = {f"/temperature/{n}": {**BASE, "span": at(s)} for n, s in dict(sensors).items()}
+        meta.update({p: {**BASE, "span": at(s)} for p, s in (extra or {}).items()})
+        req = {f"r{i}": at(s) for i, s in enumerate(required)}
+        tg = targets if targets is not None else [f"/temperature/{n}" for n in temps]
+        return Collected({"temperature": temps}, meta, req, tg, clock)
     return collect
 
 
-def recorded_sampler(c, reads, **kw):
+def recorded_sampler(c, required, **kw):
     clock = lambda: c.ns  # noqa: E731 - the one clock both use
     s = Sampler(None, clock=(clock, {"source": "fake"}), wall=lambda: c.wall)
-    s.collect = collected(c, reads, clock=clock, **kw)
+    s.collect = collected(c, required, clock=clock, **kw)
     return s
 
 
 def test_data_age_numbers():
-    """Collection 0–300 ms, current reads from 100 ms, answer at 500 ms."""
+    """Collection 0-300 ms, current reads from 100 ms, answer at 500 ms."""
     c = Clock()
-    s = recorded_sampler(c, [(100, 110), (150, 160), (290, 300)], sensors={"/temperature/x": (150, 160)})
+    s = recorded_sampler(c, [(100, 110), (290, 300)], sensors={"x": (150, 160)})
     s._attempt()
     c.advance(0.2)
     stats, status = s.read()
     sample = stats["sample"]
     assert (sample["duration_ms"], sample["age_ms"], sample["cycle_age_ms"], sample["data_age_ms"]) == (300, 200, 500, 400)
     assert sample["data_age_basis"] == "oldest_current_read_start"
-    assert stats["sensor_meta"] == {"/temperature/x": {"id": "src1:x", "provider": "hwmon", "identity_basis": "device_channel",
-                                                      "unit": "celsius", "read": {"started_offset_ms": 150.0, "completed_offset_ms": 160.0}}}
+    assert stats["sensor_meta"] == {"/temperature/x": {**BASE, "read": {"started_offset_ms": 150.0, "completed_offset_ms": 160.0}}}
     assert status["sample"]["data_age_basis"] == "oldest_current_read_start" and status["sample"]["cycle_age_ms"] == 500
     # the same timings from a plain dict callable: from the collection start
     c2 = Clock()
@@ -348,12 +356,15 @@ def test_data_age_numbers():
     assert (sample["data_age_ms"], sample["data_age_basis"]) == (500, "cycle_start_upper_bound")
 
 
-def test_oldest_read_counts_even_if_others_are_late():
-    """An early GPU read and late CPU and memory reads: the age is the GPU read's."""
+def test_a_sensor_read_before_the_required_ones_counts():
+    """Sensor T read at 20-21 ms, required reads from 100 ms, answer at 500 ms: 480 ms, from T's read."""
     c = Clock()
-    s = recorded_sampler(c, [(20, 21), (250, 260), (270, 280)])
+    s = recorded_sampler(c, [(100, 110), (250, 260)], sensors={"T": (20, 21)})
     s._attempt()
-    assert s.read()[0]["sample"]["data_age_ms"] == 280.0  # 300 - 20
+    c.advance(0.2)
+    stats = s.read()[0]
+    assert stats["sample"]["data_age_ms"] == 480.0 and stats["sample"]["data_age_basis"] == "oldest_current_read_start"
+    assert stats["sensor_meta"]["/temperature/T"]["read"]["started_offset_ms"] == 20.0
 
 
 def test_stale_boundary_on_read_basis():
@@ -368,27 +379,127 @@ def test_stale_boundary_on_read_basis():
 
 
 @pytest.mark.parametrize("kw, problem", [
-    ({"complete": False}, "incomplete read records"),
-    ({"sensors": {"/temperature/x": (-10, 5)}}, "a read span outside the collection"),  # before the collection
-    ({"sensors": {"/temperature/x": (400, 410)}}, "a read span outside the collection"),  # after it ended
-    ({"sensors": {"/temperature/x": (160, 150)}}, "a read span outside the collection"),  # reversed
+    ({"sensors": {"x": (100, 110)}, "values": {"y": 2.0}}, "a value without its record"),
+    ({"sensors": {"x": (-10, 5)}}, "a value without a valid read"),     # before the collection
+    ({"sensors": {"x": (400, 410)}}, "a value without a valid read"),   # after it ended
+    ({"sensors": {"x": (160, 150)}}, "a value without a valid read"),   # reversed
+    ({"sensors": {"x": (100, 110)}, "extra": {"/temperature/gone": (20, 21)}}, "a record for a value that is not there"),
+    ({"sensors": {"x": (100, 110)}, "targets": ["/temperature/x", "/power/VIN"]}, "a value without its record"),
 ])
-def test_bad_records_fall_back_to_the_cycle_start(kw, problem, capsys):
+def test_records_that_do_not_match_fall_back(kw, problem, capsys):
     c = Clock()
     s = recorded_sampler(c, [(100, 110)], **kw)
     s._attempt()
-    sample, meta = s.read()[0]["sample"], s.read()[0].get("sensor_meta", {})
+    stats = s.read()[0]
+    sample, meta = stats["sample"], stats.get("sensor_meta", {})
     assert sample["data_age_basis"] == "cycle_start_upper_bound" and sample["data_age_ms"] == sample["cycle_age_ms"]
-    assert all(m["read"] is None for m in meta.values())  # a record that does not hold is not shown
+    assert "/temperature/gone" not in meta  # never a pointer to nothing
+    assert stats["temperature"]["x"] == 1.0  # the values are published as collected
     assert problem in capsys.readouterr().err
     s._attempt()
     assert capsys.readouterr().err == ""  # the same problem is logged once
 
 
+@pytest.mark.parametrize("required", [[None], [(100, 110), None], []])
+def test_missing_required_reads_fall_back(required):
+    c = Clock()
+    s = recorded_sampler(c, required, sensors={"x": (150, 160)})
+    s._attempt()
+    assert s.read()[0]["sample"]["data_age_basis"] == "cycle_start_upper_bound"
+
+
+@pytest.mark.parametrize("sensors, targets", [(None, []), ({"/temperature/T": None}, ["/temperature/T"]),
+                                              ({5: {}}, []), ({}, None), ("x", "y")])
+def test_malformed_records_keep_the_values(sensors, targets):
+    """Records of the wrong shape: the snapshot is published with its values, from the cycle start."""
+    c = Clock()
+    clock = lambda: c.ns  # noqa: E731
+
+    def collect():
+        start = c.ns
+        c.advance(0.3)
+        return Collected({"temperature": {"T": 43.0}}, sensors, {"cpu": (start + MS, start + 2 * MS)}, targets, clock)
+    s = Sampler(collect, clock=(clock, {"source": "fake"}), wall=lambda: c.wall)
+    s._attempt()  # also the very first attempt
+    stats, status = s.read()
+    assert stats["temperature"] == {"T": 43.0} and stats["sample"]["sequence"] == 1
+    assert stats["sample"]["data_age_basis"] == "cycle_start_upper_bound"
+    assert status["last_attempt"]["state"] == "ok" and status["last_attempt"]["consecutive_failures"] == 0
+
+
+def test_writer_survives_bad_records_and_recovers():
+    """The real writer thread: good, malformed, good records; values, sequence and last_attempt follow."""
+    import threading
+    import time
+    c = Clock()
+    clock = lambda: c.ns  # noqa: E731
+    n = [0]
+    published = threading.Event()
+
+    def collect():
+        n[0] += 1
+        start = c.ns
+        c.advance(0.01)
+        span = (start + 1000, start + 2000)
+        if n[0] == 2:  # malformed records
+            return Collected({"temperature": {"T": float(n[0])}}, {"/temperature/T": None}, {"cpu": span}, None, clock)
+        if n[0] >= 3:
+            published.set()
+        return Collected({"temperature": {"T": float(n[0])}}, {"/temperature/T": {**BASE, "span": span}},
+                         {"cpu": span}, ["/temperature/T"], clock)
+    s = Sampler(collect, interval=0.01, clock=(clock, {"source": "fake"}), wall=lambda: c.wall).start()
+    try:
+        assert published.wait(5)
+        deadline = time.monotonic() + 5
+        while s.read()[0]["sample"]["sequence"] < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        stats, status = s.read()
+        assert s._thread.is_alive()
+        assert stats["temperature"]["T"] == float(stats["sample"]["sequence"]) and stats["sample"]["sequence"] >= 3
+        assert stats["sample"]["data_age_basis"] == "oldest_current_read_start"  # good records again
+        assert status["last_attempt"]["state"] == "ok"
+    finally:
+        s.stop()
+        s._thread.join(5)
+
+
+def test_a_slow_log_write_does_not_block_status_or_stop(monkeypatch):
+    """The fallback is logged outside the state lock: read() and stop() answer while the write hangs."""
+    import threading
+    c = Clock()
+    clock = lambda: c.ns  # noqa: E731
+    entered, gate = threading.Event(), threading.Event()
+
+    class SlowErr:
+        def write(self, text):
+            entered.set()
+            gate.wait(5)
+            return len(text)
+
+        def flush(self):
+            pass
+    s = Sampler(collected(c, [None], clock=clock), clock=(clock, {"source": "fake"}), wall=lambda: c.wall)
+    monkeypatch.setattr(sys, "stderr", SlowErr())
+    writer = threading.Thread(target=s._attempt)
+    writer.start()
+    try:
+        assert entered.wait(5)
+        done = []
+        reader = threading.Thread(target=lambda: done.append(s.read()) or s.stop() or done.append("stopped"))
+        reader.start()
+        reader.join(2)
+        assert done[1:] == ["stopped"] and done[0][1]["state"] in ("starting", "stale")
+    finally:
+        gate.set()
+        writer.join(5)
+        reader.join(5)
+    assert s.read()[0]["sample"]["sequence"] == 1  # published once the log line was written
+
+
 def test_records_on_another_clock_are_not_used():
     c = Clock()
     s = Sampler(None, clock=(lambda: c.ns, {"source": "fake"}), wall=lambda: c.wall)
-    s.collect = collected(c, [(100, 110)], sensors={"/temperature/x": (100, 110)}, clock=lambda: c.ns)  # another function
+    s.collect = collected(c, [(100, 110)], sensors={"x": (100, 110)}, clock=lambda: c.ns)  # another function
     s._attempt()
     stats = s.read()[0]
     assert stats["sample"]["data_age_basis"] == "cycle_start_upper_bound"
@@ -398,19 +509,20 @@ def test_records_on_another_clock_are_not_used():
 def test_too_slow_still_counts_the_whole_collection():
     c = Clock()
     s = recorded_sampler(c, [(100, 110)])
+    inner = s.collect
 
     def slow():
-        result = collected(c, [(5990, 5995)], clock=s._elapsed)()
+        result = inner()
         c.advance(5.8)
         return result
     s.collect = slow
     s._attempt()
-    assert s.read()[1]["last_attempt"]["reason"] == "collection_too_slow"  # the last read is recent; still dropped
+    assert s.read()[1]["last_attempt"]["reason"] == "collection_too_slow"  # recent reads; still dropped
 
 
 def test_published_records_stay_and_plain_dicts_cannot_fake_them():
     c = Clock()
-    s = recorded_sampler(c, [(100, 110)], sensors={"/temperature/x": (100, 110)})
+    s = recorded_sampler(c, [(100, 110)], sensors={"x": (100, 110)})
     s._attempt()
     first = s.read()[0]
     first["sensor_meta"]["/temperature/x"]["read"] = None  # changing a returned copy
@@ -418,7 +530,7 @@ def test_published_records_stay_and_plain_dicts_cannot_fake_them():
     again = s.read()[0]
     assert again["sensor_meta"]["/temperature/x"]["read"] == {"started_offset_ms": 100.0, "completed_offset_ms": 110.0}
     assert again["sample"]["sequence"] == 1
-    assert s.latest() == {"v": 1}  # no Sampler metadata
+    assert s.latest() == {"temperature": {"x": 1.0}}  # no Sampler metadata
     s.collect = lambda: (_ for _ in ()).throw(OSError("memory"))  # a failed collection: last good kept as it was
     s._attempt()
     assert s.read()[0]["sensor_meta"] == again["sensor_meta"]
@@ -426,6 +538,17 @@ def test_published_records_stay_and_plain_dicts_cannot_fake_them():
     p._attempt()
     stats = p.read()[0]
     assert "sensor_meta" not in stats and stats["sample"]["data_age_basis"] == "cycle_start_upper_bound"
+
+
+@pytest.mark.parametrize("step", [-3600, 3600])
+def test_wall_clock_steps_do_not_move_read_offsets(step):
+    c = Clock()
+    s = recorded_sampler(c, [(100, 110)], sensors={"x": (100, 110)})
+    s._attempt()
+    c.advance(0.2, wall=step)
+    stats = s.read()[0]
+    assert stats["sample"]["data_age_ms"] == 400.0
+    assert stats["sensor_meta"]["/temperature/x"]["read"] == {"started_offset_ms": 100.0, "completed_offset_ms": 110.0}
 
 
 def test_service_end_to_end_reports_no_paths(recorded):
@@ -447,12 +570,14 @@ def test_service_end_to_end_reports_no_paths(recorded):
         resolve(stats, ptr)
 
 
-@pytest.mark.parametrize("step", [-3600, 3600])
-def test_wall_clock_steps_do_not_move_read_offsets(step):
-    c = Clock()
-    s = recorded_sampler(c, [(100, 110)], sensors={"/temperature/x": (100, 110)})
-    s._attempt()
-    c.advance(0.2, wall=step)
-    stats = s.read()[0]
-    assert stats["sample"]["data_age_ms"] == 400.0
-    assert stats["sensor_meta"]["/temperature/x"]["read"] == {"started_offset_ms": 100.0, "completed_offset_ms": 110.0}
+@pytest.mark.parametrize("device, basis", [
+    ("devices/virtual", "resolved_path"),                                   # devices/virtual/hwmon/hwmonN
+    ("devices/virtual/thermal/thermal_zone0", "resolved_path"),
+    ("devices/virtual/platform/fan_controller", "resolved_path"),
+    ("devices/platform/i2c/1-0040", "device_channel"),
+    ("devices/platform/virtual_fan", "device_channel"),                     # a real device named "virtual..."
+])
+def test_virtual_devices_are_path_based(tmp_path, device, basis):
+    chip(tmp_path, device, 3, {"name": "x", "temp1_input": 40000})
+    _, g = hwmon(tmp_path)
+    assert g["temperature"].sensors["x temp1"]["identity_basis"] == basis

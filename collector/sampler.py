@@ -30,15 +30,35 @@ def pick_clock():
 
 @dataclasses.dataclass
 class Collected:
-    """What a recording collect() returns instead of a plain dict (collector.collect_recorded): the stats,
-    plus {JSON Pointer: sensor metadata with "span"}, the (start, end) of every current read that counts for
-    the data age, whether those records are complete, and the elapsed clock they were taken on. Spans are
-    elapsed ns; only the Sampler turns them into offsets, after checking them."""
+    """What a recording collect() returns instead of a plain dict (collector.collect_recorded): the stats
+    and, for the Sampler to check, {JSON Pointer: sensor metadata with "span"}, the (start, end) of each
+    required read by name (None if it was not timed), the pointers of all values that need a record, and
+    the elapsed clock they were taken on. Spans are elapsed ns; only the Sampler turns them into offsets."""
     stats: dict
     sensors: dict
-    reads: list
-    complete: bool
+    required: dict
+    targets: list
     clock: object
+
+
+_MISSING = object()
+
+
+def _resolve(doc, ptr):
+    """The value at JSON Pointer ptr (RFC 6901) in doc, or _MISSING."""
+    if not isinstance(ptr, str) or not ptr.startswith("/"):
+        return _MISSING
+    for part in ptr.split("/")[1:]:
+        part = part.replace("~1", "/").replace("~0", "~")
+        try:
+            doc = doc[int(part)] if isinstance(doc, list) else doc[part]
+        except (KeyError, IndexError, TypeError, ValueError):
+            return _MISSING
+    return doc
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def ms(ns):
@@ -113,6 +133,9 @@ class Sampler:
             print(f"platmon: collect took {duration / 1e9:.1f} s, longer than stale_after "
                   f"({self.stale_after:g} s); result dropped", file=sys.stderr)
             reason = "collection_too_slow"
+        sensor_meta = oldest = None
+        if reason is None:  # checked and converted before the lock: the lock is only held to publish
+            sensor_meta, oldest = self._provenance(recorded, stats, started, completed)
         with self._lock:
             self._collecting_since = None
             self._failures = 0 if reason is None else self._failures + 1
@@ -120,7 +143,6 @@ class Sampler:
                                     "completed_at": completed_at, "duration_ns": duration,
                                     "consecutive_failures": self._failures}
             if reason is None:
-                sensor_meta, oldest = self._provenance(recorded, started, completed)
                 self._sequence += 1
                 self._record = {"stats": stats, "sequence": self._sequence, "started_at": started_at,
                                 "completed_at": completed_at, "started": started, "completed": completed,
@@ -128,37 +150,68 @@ class Sampler:
                 self._ready.set()
         return started
 
-    def _provenance(self, recorded, started, completed):
-        """(sensor_meta, start of the oldest current read or None). The data age counts from that read only
-        if every record is there, on this Sampler's clock, in whole ns and inside this collection; otherwise
-        from the collection's start, as for a plain dict. A record that does not hold gets read: null."""
+    def _provenance(self, recorded, stats, started, completed):
+        """(sensor_meta, start of the oldest current read or None), outside the state lock. The data age
+        counts from that read only if every record checks out (see _check); otherwise from the collection's
+        start, as for a plain dict. The values are published either way; a record that does not hold is
+        left out or gets read: null. Never raises for bad records: they are not the data."""
         if recorded is None:
             return None, None
+        try:
+            meta, oldest, problem = self._check(recorded, stats, started, completed)
+        except Exception as e:  # records of an unexpected shape; the collected values are not affected
+            meta, oldest, problem = None, None, f"unusable read records ({type(e).__name__})"
+        if problem != self._provenance_problem:  # logged when it changes, not every collection
+            if problem:
+                print(f"platmon: data age counts from the collection start: {problem}", file=sys.stderr)
+            self._provenance_problem = problem
+        return meta, oldest
+
+    def _check(self, recorded, stats, started, completed):
+        """Every required read has a valid span; every record points at a value of these stats; every
+        target with a value has a valid read; all on this Sampler's clock, in whole ns, inside this
+        collection. The current reads (required ones and the values' own) are collected here, once."""
+        problems = []
 
         def valid(span):
             return (isinstance(span, tuple) and len(span) == 2 and all(type(t) is int for t in span)
                     and started <= span[0] <= span[1] <= completed)
 
-        problem = None if recorded.complete else "incomplete read records"
         same_clock = recorded.clock is self._elapsed
         if not same_clock:
-            problem = "read records on another clock"
-        meta = {}
-        for ptr, info in recorded.sensors.items():
+            problems.append("read records on another clock")
+        required = recorded.required if isinstance(recorded.required, dict) else {}
+        if not required or not all(valid(s) for s in required.values()):
+            problems.append("a required read is missing or invalid")
+        reads = [s for s in required.values() if valid(s)]
+        sensors = recorded.sensors if isinstance(recorded.sensors, dict) else {}
+        if sensors is not recorded.sensors:
+            problems.append("sensor records of the wrong type")
+        meta, timed = {}, set()
+        for ptr, info in sensors.items():
+            value = _resolve(stats, ptr)
+            if value is _MISSING or not isinstance(info, dict):
+                problems.append("a record for a value that is not there")
+                continue  # never published: no pointer to nothing
             span = info.get("span")
-            good = same_clock and span is not None and valid(span)
-            if span is not None and not good:
-                problem = problem or "a read span outside the collection"
+            good = _number(value) and same_clock and valid(span)
+            if _number(value) and not good:
+                problems.append("a value without a valid read")
             meta[ptr] = {**{k: info.get(k) for k in ("id", "provider", "identity_basis", "unit")},
                          "read": {"started_offset_ms": ms(span[0] - started), "completed_offset_ms": ms(span[1] - started)}
                          if good else None}
-        if not recorded.reads or not all(valid(s) for s in recorded.reads):
-            problem = problem or "no valid read spans"
-        if problem != self._provenance_problem:  # logged when it changes, not every collection
-            if problem:
-                print(f"platmon: data age counts from the collection start: {problem}", file=sys.stderr)
-            self._provenance_problem = problem
-        return meta, None if problem else min(s[0] for s in recorded.reads)
+            if good:
+                reads.append(span)
+                timed.add(ptr)
+        targets = recorded.targets if isinstance(recorded.targets, list) else None
+        if targets is None:
+            problems.append("no list of values to check")
+        for ptr in targets or ():
+            value = _resolve(stats, ptr)
+            if value is _MISSING or (_number(value) and ptr not in timed):
+                problems.append("a value without its record")
+        problem = problems[0] if problems else None
+        return meta, None if problem or not reads else min(s[0] for s in reads), problem
 
     def read(self, timeout=0.0):
         """(stats, status) from one capture of the state, so both describe the same moment.
