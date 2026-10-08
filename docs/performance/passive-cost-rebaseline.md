@@ -196,4 +196,6 @@ python3 benchmarks/cadence.py report --md DIR/results.jsonl   # Tables 1-3 plus 
 
 Raw records (`results.jsonl`, one per board) are kept outside the repository; SHA-256 (first 16 hex
 digits): orin `d29b9a4c9747d155`, rpi4 `d52147dfa221951e`, wsl `bbee93155072ac92`. The tables above were
-aggregated from them with `cadence.py report` at `462c5d0`; re-running it gives the same output.
+aggregated from them with `cadence.py report` at `462c5d0`; re-running it gives the same output. They were
+re-aggregated with this branch's later report code, which gives a block no delta when its runs differ in
+interval, poll, clients, Python, product or bench hash or scope: every block matched, no number changed.

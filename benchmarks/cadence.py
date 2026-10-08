@@ -893,13 +893,19 @@ def parts_summary(s, t0, t1):
 
 
 def blocks(runs):
-    """Per block (one A B B A of one client count): mean B1 - mean B0 of that block's valid runs."""
-    out = {}
+    """Per block (one A B B A of one client count): mean B1 - mean B0 of that block's valid runs; None, with
+    the reasons, when the block's runs are not comparable (see mismatches)."""
+    groups = {}
     for r in runs:
         if r["valid"] and r.get("block"):
-            out.setdefault(r["block"], {"B0": [], "B1": []})[r["variant"]].append(r["cpu_pct_one_core"])
-    return {b: {**v, "delta_pp": sum(v["B1"]) / len(v["B1"]) - sum(v["B0"]) / len(v["B0"]) if v["B0"] and v["B1"] else None}
-            for b, v in out.items()}
+            groups.setdefault(r["block"], []).append(r)
+    out = {}
+    for b, rs in groups.items():
+        v = {k: [r["cpu_pct_one_core"] for r in rs if r["variant"] == k] for k in ("B0", "B1")}
+        problems = mismatches(rs)
+        delta = sum(v["B1"]) / len(v["B1"]) - sum(v["B0"]) / len(v["B0"]) if v["B0"] and v["B1"] and not problems else None
+        out[b] = {**v, "delta_pp": delta, "problems": problems}
+    return out
 
 
 def mismatches(runs):
@@ -1057,11 +1063,11 @@ def markdown(out):
                 f"{p['skipped_ticks']}/{p['pending_at_end']}", "yes" if p["valid"] else f"no: {p['invalid']}"]) + " |")
     with_blocks = [c for c in out["comparisons"] if c.get("blocks")]
     if with_blocks:
-        lines += ["", "| platform | phase | clients | block | B0 CPU % | B1 CPU % | B1-B0 pp |", "|" + "---|" * 7]
+        lines += ["", "| platform | phase | clients | block | B0 CPU % | B1 CPU % | B1-B0 pp | problems |", "|" + "---|" * 8]
         for c in with_blocks:
             for name, v in c["blocks"].items():
                 lines.append(f"| {c['key'][0]} | {c['key'][1]} | {c['key'][3]} | {name} | {', '.join(f(x) for x in v['B0']) or '-'} "
-                             f"| {', '.join(f(x) for x in v['B1']) or '-'} | {f(v['delta_pp'], 3)} |")
+                             f"| {', '.join(f(x) for x in v['B1']) or '-'} | {f(v['delta_pp'], 3)} | {'; '.join(v['problems']) or '-'} |")
     with_parts = [r for r in out["runs"] if r.get("parts")]
     if with_parts:
         lines += ["", "| platform | run | CPU % (process) | part | calls | CPU % of one core (sum) | cpu mean ms "

@@ -459,6 +459,19 @@ def test_block_deltas_and_parts_summary():
     assert cadence.parts_summary({"tables": {}}, 0, 1) is None
 
 
+def test_block_delta_refuses_runs_that_are_not_comparable():
+    runs = [dict(base, variant="B0", cpu_pct_one_core=1.0, block="c1-1"),
+            dict(base, variant="B1", cpu_pct_one_core=1.2, block="c1-1", source_hash="other"),
+            dict(base, variant="B0", cpu_pct_one_core=1.0, block="c1-2"),
+            dict(base, variant="B1", cpu_pct_one_core=1.1, block="c1-2", scope={"interfaces": 3}),
+            dict(base, variant="B0", cpu_pct_one_core=1.0, block="c1-3"),
+            dict(base, variant="B1", cpu_pct_one_core=1.1, block="c1-3")]
+    b = cadence.compare(runs)["blocks"]
+    assert b["c1-1"]["delta_pp"] is None and "source_hash" in b["c1-1"]["problems"][0]
+    assert b["c1-2"]["delta_pp"] is None and "scope" in b["c1-2"]["problems"][0]
+    assert b["c1-3"]["delta_pp"] == pytest.approx(0.1) and b["c1-3"]["problems"] == []
+
+
 def test_parts_run_reports_apart(tmp_path, capsys):
     """A short real passive-parts serve run: parts are timed once per collection, inside the window only."""
     out = tmp_path / "s.json"
