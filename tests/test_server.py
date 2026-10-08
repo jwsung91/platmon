@@ -19,6 +19,9 @@ class NoWait(Sampler):
     def read(self, timeout=0.0):
         return super().read(0.0)
 
+    def _stats_json(self, timeout=0.0):  # /api/stats
+        return super()._stats_json(0.0)
+
 
 def serve(stats, web=True, sampler=None):
     """Serves one collected snapshot of stats (None: nothing collected yet), or the given sampler."""

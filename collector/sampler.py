@@ -7,6 +7,7 @@ fresh sample from the last good one while collection fails. See docs/api.md.
 """
 import copy
 import dataclasses
+import json
 import sys
 import threading
 import time
@@ -225,6 +226,21 @@ class Sampler:
         stats: the current snapshot with schema_version, sample and collectors added, or None if there is
         none yet or it is stale; waits up to timeout for the first one. status: the /api/status body.
         Both are new dicts: callers may change them."""
+        view, status = self._view(timeout)
+        return (None if view is None else copy.deepcopy(view)), status
+
+    def _stats_json(self, timeout=0.0):
+        """For frontends/server.py: (the /api/stats body as JSON bytes, or None where read() gives no stats;
+        status). The same JSON as json.dumps(read()[0]), without copying the snapshot first: only bytes and
+        the new status dict leave the Sampler."""
+        view, status = self._view(timeout)
+        return (None if view is None else json.dumps(view).encode()), status
+
+    def _view(self, timeout):
+        """read() without the copy: stats is a new top-level dict, but its values are the published
+        record's own. A record is never changed after it is published (a new one replaces it), so the view
+        can be serialized outside the lock; it must not leave the Sampler (read copies it, _stats_json
+        returns bytes)."""
         if timeout:
             self._ready.wait(timeout)
         with self._lock:
@@ -256,8 +272,8 @@ class Sampler:
         }
         if not fresh:
             return None, status
-        stats = copy.deepcopy(record["stats"])
-        optional = stats.pop("collectors", None)
+        stats = {k: v for k, v in record["stats"].items() if k != "collectors"}  # same key order as before
+        optional = record["stats"].get("collectors")
         optional = {k: v for k, v in optional.items() if k != "core"} if isinstance(optional, dict) else {}
         stats.update({
             "schema_version": SCHEMA_VERSION,
@@ -272,7 +288,7 @@ class Sampler:
             "collectors": {"core": {"state": "ok", "reason": None}, **optional},
         })
         if record["sensor_meta"] is not None:
-            stats["sensor_meta"] = copy.deepcopy(record["sensor_meta"])
+            stats["sensor_meta"] = record["sensor_meta"]
         return stats, status
 
     @staticmethod
