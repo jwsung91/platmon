@@ -49,4 +49,4 @@ Clients ask for `/api/observations` on the groups' cadence, not every second: th
 `platmon` command ask at most every 10 s (the page only while it is visible) and add the time since that
 answer to the ages shown. A server without the endpoint (404) is not asked again.
 
-Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)).
+Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `probe` ([probe.md](probe.md)).

@@ -51,6 +51,7 @@
   <section><h2>Disk I/O</h2><div id="dio"></div></section>
   <section><h2>Storage</h2><div id="sto"></div></section>
   <section><h2>Wi-Fi</h2><div id="wifi"></div></section>
+  <section><h2>TCP connect</h2><div id="probe"></div></section>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -120,6 +121,17 @@ async function pollObs() {
   } catch (e) { obs = null; }  // the main view goes on without it
   $('sto').innerHTML = storageRows();
   $('wifi').innerHTML = wifiRows();
+  $('probe').innerHTML = probeRows();
+}
+// TCP connect time to the configured targets (not ICMP ping): the latest attempt, and recent failures
+function probeRows() {
+  const g = obs && obs.groups && obs.groups.probe, o = g && g.observation, d = g && g.data;
+  const items = d && Array.isArray(d.targets) ? d.targets : [];
+  if (!o || !items.length) return '';
+  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
+  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` + items.map(t =>
+    kv(esc(t.address.includes(':') ? `[${t.address}]:${t.port}` : `${t.address}:${t.port}`),
+      (t.connect_ms != null ? t.connect_ms.toFixed(1) + ' ms' : esc(t.reason)) + ` · failed ${t.failures}/${t.attempts}`)).join('');
 }
 // the signal while connected, never the last one after; a value without dBm is shown without a unit
 function wifiRows() {
@@ -242,7 +254,7 @@ async function tick() {
     showAge();
   }
 }
-setInterval(() => { showAge(); pollObs(); if (obs) { $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); } }, 1000);  // ages keep moving while a request hangs
+setInterval(() => { showAge(); pollObs(); if (obs) { $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); } }, 1000);  // ages keep moving while a request hangs
 pollObs();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
