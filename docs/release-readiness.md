@@ -1,0 +1,112 @@
+# Release readiness (integration of #32–#38)
+
+Status of the features built on top of main `85259427f20b` (#31), checked together on the
+`integration/release-candidate` branch. That branch is for checking only: each feature is merged through
+its own PR, in order, after review. Nothing here is released, tagged or deployed.
+
+## Contents and defaults
+
+| PR | Feature | Default | API | Docs |
+| --- | --- | --- | --- | --- |
+| #31 (merged) | Network counters | **on** | `/api/stats` `network` | [network.md](network.md) |
+| #32 | Disk I/O counters | **on** | `/api/stats` `disk_io` | [disk-io.md](disk-io.md) |
+| #33 | Network / Disk I/O in the web page, `platmon` command, `/text` | - | - | [api.md](api.md#web-page) |
+| #34 | Storage capacity; low-frequency groups | off | `/api/observations` (new) | [storage.md](storage.md), [observations.md](observations.md) |
+| #35 | Pressure stall information | off | `/api/stats` `pressure` | [pressure.md](pressure.md) |
+| #36 | Wi-Fi signal (passive) | off | `/api/observations` `wifi` | [wifi.md](wifi.md) |
+| #37 | TCP connect probe (active) | off, no targets | `/api/observations` `probe` | [probe.md](probe.md) |
+| #38 | Recent history | off | `/api/history` (new) | [history.md](history.md) |
+
+Merge order: #32 → #33 → #34 → #36 → #37 → #38; #35 after #33. Stacked PRs show their base; each one's own
+commits are listed in its description.
+
+## Compatibility
+
+- `/api/stats` keeps every existing key, unit and type and `schema_version` 1. New keys: `network`,
+  `disk_io` (on by default), `pressure` (when enabled), and the matching `collectors` entries. `disk` (root
+  filesystem usage) is unchanged and separate from `disk_io`.
+- `/api/status`, `/text`, `/` and their status codes, 503 rules and `no-store` are unchanged; `/text`
+  shows more lines. New read-only endpoints: `/api/observations` (always 200), `/api/history` (404 while
+  history is off). Older clients ignore them; the new page and command handle servers without them
+  (nothing shown, not asked again after a 404).
+- Config: new sections `[network]`, `[disk_io]` (on), `[pressure]`, `[storage]`, `[wifi]`, `[probe]`,
+  `[history]` (off). An existing INI without them gets the defaults; an explicit `enabled = no` is kept;
+  unknown keys are still refused.
+- The `platmon` command stays one standard-library file; it never imports the collector.
+
+## Cost (integrated, `c2752c1`)
+
+The real service (`python3 platmon.py INI`, native) polled like the web page (`/api/stats` every 1 s,
+`/api/observations` and `/api/history` every 10 s) by `benchmarks/service_cpu.py` from its own process;
+the service's user + system CPU from `/proc/<pid>/stat`; 30 s warmup + 120 s window; order default, all,
+all, default.
+
+| board | default (Network + Disk I/O on) | all on (+ storage, Wi-Fi, probe to loopback, PSI, history) | target |
+| --- | --- | --- | --- |
+| Jetson Orin Nano | 1.583, 1.669 % (mean 1.626) | 1.817, 1.742 % (mean 1.779) | ≤ 2.0 %: met by both |
+| Raspberry Pi 4 | 1.567, 1.595 % (mean 1.581) | 1.835, 1.860 % (mean 1.847) | ≤ 2.0 %: met by both |
+
+RSS at the end of the windows 23.8–26.5 MiB in every run. `/api/stats` answered 120–121 times per window
+without an error (largest latency 4.3 ms Orin, 5.6 ms Raspberry Pi); with history off `/api/history` is the
+expected 404. History was not full in a 150 s run: its bound is 3.5–3.7 MiB at 600 s
+([performance/low-frequency.md](performance/low-frequency.md)). PSI is unsupported on both boards, so the
+"all on" runs include its unsupported path only.
+
+Per-feature results and the criteria not met:
+
+| feature | per-feature result | criteria |
+| --- | --- | --- |
+| Network | +0.160 / +0.175 pp (`31b4bbc`) | met under [budget.md](performance/budget.md); the earlier 0.1 pp target is recorded as not met |
+| Disk I/O | +0.152 / +0.123 pp, call p95 0.94 / 1.18 ms (`e184f8c`) | met |
+| Storage | 2.8–3.1 ms per observation every 30 s (≈ 0.01 pp) | call p95 ≤ 2 ms **not met** (3.1–3.4 ms); runs on its own thread; off by default |
+| Wi-Fi | 0.6–0.8 ms CPU per 5 s observation, elapsed p95 2.2 / 6.4 ms | call p95 **not met** (waiting on the driver); own thread; off by default |
+| PSI | 1.8 µs per collection on the unsupported path (WSL tight loop) | normal path unmeasured on the boards (no PSI there); off by default |
+| Probe | 0.3–0.7 ms loopback connect | real targets not approved: unmeasured; off by default |
+| History | ≤ 3.7 MiB at its bound | integrated run within 2.0 %; off by default |
+
+## Verified and not verified
+
+Verified: full `pytest` and the web harness on every branch, CI on Python 3.9 and 3.13 (push and
+pull_request) for every PR and this branch; Orin Nano and Raspberry Pi 4 natively on loopback test ports
+(functional checks of every feature; per-feature cost; the integrated runs above); the web page in a real
+browser (Chromium headless shell, 1280 px and 390 px) for #33's panels. Each device run left the boards'
+own services (`e1bc82a`) untouched, compared by state records before and after (see the performance
+reports for which runs have both).
+
+Not verified: a container deployment of any new feature (the scope differences are documented, not run);
+systemd installation of this branch; WSL for the low-frequency groups; PSI's normal path and the probe's
+real targets on the boards; the new web panels for storage, Wi-Fi, probe, pressure and history in a real
+browser (harness only); history filled to its retention on a board.
+
+## Upgrade and rollout (for after approval; not done)
+
+New installs get the defaults above. An existing install keeps its INI: Network and Disk I/O turn on
+unless its INI says `enabled = no`; everything else stays off until enabled.
+
+For each device, at a fixed merged SHA (the procedure used for earlier rollouts):
+
+1. Record the running state: SHA, container id and image (Orin) or PID and start time (Raspberry Pi), INI,
+   CLI, health.
+2. Keep rollback material: tag the running image `platmon:rollback-<old sha>`, and copy the compose files,
+   INI, CLI, container inspect output, ROLLBACK.md and SHA256SUMS to `~/platmon-rollback-<old sha>-<time>/`.
+3. Build the candidate from `git archive <sha>` locally (`--provenance=false`); never pull or push images.
+4. Smoke-test the candidate under its own compose project on `127.0.0.1:19797`: healthy, `/api/stats` 200
+   with `network` and `disk_io`, source ids equal to the running service, then remove it.
+5. Switch: check out the SHA, tag the candidate as `platmon:local`, recreate only the platmon service;
+   on the Raspberry Pi, fast-forward its checkout and restart the process the same way it was started.
+6. After: health, `/api/status` `ready`, CPU of the service compared with the integrated numbers above.
+   Roll back (ROLLBACK.md) on a failed health check, a non-ready status for more than a minute, or CPU
+   well above 2 % of one core.
+
+Pending approval as of 2026-10-09: the rollout of #31 (`8525942`) itself; the Orin candidate for it is
+built and smoke-tested and its rollback material exists ([development/remaining-work.md](development/remaining-work.md)).
+
+## Raw data
+
+On each device: `~/platmon-rc-c2752c1/` (`run-1-default.json` … `run-4-default.json`, `ops-before.txt`,
+`ops-after.txt`), plus the per-feature directories listed in the performance reports.
+
+| board | run-1 default | run-2 all | run-3 all | run-4 default |
+| --- | --- | --- | --- | --- |
+| orin | `9f48f3c5…` | `09dd3239…` | `b92c63e7…` | `5ba67ce9…` |
+| rpi4 | `088ae0e2…` | `c5763765…` | `dffe1d52…` | `0b58d724…` |
