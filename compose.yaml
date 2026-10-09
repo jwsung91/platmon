@@ -15,8 +15,9 @@ services:
     init: true                  # forward docker stop's SIGTERM promptly
     uts: host                   # host's hostname, the model name fallback on hosts without DMI / device tree
     restart: unless-stopped
-    ports:
-      - "9797:9797"
+    # Linux host interfaces and Wi-Fi must be read in the same network namespace.
+    # The HTTP bind/port comes directly from platmon.ini; do not publish ports in host mode.
+    network_mode: host
     environment:
       PLATMON_DEVICE_TREE: /host/firmware/devicetree/base
       PLATMON_HOST_ROOT: /host/root

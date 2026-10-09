@@ -40,3 +40,47 @@ def test_install_cli_user(tmp_path):
     r = subprocess.run([script, "--user"], env=env, capture_output=True, text=True)
     assert r.returncode == 1 and "not the platmon client" in r.stderr
     assert "someone else's" in target.read_text()
+
+
+@pytest.mark.parametrize("mode, listener, expected", [
+    ("host", "localhost 9797", "look at it with: platmon\n"),
+    ("host", "localhost 19799", "look at it with: platmon localhost:19799"),
+    ("host", "192.0.2.1 9797", "look at it with: platmon 192.0.2.1:9797"),
+    ("bridge", "unused", "look at it with: platmon localhost:19800"),
+])
+def test_docker_start_reports_host_or_published_listener(tmp_path, mode, listener, expected):
+    """Exercise the real start script without a Docker daemon or privileged commands."""
+    import json
+    import sys
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(f"#!{sys.executable}\n" + '''import json, os, sys
+args = sys.argv[1:]
+with open(os.environ["DOCKER_CALLS"], "a") as f:
+    f.write(json.dumps(args) + "\\n")
+if args[0] == "inspect":
+    field = args[2]
+    print("healthy" if "Health" in field else os.environ["TEST_MODE"] if "NetworkMode" in field else "true")
+elif "ps" in args:
+    print("candidate")
+elif "exec" in args:
+    assert "load_config" in args[-1] and "/opt/platmon/platmon.ini" in args[-1]
+    print(os.environ["TEST_LISTENER"])
+elif "port" in args:
+    assert os.environ["TEST_MODE"] != "host", "host mode must not query port mappings"
+    print("0.0.0.0:19800")
+elif not ("up" in args or "logs" in args):
+    raise SystemExit("unexpected Docker command: " + repr(args))
+''')
+    docker.chmod(0o755)
+    systemctl = bin_dir / "systemctl"
+    systemctl.write_text("#!/bin/sh\nexit 1\n")
+    systemctl.chmod(0o755)
+    calls = tmp_path / "calls.jsonl"
+    env = dict(os.environ, HOME=str(tmp_path), PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
+               TEST_MODE=mode, TEST_LISTENER=listener, DOCKER_CALLS=str(calls))
+    result = subprocess.run([str(SCRIPT_DIR / "docker/start.sh")], env=env, capture_output=True, text=True, check=True)
+    assert expected in result.stdout
+    recorded = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert any("exec" in call for call in recorded) == (mode == "host")
