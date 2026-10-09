@@ -52,6 +52,7 @@ const history = {retention_s: 600, series: {
       await page.setViewportSize({width, height: 900}); await page.goto('http://platmon.test/');
       await page.waitForFunction(() => document.querySelector('#overview').textContent.includes('Root filesystem'));
       assert(await page.locator('#panel-overview').isVisible());
+      assert.equal(await page.locator('#tab-hint').isVisible(), width <= 540);
       assert(!(await page.locator('header').innerText()).includes('Ubuntu 22.04.5 LTS'));
       assert(!(await page.locator('header').innerText()).includes('MAXN_SUPER'));
       assert.equal(await page.locator('#history-panel').isVisible(), false);
@@ -111,12 +112,20 @@ const history = {retention_s: 600, series: {
           const before = [counts['/api/observations'], counts['/api/history']];
           await page.waitForTimeout(1100);
           assert.deepEqual([counts['/api/observations'], counts['/api/history']], before);
+          assert.equal(new URL(page.url()).hash, '#system');
+          await page.reload();
+          await page.waitForFunction(() => document.querySelector('#system-os').textContent === 'Ubuntu 22.04.5 LTS');
+          assert(await page.locator('#panel-system').isVisible());
+          assert.deepEqual([counts['/api/observations'], counts['/api/history']], before, 'restoring System does not request optional endpoints');
+          const bounds = await page.locator('#tab-system').boundingBox();
+          assert(bounds.x >= 0 && bounds.x + bounds.width <= width, 'restored tab is visible without horizontal scrolling');
         }
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), tab + ' fits narrow width');
         await page.screenshot({path: path.join(output, `${tab}-${width}.png`), fullPage: true});
       }
     }
     await page.locator('#tab-resources').click();
+    await page.waitForFunction(() => document.querySelectorAll('#hist svg').length === 12);
     const before = await page.locator('*').count();
     for (let n = 0; n < 120; n++) await page.evaluate(() => tick());
     assert.equal(await page.locator('*').count(), before, 'repeated rendering does not append DOM nodes');
@@ -129,6 +138,16 @@ const history = {retention_s: 600, series: {
     assert((await page.locator('#err').innerText()).includes('No answer within 5 s'));
     mode = 'ok'; await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await page.waitForFunction(() => !document.querySelector('#err').textContent);
+    await page.goto('http://platmon.test/#unknown');
+    await page.waitForFunction(() => document.querySelector('#overview').textContent.includes('Root filesystem'));
+    assert(await page.locator('#panel-overview').isVisible());
+    await page.evaluate(() => { location.hash = 'system'; });
+    await page.waitForFunction(() => !document.querySelector('#panel-system').hidden);
+    await page.goBack();
+    await page.waitForFunction(() => !document.querySelector('#panel-overview').hidden);
+    await page.goto('http://platmon.test/#network');
+    await page.waitForFunction(() => document.querySelector('#wifi').textContent.includes('-64 dBm'));
+    assert(await page.locator('#panel-network').isVisible());
     assert.deepEqual(errors, []);
     fs.writeFileSync(path.join(output, 'browser.json'), JSON.stringify({browser: await browser.version(),
       fixtures: true, widths: [1280, 390], history_series: 64, displayed_series: 12, points_per_series: 120,

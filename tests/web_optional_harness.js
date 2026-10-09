@@ -7,8 +7,9 @@ const elements = {}, requests = [], timers = new Map(), intervals = [], listener
 let now = 0, next = 0;
 const context = vm.createContext({
   AbortController, console, performance: {now: () => now},
+  location: {hash: ''}, history: {replaceState() {}}, window: {addEventListener() {}},
   document: {visibilityState: 'visible', getElementById: id => elements[id] ||= {innerHTML: '', textContent: '', value: '',
-    setAttribute() {}, addEventListener() {}, focus() {}},
+    setAttribute() {}, addEventListener() {}, focus() {}, scrollIntoView() {}},
     querySelectorAll: () => [], addEventListener: (_, fn) => listeners.push(fn)},
   setTimeout: (fn, ms) => { timers.set(++next, {fn, ms}); return next; },
   clearTimeout: id => timers.delete(id), setInterval: fn => intervals.push(fn),

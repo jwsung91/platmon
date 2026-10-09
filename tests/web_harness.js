@@ -6,7 +6,10 @@ const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<
 
 const els = {};
 const el = id => (els[id] ||= {innerHTML: '', textContent: '', value: '', hidden: false, lastElementChild: null,
-  setAttribute() {}, addEventListener() {}, focus() {}});
+  setAttribute() {}, addEventListener() {}, focus() {}, scrollIntoView() {}});
+global.location = {hash: ''};
+global.history = {replaceState() {}};
+global.window = {addEventListener() {}};
 const listeners = [];
 global.document = {getElementById: el, querySelectorAll: () => [], visibilityState: 'visible',
   addEventListener: (type, fn) => type === 'visibilitychange' && listeners.push(fn)};

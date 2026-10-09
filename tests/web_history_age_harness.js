@@ -2,8 +2,9 @@ const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:a
 let now = 0;
 const elements = {}, intervals = [], age = {dataset: {historyAge: '2000'}, textContent: ''};
 const context = vm.createContext({AbortController, performance: {now: () => now}, console,
+  location: {hash: ''}, history: {replaceState() {}}, window: {addEventListener() {}},
   document: {visibilityState: 'visible', getElementById: id => elements[id] ||= {innerHTML:'',textContent:'',value:'',
-    setAttribute() {}, addEventListener() {}, focus() {}},
+    setAttribute() {}, addEventListener() {}, focus() {}, scrollIntoView() {}},
     querySelectorAll: selector => selector === '[data-history-age]' ? [age] : [], addEventListener() {}},
   setInterval: fn => intervals.push(fn), setTimeout() {}, clearTimeout() {},
   fetch: async url => url.startsWith('api/history') ? {ok:true, status:200, json:async() => ({retention_s:600,
