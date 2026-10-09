@@ -2,7 +2,7 @@
 
 A low-frequency group ([observations.md](observations.md)): the partitions of the physical disks and the
 size, use and free space of the local disk filesystems, every `[storage] interval` seconds (30 by
-default). **Off by default** (`[storage] enabled = yes` turns it on). It is separate from:
+default). **On by default** (`[storage] enabled = no` turns it off). It is separate from:
 
 - `disk` in `/api/stats`, the root filesystem's size and use, which keeps its keys and its 1 s cadence;
 - `disk_io` ([disk-io.md](disk-io.md)), how busy the disks are.
@@ -84,7 +84,7 @@ between) and that filesystem stays listed without numbers. Nothing found at all 
 
 ```ini
 [storage]
-enabled = no      ; yes: observe it
+enabled = yes     ; no: do not observe it
 interval = 30     ; seconds between observations, 5 to 3600
 ```
 
@@ -113,7 +113,8 @@ This pins the filesystem being measured, not a mount-table transaction. A same-d
 replacement reusing the same device number cannot always be distinguished; mount options and mount
 list remain the earlier mountinfo observation. Blocking remains isolated to the existing single storage
 worker. No new thread or raw device access is introduced. The [resumed integration report](performance/resumed-integration-results.md) measures this descriptor
-path; its call p95 exceeds 2 ms, so it remains off by default.
+path; its call p95 still exceeds 2 ms. It is now enabled by default by user policy;
+this does not change the measured result or the 2 ms target.
 
 Directory bind mounts are supported under the same identity check; **file bind mounts are not**.
 The isolated Docker test exposed file mounts whose capacity read returns `io_error` and null values.

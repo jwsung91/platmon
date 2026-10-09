@@ -1,5 +1,20 @@
 # Release readiness
 
+## Default enablement policy update (2026-10-09)
+
+After #40–#46 merged at `dc2875428892e99055e4dfe9c9afab0c2f7f1c52`, the owner requested
+all monitoring features enabled by default. Network, Disk I/O, Storage, Wi-Fi, PSI, Probe and
+History now default to enabled in both code and the shipped INI. Existing explicit off values
+remain effective; omitted sections adopt the new defaults. Probe with no configured targets
+stays idle without a worker, observation group or connection; targets require a restart to apply.
+Unsupported hardware retains its existing unavailable result. No production configuration is changed.
+
+This is an explicit policy choice, not a new performance pass. The previous supported all-on
+measurement (PSI excluded, loopback Probe) reached 2.174% of one core in one Orin short window,
+and 2.079% / 2.019% on Orin/Pi over retention. Storage/Wi-Fi call p95 still exceeds 2 ms.
+The 2% target and raw results remain unchanged; the new exact default configuration has not
+been ARM-benchmarked. Historical off-by-default statements below describe their measured revisions.
+
 ## Final candidate disposition (2026-10-09)
 
 **Eligible for the authorized aggregate merge within the measured default configuration and

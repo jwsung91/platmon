@@ -2,7 +2,7 @@
 
 A low-frequency group ([observations.md](observations.md)) named `wifi`: what the kernel last knew about
 each wireless interface's link, read from `/proc/net/wireless` every `[wifi] interval` seconds (5 by
-default). **Off by default** (`[wifi] enabled = yes` turns it on). Passive: platmon never scans,
+default). **On by default** (`[wifi] enabled = no` turns it off). Passive: platmon never scans,
 reconnects or changes a setting, and does not read SSID, BSSID or nearby access points. Rx/tx traffic
 stays in `network` ([network.md](network.md)), at its 1 s cadence.
 
@@ -55,7 +55,7 @@ unknown header is `invalid_data`; a row that does not match the format is left o
 
 ```ini
 [wifi]
-enabled = no      ; yes: observe it
+enabled = yes     ; no: do not observe it
 interval = 5      ; seconds between observations, 1 to 3600
 ```
 

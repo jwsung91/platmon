@@ -77,7 +77,7 @@ def main(argv=None):
     a = p.parse_args(argv)
     config = configparser.ConfigParser()
     config.read(a.ini)
-    history_enabled = config.getboolean('history', 'enabled', fallback=False)
+    history_enabled = config.getboolean('history', 'enabled', fallback=True)
     interval_ms = config.getfloat('core', 'interval', fallback=1.0) * 1000
     base = f"http://127.0.0.1:{a.port}"
     # Never accidentally measure or terminate an existing service on this port.

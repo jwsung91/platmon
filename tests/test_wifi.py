@@ -67,9 +67,9 @@ def test_observation_states(source, state, reason):
     assert out["provider"] == "proc_net_wireless" and out["scope"]["kind"] == "process_network_namespace"
 
 
-def test_wifi_is_off_by_default_with_a_5_s_candidate_interval(tmp_path):
+def test_wifi_is_on_by_default_with_a_5_s_candidate_interval(tmp_path):
     cfg = platmon.load_config()
-    assert not cfg["wifi"].getboolean("enabled") and cfg["wifi"].getfloat("interval") == 5.0
+    assert cfg["wifi"].getboolean("enabled") and cfg["wifi"].getfloat("interval") == 5.0
     with pytest.raises(ValueError, match="out of range"):
         platmon.load_config(ini_file(tmp_path, "[wifi]\ninterval = 0.5\n"))
 

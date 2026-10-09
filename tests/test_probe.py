@@ -96,7 +96,6 @@ def test_targets_are_probed_one_after_another():
 
 
 @pytest.mark.parametrize("text, error", [
-    ("[probe]\nenabled = yes\n", "needs targets"),
     ("[probe]\ntargets = host.example:80\n", "targets"),
     ("[probe]\nenabled = yes\ntargets = 192.0.2.1:1, 192.0.2.2:1\ntimeout = 5\ninterval = 10\n", "interval must be longer"),
     ("[probe]\ntimeout = 20\n", "out of range")])
@@ -105,9 +104,9 @@ def test_config_refuses(tmp_path, text, error):
         platmon.load_config(ini_file(tmp_path, text))
 
 
-def test_off_by_default_without_targets():
+def test_enabled_by_default_without_targets():
     cfg = platmon.load_config()
-    assert not cfg["probe"].getboolean("enabled") and cfg["probe"]["targets"] == ""
+    assert cfg["probe"].getboolean("enabled") and cfg["probe"]["targets"] == ""
 
 
 def test_cli_lines():
