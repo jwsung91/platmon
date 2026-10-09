@@ -2,25 +2,29 @@
 
 ## Current final candidate status (2026-10-09)
 
-The owner authorized necessary merges. #40, #43 and #41 are merged; their main CI passed.
-#42 now targets main, #44 follows #42, and #46 preserves all component changes and #45's
-validation work. The exact measured code is `30d377a9b7cd470d655367398dab39c3b1f5313a`;
-the initial normal merges and documentation updates preserved that runtime byte-for-byte.
-A subsequent regression test reproduced a one-attempt core failure being hidden in the history
-line. #42 `00781fd` corrects it with internal publication metadata; no API change. The remaining
-component merges are held for corrected-runtime validation, and the measurements below are baseline.
+The owner authorized necessary merges. #40, #43 and #41 are merged; main CI passed.
+#42 targets main, #44 follows #42, and #46 preserves all components and #45's validation work.
+The current candidate runtime is `aac7ed796faf2be0e387312c04a78925198fe11d`; remaining component
+merges await the declared ARM gates. **The candidate remains Draft, not a release or deployment.**
 
-[Final measured results](performance/final-candidate-results.md) supersede the earlier CPU matrix:
-two uncontended ABBA blocks pass the default <=2% CPU target on each ARM board. The final-page
-661 s Chromium soak passes with constant live DOM and no JS errors. Local tests are 672 passed /
-3 skipped; candidate CI is 674/1 (Python 3.9) and 673/2 (Python 3.13), including Node and hosted PSI.
-The bounded 1830 s ARM retention run is still in progress; Orin compose verification follows it.
+Two reproduced History defects are corrected: one failed core attempt now inserts a graph break,
+and each publisher releases expired points instead of retaining slow observations until the shared
+core-cadence count cap fills. Focused tests pass 53/53; integrated tests pass 676/3 locally and
+678/1 (Python 3.9), 677/2 (Python 3.13) in candidate CI 37913085542. The unchanged frontend retains
+its 1280/390 px Chromium fixtures and 661 s soak (constant DOM, no JS errors).
+
+[Pre-correction results](performance/final-candidate-results.md) and the
+[recovery-gap round](performance/recovery-gap-validation.md) remain historical measurements.
+The reproduced expiry defect prevents using them as proof of post-fill memory stability.
+The [expiry correction plan](performance/history-expiry-validation.md) records the new bounded
+measurement scope before execution. Actual RSS, default CPU and isolated Orin compose results
+will decide the remaining merges; no sampled timing is described as full per-attempt accounting.
 
 Network/Disk remain on; Storage/PSI/Wi-Fi/TCP/history remain off. Storage/Wi-Fi call p95 still
 exceeds 2 ms. Actual systemd DynamicUser execution is unverified because administrator
 authentication is unavailable; Pi unit static verification succeeds. ARM PSI is unsupported and
-no external probe target is approved. Sampled duration coverage is not full per-attempt accounting.
-Production stays at `8525942`; deployment, tags, releases and registry pushes remain unapproved.
+no external probe target is approved. Production stays at `8525942`; deployment, tags, releases
+and registry pushes remain unapproved. The historical rollback procedure below is not executed.
 
 ## Historical resumed candidate status (2026-10-09)
 

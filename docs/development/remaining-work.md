@@ -13,26 +13,27 @@ implementation; merging alone does **not** complete the expanded validation requ
 
 The owner authorized necessary merges on 2026-10-09. #40, #43 and #41 are merged;
 main is `efb3af6c12873195f9b3cfe23ad68cbd5ff802b3`, with successful main CI.
-#42 now targets main; #44 follows its updated head. Neither duplicates Disk work in its diff.
-The seven-stage post-integration request is at 3/7 complete (status, frontend, Disk), with
-History and integration reopened by a reproduced single-failure gap defect. Production remains `8525942`.
+The seven-stage request has 4/7 stages complete (status, frontend, Disk and local integration).
+History/ARM deployment-form validation is in progress; final documentation/merge disposition follows.
+Production remains `8525942`; release publication and deployment are not authorized.
 
-Exact measured candidate: `30d377a9b7cd470d655367398dab39c3b1f5313a`. The
-[final plan](../performance/final-candidate-plan.md) fixes a 60-minute board budget for two
-ABBA blocks and 1830 s retention; it supersedes the earlier stop after 660 s. The earlier
-CPU matrix overlapped an independent validation and is historical, not the final gate.
-Local final runtime tests: 672 passed / 3 skipped; candidate CI 37904134307/37904140826
-passed on Python 3.9 and 3.13. Runtime files in the merged component branches are identical.
-Final-page Chromium fixtures and the 661 s real-page soak pass. All 16 ARM CPU windows pass;
-the 1830 s retention run is still in progress. These are now pre-correction baseline results:
-#42 `00781fd` fixes a reproduced one-attempt core failure that was connected across the history
-graph. Its focused 50 tests and full 662/3 pass locally. Corrected-runtime integration and board
-validation must complete before #42/#44/#46 can merge.
+The final audit reproduced and corrected two History defects: a single failed core attempt did not
+break the graph (`00781fd`), and expired slow observations remained internally until the shared
+point cap filled (`a52880b`). The latter is a two-line expiry correction with three failing-before
+regressions. The preceding `30d377a` and `65bcc39` measurements are preserved as baseline evidence,
+not a post-expiry memory gate pass. The current runtime is `aac7ed796faf2be0e387312c04a78925198fe11d`.
 
-Actual systemd DynamicUser execution still needs administrator authentication; Pi unit syntax
-verification passes. PSI remains unsupported on ARM; no external TCP target is approved.
-These documented limits do not authorize privilege workarounds or production changes.
-Raw evidence is in `.validation/final-rc-evidence/` and `~/platmon-final-rc-30d377a/`.
+Local integration: 676 passed / 3 skipped. Exact candidate CI 37913085542 / 37913078085 passes
+Python 3.9 (678/1) and 3.13 (677/2), including Node and hosted normal PSI. Component heads #42
+`a52880b` and #44 `93bd086` also pass both versions. The unchanged final-page Chromium fixtures
+and 661 s soak remain applicable. The [expiry validation plan](../performance/history-expiry-validation.md)
+fixes the reassessed scope before another board measurement; earlier runners must finish first.
+No targets or defaults are relaxed. #42 and #46 remain Draft until the required gates are decided.
+
+Actual systemd DynamicUser execution needs unavailable administrator authentication; Pi unit
+static verification passes. ARM PSI is unsupported and no external TCP target is approved.
+Private raw/state/CI evidence is preserved in `.validation/final-rc-evidence/`,
+`.validation/recovery-rc-evidence/` and `.validation/expiry-rc-evidence/` with matching board directories.
 
 ## Historical checkpoint — resumed integration
 
