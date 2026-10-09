@@ -22,7 +22,9 @@ restart starts empty), and serves them at `/api/history` for trend graphs. **Off
 
 One append per **published** core snapshot or independent slow observation, installed before either
 publisher starts. Failed or dropped core collections add no measured point; an elapsed publication gap
-inserts a null break at the next successful publication. HTTP requests never add points. Duplicate or
+inserts a null break at the next successful publication. A core recovery also inserts a null after even
+one failed attempt, using internal publication metadata rather than inferring failure from time alone.
+The next uninterrupted success adds no extra break. HTTP requests never add points. Duplicate or
 out-of-order publication IDs are ignored within each of the four domains (core/storage/wifi/probe). A point is
 `[publication_id, age_ms, value]`: the core sequence, or the independent observation ID for an
 `observation/` series, and how long ago that
