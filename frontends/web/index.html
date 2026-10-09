@@ -50,6 +50,7 @@
   <section><h2>Network</h2><div id="net"></div></section>
   <section><h2>Disk I/O</h2><div id="dio"></div></section>
   <section><h2>Storage</h2><div id="sto"></div></section>
+  <section><h2>Wi-Fi</h2><div id="wifi"></div></section>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -118,6 +119,18 @@ async function pollObs() {
     else if (r.ok) { obs = await r.json(); obsAt = performance.now(); }
   } catch (e) { obs = null; }  // the main view goes on without it
   $('sto').innerHTML = storageRows();
+  $('wifi').innerHTML = wifiRows();
+}
+// the signal while connected, never the last one after; a value without dBm is shown without a unit
+function wifiRows() {
+  const g = obs && obs.groups && obs.groups.wifi, o = g && g.observation, d = g && g.data;
+  const items = d && Array.isArray(d.interfaces) ? d.interfaces : [];
+  if (!o || !items.length) return '';
+  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
+  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` + items.map(i => kv(esc(i.name),
+    !i.connected ? 'not connected' : i.signal_dbm != null ? i.signal_dbm + ' dBm'
+      : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a') +
+    (i.connected && i.link_quality != null ? `<div class="muted">link quality ${i.link_quality}</div>` : '')).join('');
 }
 function storageRows() {
   const g = obs && obs.groups && obs.groups.storage, o = g && g.observation, d = g && g.data;
@@ -229,7 +242,7 @@ async function tick() {
     showAge();
   }
 }
-setInterval(() => { showAge(); pollObs(); if (obs) $('sto').innerHTML = storageRows(); }, 1000);  // ages keep moving while a request hangs
+setInterval(() => { showAge(); pollObs(); if (obs) { $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); } }, 1000);  // ages keep moving while a request hangs
 pollObs();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;

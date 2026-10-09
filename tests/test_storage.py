@@ -236,7 +236,9 @@ def test_storage_is_off_by_default_and_its_interval_is_checked(monkeypatch, tmp_
             platmon.load_config(ini_file(tmp_path, text))
 
 
-@pytest.mark.parametrize("text, groups", [(None, []), ("[storage]\nenabled = yes\ninterval = 60\n", [("storage", 60.0)])])
+@pytest.mark.parametrize("text, groups", [(None, []), ("[storage]\nenabled = yes\ninterval = 60\n", [("storage", 60.0)]),
+                                         ("[wifi]\nenabled = yes\n", [("wifi", 5.0)]),
+                                         ("[storage]\nenabled = yes\n[wifi]\nenabled = yes\n", [("storage", 30.0), ("wifi", 5.0)])])
 def test_storage_runs_as_its_own_group_only_when_enabled(monkeypatch, tmp_path, text, groups):
     class Stop(Exception):
         pass

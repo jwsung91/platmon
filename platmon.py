@@ -19,6 +19,7 @@ from collector.network import NetworkCounters
 from collector.sampler import Sampler, pick_clock
 from collector.slow import Observations, Slow
 from collector.storage import Storage
+from collector.wifi import Wifi
 from frontends import server
 
 FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outputs that run inside the core
@@ -28,10 +29,11 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "network": {"enabled": True},  # measured cost: docs/performance/budget.md
     "disk_io": {"enabled": True},
     "storage": {"enabled": False, "interval": 30.0},
+    "wifi": {"enabled": False, "interval": 5.0},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
-RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("http", "port"): (1, 65535)}
+RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("wifi", "interval"): (1, 3600), ("http", "port"): (1, 65535)}
 
 
 def check(cfg):
@@ -111,8 +113,8 @@ def main(argv=None):
     sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io), interval,
                       clock=clock).start()
     # low-frequency groups, each on its own thread and cadence, served by /api/observations
-    slow = [Slow("storage", Storage(), cfg["storage"].getfloat("interval"), clock[0])] \
-        if cfg["storage"].getboolean("enabled") else []
+    slow = [Slow(name, observe(), cfg[name].getfloat("interval"), clock[0])
+            for name, observe in (("storage", Storage), ("wifi", Wifi)) if cfg[name].getboolean("enabled")]
     observations = Observations(slow, sampler.instance_id, clock[1]).start()
     threads = [t for name, start in FRONTENDS.items()
                if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name], observations))]
