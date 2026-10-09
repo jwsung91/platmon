@@ -48,6 +48,7 @@
   <section><h2>Power · Fan</h2><div id="pwr"></div></section>
   <section><h2>Network</h2><div id="net"></div></section>
   <section><h2>Disk I/O</h2><div id="dio"></div></section>
+  <section><h2>Pressure</h2><div id="psi"></div></section>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -102,6 +103,13 @@ function diskRows(s) {
   }).join('');
 }
 
+// pressure stall information: the kernel's 10 s averages of the share of time tasks were stalled (not usage)
+function psiRows(s) {
+  const res = s.pressure && s.pressure.resources && typeof s.pressure.resources === 'object' ? s.pressure.resources : {};
+  const rows = Object.entries(res).map(([name, r]) => kv(esc(name), `some ${r.some.avg10.toFixed(1)}%` + (r.full ? ` · full ${r.full.avg10.toFixed(1)}%` : '')));
+  return rows.length ? '<div class="muted">avg10 · share of time stalled</div>' + rows.join('') : '';
+}
+
 // optional groups that could not read everything, as in cli.py; nothing for absent sensors or older servers
 function collectionNote(s) {
   const c = s.collectors && typeof s.collectors === 'object' ? s.collectors : {};
@@ -130,6 +138,7 @@ function render(s) {
     s.fans.map(f => kv('Fan ' + f.name, ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
   $('net').innerHTML = netRows(s);
   $('dio').innerHTML = diskRows(s);
+  $('psi').innerHTML = psiRows(s);
   document.querySelectorAll('section').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
 }
 

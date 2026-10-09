@@ -48,9 +48,10 @@ class Collected:
     clock: object
     network: object = None
     disk_io: object = None
+    pressure: object = None
 
 
-PASSIVE = (("network", "interfaces"), ("disk_io", "disks"))  # stats key, its list of values: one read each
+PASSIVE = (("network", "interfaces"), ("disk_io", "disks"), ("pressure", "resources"))  # stats key, its list of values: one read each
 
 
 def sensor_values(stats):

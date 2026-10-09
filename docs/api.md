@@ -22,7 +22,8 @@ service, `sensor_meta` next to them; answers without `schema_version` come from 
 and have no sample metadata. With `[network] enabled = yes` (the default) there is also `network`: the
 interface counters and rates of platmon's own network namespace, described in [network.md](network.md), and
 with `[disk_io] enabled = yes` (the default) `disk_io`: the I/O counters and rates of each physical disk, in
-[disk-io.md](disk-io.md).
+[disk-io.md](disk-io.md). With `[pressure] enabled = yes` (off by default) there is `pressure`: the kernel's
+pressure stall information, in [pressure.md](pressure.md).
 
 ```json
 {

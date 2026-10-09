@@ -30,7 +30,7 @@ def test_every_step_ran(steps):
                            "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout",
                            "cpu_warmup", "cpu_partial", "cpu_odd_reason",
                            "collection_bad", "collection_bad_then_down", "collection_ok", "collection_odd",
-                           "read_based_age", "counters", "counters_absent", "counters_odd"]
+                           "read_based_age", "counters", "pressure", "counters_absent", "counters_odd"]
     for s in steps.values():
         if s["step"] != "cpu_warmup":  # no CPU rows before the second reading, by design
             assert s["shows_data"], s     # the last good values stay on screen
@@ -145,3 +145,10 @@ def test_network_and_disk_rows(steps):
 def test_counters_absent_or_odd_show_nothing(steps):
     for step in ("counters_absent", "counters_odd"):
         assert steps[step]["net"] == "" and steps[step]["dio"] == "" and steps[step]["err"] == "", step
+
+
+def test_pressure_rows(steps):
+    psi = steps["pressure"]["psi"]
+    assert "avg10 · share of time stalled" in psi and "some 1.3%" in psi and "some 3.0% · full 0.5%" in psi
+    assert "cpu</span><span>some 1.3%</span>" in psi  # no full for the CPU: undefined at the system level
+    assert steps["counters_absent"]["psi"] == ""
