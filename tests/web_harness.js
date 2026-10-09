@@ -51,7 +51,7 @@ const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
-  net: el('net').innerHTML, dio: el('dio').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches,
+  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -155,6 +155,9 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
     disk_io: {scope: {kind: 'host_block_devices'}, provider: 'proc_diskstats', read: null, disks: [
       disk('nvme0n1', {read_bytes_per_s: 3 * 2 ** 20, write_bytes_per_s: 512, reads_per_s: 4, writes_per_s: 0.5, io_time_ratio: 0.034}, null, 2),
       disk('sda', null, 'counter_regressed')]}}), 'counters');
+  await next(ok({...meta('c', 9, 100), pressure: {scope: {kind: 'host'}, provider: 'proc_pressure', read: null, resources: {
+    cpu: {some: {avg10: 1.25, avg60: 0, avg300: 0, total_us: 1}, full: null},
+    io: {some: {avg10: 3, avg60: 0, avg300: 0, total_us: 1}, full: {avg10: 0.5, avg60: 0, avg300: 0, total_us: 1}}}}}), 'pressure');
   await next(ok(meta('c', 9, 100)), 'counters_absent');  // turned off, or an older server
   await next(ok({...meta('c', 10, 100), network: {interfaces: 'odd'}, disk_io: null}), 'counters_odd');
 })();

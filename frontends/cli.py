@@ -101,6 +101,11 @@ def counters_lines(s):
         out += ["NET   bytes/s, this process's network namespace"] + rows_of(net["interfaces"], "interfaces", network_line)
     if isinstance(dio, dict) and isinstance(dio.get("disks"), list) and dio["disks"]:
         out += ["IO    bytes/s per disk"] + rows_of(dio["disks"], "disks", disk_line)
+    psi = s.get("pressure")
+    res = psi.get("resources") if isinstance(psi, dict) else None
+    if isinstance(res, dict) and res:  # the kernel's 10 s averages: share of time tasks were stalled
+        out.append("PSI   " + "  ".join(f"{name} some {r['some']['avg10']:.1f}%" + (f" full {r['full']['avg10']:.1f}%" if r.get("full") else "")
+                                        for name, r in res.items()) + "  (avg10, time stalled)")
     return out
 
 

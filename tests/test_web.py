@@ -30,7 +30,7 @@ def test_every_step_ran(steps):
                            "old_request_aborted", "tab_return_check_503", "tab_return_check_timeout",
                            "cpu_warmup", "cpu_partial", "cpu_odd_reason",
                            "collection_bad", "collection_bad_then_down", "collection_ok", "collection_odd",
-                           "read_based_age", "counters", "counters_absent", "counters_odd"]
+                           "read_based_age", "counters", "pressure", "counters_absent", "counters_odd"]
     for s in steps.values():
         if s["step"] != "cpu_warmup":  # no CPU rows before the second reading, by design
             assert s["shows_data"], s     # the last good values stay on screen
@@ -185,3 +185,10 @@ def test_history_graphs(steps):
     eth0 = hist.split("eth0 rx")[1].split("</svg>")[0]
     assert eth0.count("M") == 1 and "L" not in eth0  # one point between two gaps: no line drawn across them
     assert steps["read_based_age"]["hist"] == "" and steps["read_based_age"]["hist_fetches"] == 2  # 404: stopped
+
+
+def test_pressure_rows(steps):
+    psi = steps["pressure"]["psi"]
+    assert "avg10 · share of time stalled" in psi and "some 1.3%" in psi and "some 3.0% · full 0.5%" in psi
+    assert "cpu</span><span>some 1.3%</span>" in psi  # no full for the CPU: undefined at the system level
+    assert steps["counters_absent"]["psi"] == ""

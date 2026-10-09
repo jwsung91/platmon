@@ -207,3 +207,10 @@ def test_render_limits_rows_and_says_how_many_were_left_out():
                                    {"network": {"interfaces": "odd"}, "disk_io": {"disks": 5}}, {"network": "odd"}])
 def test_render_without_counters_is_unchanged(extra):
     assert render(dict(FULL, **extra)) == render(FULL)
+
+
+def test_render_pressure_without_cpu_full():
+    psi = {"resources": {"cpu": {"some": {"avg10": 1.25}, "full": None},
+                         "io": {"some": {"avg10": 3.0}, "full": {"avg10": 0.5}}}}
+    assert render(dict(FULL, pressure=psi)).splitlines()[-1] == "PSI   cpu some 1.2%  io some 3.0% full 0.5%  (avg10, time stalled)"
+    assert render(dict(FULL, pressure={"resources": {}})) == render(FULL) == render(dict(FULL, pressure="odd"))

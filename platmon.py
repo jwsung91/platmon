@@ -18,6 +18,7 @@ from collector.disk_io import DiskCounters
 from collector.history import History
 from collector.network import NetworkCounters
 from collector.probe import Probe, parse_targets
+from collector.pressure import Pressure
 from collector.sampler import Sampler, pick_clock
 from collector.slow import Observations, Slow
 from collector.storage import Storage
@@ -34,6 +35,7 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "wifi": {"enabled": False, "interval": 5.0},
     "probe": {"enabled": False, "interval": 10.0, "timeout": 2.0, "targets": ""},
     "history": {"enabled": False, "retention": 600.0},
+    "pressure": {"enabled": False},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
@@ -122,9 +124,11 @@ def main(argv=None):
     network = NetworkCounters(clock[0], max_gap=max(3 * interval, 5.0)) if cfg["network"].getboolean("enabled") else None
     # per physical disk I/O counters of the host, the same way
     disk_io = DiskCounters(clock[0], max_gap=max(3 * interval, 5.0)) if cfg["disk_io"].getboolean("enabled") else None
+    # pressure stall information, where the kernel provides it (off by default: see docs/pressure.md)
+    pressure = Pressure(clock[0]) if cfg["pressure"].getboolean("enabled") else None
     # {} keeps what was logged about unreadable optional sensors, so a lasting failure is logged once.
     # The same clock times the CPU readings, every sensor read and the Sampler's collections.
-    sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io), interval,
+    sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io, pressure), interval,
                       clock=clock).start()
     # low-frequency groups, each on its own thread and cadence, served by /api/observations
     slow = [Slow(name, observe(), cfg[name].getfloat("interval"), clock[0])
