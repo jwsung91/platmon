@@ -175,3 +175,14 @@ def test_probe_from_observations(steps):
     assert "192.0.2.1:443</span><span>12.3 ms · failed 1/10" in probe
     assert "[2001:db8::1]:22</span><span>timeout · failed 3/3" in probe and "0.0 ms" not in probe
     assert steps["read_based_age"]["probe"] == ""
+
+
+def test_history_graphs(steps):
+    hist = steps["ok"]["hist"]
+    assert "last 10 min" in hist and "RAM used</span><span>2.0G" in hist and "<svg" in hist
+    assert "eth0 rx</span><span>no value" in hist  # the latest point is a gap: said so, not 0
+    assert "&#60;b&#62; tx" in hist and "<b>" not in hist
+    assert "cpu/0" not in hist and "unknown" not in hist  # only the series the page knows how to label
+    eth0 = hist.split("eth0 rx")[1].split("</svg>")[0]
+    assert eth0.count("M") == 1 and "L" not in eth0  # one point between two gaps: no line drawn across them
+    assert steps["read_based_age"]["hist"] == "" and steps["read_based_age"]["hist_fetches"] == 2  # 404: stopped

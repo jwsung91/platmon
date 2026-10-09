@@ -107,6 +107,7 @@ class Sampler:
         self._provenance_problem = None  # last logged reason for falling back to the cycle start
         self._ready = threading.Event()
         self._stop = threading.Event()
+        self.on_publish = None  # called with each published record (never to change it), e.g. History.append
         self._thread = None
 
     def start(self):
@@ -167,6 +168,11 @@ class Sampler:
                                 "completed_at": completed_at, "started": started, "completed": completed,
                                 "sensor_meta": sensor_meta, "oldest_read": oldest}
                 self._ready.set()
+        if reason is None and self.on_publish is not None:  # outside the lock; a failure there is not the core's
+            try:
+                self.on_publish(self._record)
+            except Exception as e:
+                print(f"platmon: history append failed: {e!r}", file=sys.stderr)
         return started
 
     def _provenance(self, recorded, stats, started, completed):

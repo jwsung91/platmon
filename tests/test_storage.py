@@ -250,7 +250,7 @@ def test_storage_runs_as_its_own_group_only_when_enabled(monkeypatch, tmp_path, 
             return self
     seen = {}
 
-    def frontend(sampler, cfg, observations):
+    def frontend(sampler, cfg, observations, history=None):
         seen["observations"] = observations
         raise Stop
     monkeypatch.setattr(platmon, "Sampler", lambda *a, **k: FakeSampler())

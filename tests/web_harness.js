@@ -39,8 +39,11 @@ const answers = [];  // what the next requests get, in order
 let fetches = 0;
 const obsAnswers = [];  // what /api/observations requests get, in order; a 404 (older server) when none is queued
 let obsFetches = 0;
+const histAnswers = [];  // /api/history answers, in order; 404 (off, or an older server) when none is queued
+let histFetches = 0;
 global.fetch = (url, opts) => {
   if (url === 'api/observations') { obsFetches++; return (obsAnswers.shift() || (() => Promise.resolve(reply(404, {}))))(); }
+  if (url.startsWith('api/history')) { histFetches++; return (histAnswers.shift() || (() => Promise.resolve(reply(404, {}))))(); }
   fetches++; return answers.shift()((opts || {}).signal);
 };
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
@@ -48,7 +51,7 @@ const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
-  net: el('net').innerHTML, dio: el('dio').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, obs_fetches: obsFetches,
+  net: el('net').innerHTML, dio: el('dio').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -70,6 +73,11 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
     probe: {state: 'ok', observation: {id: 4, data_age_ms: 1000, stale: false}, data: {provider: 'tcp_connect', timeout_ms: 2000, targets: [
       {address: '192.0.2.1', port: 443, connect_ms: 12.34, reason: null, attempts: 10, failures: 1, failure_ratio: 0.1},
       {address: '2001:db8::1', port: 22, connect_ms: null, reason: 'timeout', attempts: 3, failures: 3, failure_ratio: 1}]}}}}));
+  histAnswers.push(ok({schema_version: 1, retention_s: 600, interval_ms: 1000, dropped_series: 0, series: {
+    'memory/used_bytes': [[1, 3000, 2 ** 30], [2, 2000, 2 ** 31], [3, 1000, 2 ** 31]],
+    'network/netns1:x/2/eth0/rx_bytes_per_s': [[1, 3000, null], [2, 2000, 1024], [3, 1000, null]],
+    'network/netns1:x/3/<b>/tx_bytes_per_s': [[3, 1000, 5]],
+    'cpu/0/usage': [[1, 3000, 5]], 'unknown/series': [[1, 1, 1]]}}));
   answers.push(ok(SNAP));
   eval(code);  // the page script ends with tick()
   await settle(); report('ok');
