@@ -104,7 +104,7 @@ Raw files stay on each device in `~/platmon-diskbench-<sha>/raw-<alias>/results.
 | 2 | orin | `6e31ab33677f8f2b834349ca75c8cef6ff6e4a443b77350243249b1ae6bba59b` |
 | 2 | rpi4 | `eb8e2379fbb50c01547898e97fff1886e72393565b56ca5fc2fb3d8f984d04b9` |
 
-## Classification correctness follow-up (measurement pending)
+## Classification correctness follow-up (2026-10-09)
 
 The resumed audit found that the previous name-only cache survived device-number changes and whole-file
 failures, and permanently cached a missing sysfs link. The follow-up keys confirmed classifications by
@@ -117,3 +117,56 @@ two ABBA blocks per board, 8 windows, at most 50 minutes/16 windows per board in
 cause-driven optimization round. Acceptance stays CPU ≤2% and call elapsed p95 ≤2 ms, no new errors,
 overruns, freshness fallback or sustained memory growth. No stress load, operating setting change or
 production restart. The existing default-on decision is historical until this follow-up is measured.
+
+The already-running experiment completed successfully at 15:31 KST and was audited rather than
+repeated. Product and benchmark commit: `1eae3a4bd5ddc6395d6c9c871e6af60b61041f27`, product hash
+`4b1c82e1768ab6dd`, benchmark hash `5dcc5ddcf361cef8`. Both boards have eight valid, counted windows,
+two complete off/on/on/off blocks, with the exact conditions above. The report's scope/equivalence
+checks found no mismatch; off windows made zero Disk calls. Every window completed normally.
+
+| current classifier | Orin Nano | Raspberry Pi 4 |
+| --- | --- | --- |
+| Disk off CPU, four runs (%) | 1.593, 1.597, 1.596, 1.570 | 1.436, 1.315, 1.437, 1.439 |
+| Disk on CPU, four runs (%) | 1.715, 1.713, 1.717, 1.692 | 1.603, 1.623, 1.598, 1.634 |
+| off → on mean CPU (%) | 1.589 → **1.709** | 1.407 → **1.614** |
+| on − off (pp), by block | +0.119, +0.121 | +0.238, +0.178 |
+| collector CPU mean per collection, off → on (ms) | 13.848 → 15.036 (+1.188) | 9.709 → 11.691 (+1.982) |
+| HTTP handler CPU mean per request, off → on (ms) | 0.753 → 0.778 (+0.026) | 1.421 → 1.536 (+0.115) |
+| Disk call elapsed p95, pooled 480 calls (ms) | **1.263** (largest per-run p95 1.268) | **1.555** (1.560) |
+| failures / overruns / freshness fallbacks / HTTP errors | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+| RSS end, off → on mean (MiB) | 25.63 → 26.37 | 29.35 → 29.11 |
+
+CPU ≤2.0% and Disk call p95 ≤2 ms are met on each board by this classifier. This is new evidence for
+default-on eligibility, not a reuse of `e184f8c`. It does not establish the final History integration's
+CPU cost. Pi collection overhead is near the approximately 2 ms review criterion and is reported
+separately from request cost. Orin second-half RSS increased by 1560 KiB in one on window; all seven
+others increased by 4–8 KiB, and all Pi windows by at most 8 KiB. The isolated step did not repeat in
+the following on window; no sustained increase was observed in these finite windows.
+
+The before/after records match for production SHA `8525942`, INI hash, instance ID, governors and
+power mode, and for the Orin container ID/image/PID/start time/config/mounts/restart count and Pi
+process/PID/start time. The state recorder's own PID naturally differs. Orin uses Python 3.10.12,
+MAXN_SUPER/schedutil; Pi uses Python 3.13.5/ondemand. No production restart or configuration change.
+
+Raw files remain in `~/platmon-diskbench-1eae3a4/` on each board. Full SHA-256:
+
+| board | file | SHA-256 |
+| --- | --- | --- |
+| Orin | `raw-orin/results.jsonl` | `f22e6285e48b5979246261f7f561611c5b415efe647f32064e930483a62bdea7` |
+| Orin | `ops-before.json` | `6cb5d747536da13aefc2270d3f6de2ac2fbcd09c03c962c88a0ad65aa86bd076` |
+| Orin | `ops-after.json` | `06677def3f1dfeb52dba7684e712a6100f927b5bceefa164b2f0674fbcdeab13` |
+| Pi | `raw-rpi4/results.jsonl` | `381de384e9bbb0fb4394ed6bf591fa4c04bc3385d463a708049610119a6caee2` |
+| Pi | `ops-before.json` | `efb6e5eb9740380d3d6c6ea84c4cd6d14bf7d62c8211e4b89cc1f833ec84cdb1` |
+| Pi | `ops-after.json` | `3acee22d31a39dc9517746b0c62befaf18c3beeaf3f06cfc6c175422d75cbf13` |
+
+Recompute using the benchmark code at the measured SHA:
+
+```bash
+python3 benchmarks/cadence.py report --md raw-orin/results.jsonl
+python3 benchmarks/cadence.py report --md raw-rpi4/results.jsonl
+```
+
+Independent local validation of this PR: Python 3.12.3, `pytest -v`, 643 passed / 3 skipped;
+`git diff --check` passed. The skips concern two profiling capabilities and unsupported host PSI.
+The follow-up's Python 3.9 and 3.13 CI both passed; subsequent documentation commits do not change
+the measured product or benchmark files.
