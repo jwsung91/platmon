@@ -137,8 +137,9 @@ def test_network_and_disk_rows(steps):
     net, dio = steps["counters"]["net"], steps["counters"]["dio"]
     assert "rx 1.5 KiB/s · tx 0 B/s" in net and "errors 3/0 (rx/tx, total)" in net and "this process's network namespace" in net
     assert "&#60;img src=x onerror=alert(1)&#62;" in net and "<img" not in net  # a name is text, never HTML
+    assert "rx 2.0 · tx 0.0 packets/s · window 1.000 s" in net
     assert "warming up" in net and "some_new_reason" in net  # no rate: the reason, not 0
-    assert "read 3.0 MiB/s · write 512 B/s" in dio and "reads 4.0/s · writes 0.5/s · I/O time 3.4% · in flight 2" in dio
+    assert "read 3.0 MiB/s · write 512 B/s" in dio and "reads 4.0/s · writes 0.5/s · I/O time 3.4% · window 1.000 s" in dio and "in flight 2" in dio
     assert "counter went backwards" in dio and "saturat" not in dio
 
 
@@ -203,3 +204,17 @@ def test_history_uses_elapsed_spacing_and_low_frequency_units(steps):
     assert "latest point 2 s ago" in hist
     probe = hist.split("TCP 127.0.0.1:80")[1].split("</svg>")[0]
     assert "M0.0,26.0L20.0,14.0L200.0,2.0" in probe  # irregular 1 s then 9 s interval
+
+
+def test_optional_polling_is_bounded():
+    if NODE is None:
+        pytest.skip("node not installed")
+    subprocess.run([NODE, str(ROOT / "tests/web_optional_harness.js"),
+                    str(ROOT / "frontends/web/index.html")], check=True, timeout=30)
+
+
+def test_cached_history_age_keeps_advancing():
+    if NODE is None:
+        pytest.skip("node not installed")
+    subprocess.run([NODE, str(ROOT / "tests/web_history_age_harness.js"),
+                    str(ROOT / "frontends/web/index.html")], check=True, timeout=30)
