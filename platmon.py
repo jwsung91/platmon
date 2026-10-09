@@ -22,7 +22,7 @@ FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outpu
 
 DEFAULTS = {  # the type of each default is the type its config value must parse as
     "core": {"interval": 1.0},
-    "network": {"enabled": True},
+    "network": {"enabled": False},  # opt-in: its measured cost is over the 0.1 pp budget (docs/network.md)
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}

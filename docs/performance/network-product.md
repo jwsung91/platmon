@@ -6,6 +6,20 @@ product and bench code with `[network]` off (A) and on (B). Not the passive prot
 ([passive-cost-rebaseline.md](passive-cost-rebaseline.md), Network part 0.026 / 0.047 pp) are not used as
 a prediction or a pass.
 
+## Decision: opt-in (default off)
+
+After the two rounds below, the 0.1 pp budget for Network switched on is **not met** (`31b4bbc`: +0.160 pp
+Orin, +0.175 pp Raspberry Pi) and stays recorded as not met; it is not raised and no further
+micro-optimization is planned. Network ships as an opt-in feature with this measured cost stated:
+`[network] enabled` defaults to `no` (built-in default and the shipped `platmon.ini`), and
+`enabled = yes` gives the measured feature unchanged. This limits what the default installation costs;
+it does not lower the cost when enabled, and the whole-process 1 % target is not met either way.
+
+The default changed after the measurements, in a later commit. The code paths that were measured
+(`collect_recorded` with or without a `NetworkCounters`, selected explicitly by the bench's
+`--product-network`) did not change, so the off/on numbers were not measured again on that commit;
+they are the measurements of `8cc82b0` and `31b4bbc`.
+
 ## Result (2026-10-09, product `8cc82b0`)
 
 | | Orin Nano | Raspberry Pi 4 |
@@ -139,7 +153,13 @@ stay as they are; they are the result for that SHA.
   20.2 min of runs each (budget 30 min / 8 windows). Same boards, Python, scope (10 / 3 interfaces) and
   services; every run valid, every block comparable, 0 network calls in off runs, 0 failed collections,
   overruns, data-age fallbacks, HTTP or client errors; `get_throttled` 0x0 before and after every
-  Raspberry Pi run. The services were the same before and after (as above).
+  Raspberry Pi run. The services' state: the full record taken before this round was not kept (it was
+  in a temporary directory that is gone, and none was written on the devices). What remains is an excerpt
+  printed when it was taken (Orin container id, image, start time, restart count; both checkout SHAs;
+  power mode; governors; both services' `instance_id`; the Raspberry Pi PID; `get_throttled`), which the
+  state after the round matches. The INI hash, the rollback SHA256SUMS and the images after the round
+  match the first round's record. That is a comparison with earlier records, not a direct before/after
+  comparison of one full record.
 
 | board | block | off runs | on runs | on − off pp |
 | --- | --- | --- | --- | --- |
