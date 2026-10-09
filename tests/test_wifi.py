@@ -1,6 +1,7 @@
 """collector/wifi.py: /proc/net/wireless rows (format of net/wireless/wext-proc.c), the observation and the
 CLI lines. Fake file contents; the last test reads the host's file where there is one."""
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,7 +26,8 @@ def observe(source):
             raise source
         return source
     g = sysfs.Group("wifi")
-    return Wifi(read=read)(g), g.status()
+    return Wifi(read=read, netns=lambda: SimpleNamespace(st_dev=1, st_ino=2),
+                indexes=lambda: [(3, "wlan0")])(g), g.status()
 
 
 def test_connected_rows_from_the_boards():
@@ -62,7 +64,7 @@ def test_bad_rows_and_files():
 def test_observation_states(source, state, reason):
     out, status = observe(source)
     assert (status["state"], status["reason"]) == (state, reason)
-    assert out["provider"] == "proc_net_wireless" and out["scope"] == {"kind": "process_network_namespace"}
+    assert out["provider"] == "proc_net_wireless" and out["scope"]["kind"] == "process_network_namespace"
 
 
 def test_wifi_is_off_by_default_with_a_5_s_candidate_interval(tmp_path):
@@ -83,7 +85,25 @@ def test_cli_lines():
 
 
 def test_real_host_file():
-    out, status = observe(open("/proc/net/wireless").read() if os.path.exists("/proc/net/wireless") else FileNotFoundError(2, "x"))
+    group = sysfs.Group("wifi")
+    out = Wifi()(group)
+    status = group.status()
     assert status["state"] in ("ok", "unavailable", "partial")
     for i in out["interfaces"]:
         assert i["signal_dbm"] is None or i["signal_dbm"] < 0
+
+
+def test_observation_exports_known_interface_identity():
+    from collector.network import namespace_id
+    out, _ = observe(HEAD + PI)
+    assert out["scope"]["id"] == namespace_id(SimpleNamespace(st_dev=1, st_ino=2))
+    assert out["interfaces"][0]["ifindex"] == 3
+
+
+def test_unavailable_identity_is_not_invented():
+    def denied():
+        raise PermissionError(13, "denied")
+    g = sysfs.Group("wifi")
+    out = Wifi(read=lambda path: HEAD + PI, netns=denied, indexes=lambda: [])(g)
+    assert out["scope"]["id"] is None and out["interfaces"][0]["ifindex"] is None
+    assert g.status()["state"] == "partial"

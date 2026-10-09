@@ -52,7 +52,7 @@ def test_points_are_bounded_and_old_series_go_away():
     for n in range(1, 500):
         h.append(record(n, n * S))
     series, dropped = h.view(499 * S)
-    assert len(h._series["memory/used_bytes"]) == 62  # memory: retention / interval + 2 points at most
+    assert len(h._series["memory/used_bytes"]) == 61  # includes the point exactly at the retention boundary
     assert len(series["memory/used_bytes"]) == 61 and series["memory/used_bytes"][-1] == [499, 0.0, 1499]  # last 60 s
     later = {"stats": {"memory": {"used": 1}}, "sensor_meta": {}, "sequence": 550, "started": 550 * S}
     h.append(later)  # eth0, sda and the CPUs are not in it: kept until they are older than the retention
@@ -100,7 +100,33 @@ def test_only_published_snapshots_append_and_reads_never_do():
     for _ in range(20):
         s.read()
         s._stats_json()
-    assert [p[0] for p in h.view(c.ns)[0]["memory/used_bytes"]] == [1, 2]  # sequences 1 and 2: attempts 1 and 4
+    pts = h.view(c.ns)[0]["memory/used_bytes"]
+    assert [p[0] for p in pts if p[2] is not None] == [1, 2]  # attempts 1 and 4 only
+    assert [p[2] for p in pts] == [1001, None, 1004]  # the elapsed outage inserts a gap, not a sample
+
+
+def test_one_failed_core_attempt_breaks_the_line_on_recovery():
+    c = Clock()
+    calls = [0]
+
+    def collect():
+        calls[0] += 1
+        if calls[0] == 2:
+            raise OSError("one required read failed")
+        return stats(calls[0])
+
+    s = fake(collect, c)
+    h = History(retention=600, interval=1.0)
+    s.on_publish = h.append
+    for _ in range(3):
+        c.advance(1)
+        s._attempt()
+    pts = h.view(c.ns)[0]["memory/used_bytes"]
+    assert [p[0] for p in pts if p[2] is not None] == [1, 2]
+    assert [p[2] for p in pts] == [1001, None, 1003]
+    c.advance(1)
+    s._attempt()
+    assert [p[2] for p in h.view(c.ns)[0]["memory/used_bytes"]] == [1001, None, 1003, 1004]
 
 
 def test_a_failing_append_never_stops_the_core(capsys):
@@ -158,6 +184,132 @@ def test_history_endpoint(server):
     doc = json.loads(body)
     assert (code, headers["Content-Type"], headers["Cache-Control"]) == (200, "application/json", "no-store")
     assert list(doc["series"]) == ["memory/used_bytes"] and doc["retention_s"] == 600 and doc["interval_ms"] == 1000
-    for q in ("points=0", "points=601", "seconds=0", "seconds=601", "prefix=" + "x" * 129, "points=x"):
+    for q in ("points=0", "points=601", "seconds=0", "seconds=601", "prefix=" + "x" * 129, "points=x", "unknown=1", "unknown=", "points=2&points=3"):
         assert get(url + "/api/history?" + q)[0] == 400, q
     assert get(start(None) + "/api/history")[0] == 404  # history off
+
+
+def test_missing_series_and_elapsed_gap_do_not_join_values():
+    h = History(retention=60, interval=1)
+    h.append(record(1, S))
+    h.append({"sequence": 2, "started": 2*S, "stats": {}, "sensor_meta": {}})
+    h.append(record(3, 3*S))
+    assert [p[2] for p in h.view(3*S, prefix="memory/")[0]["memory/used_bytes"]] == [1001, None, 1003]
+    h.append(record(4, 20*S))
+    assert h.view(20*S, prefix="memory/")[0]["memory/used_bytes"][-2][2] is None
+    h.append(record(4, 20*S))
+    assert sum(p[0] == 4 and p[2] is not None for p in h.view(20*S)[0]["memory/used_bytes"]) == 1
+
+
+def test_downsampling_preserves_missing_bucket_and_newest():
+    h = History(retention=60, interval=1)
+    for n in range(1, 21):
+        r = record(n, n*S)
+        if n == 9:
+            r["stats"]["memory"]["used"] = None
+        h.append(r)
+    pts = h.view(20*S, prefix="memory/", points=4)[0]["memory/used_bytes"]
+    assert len(pts) <= 4 and pts[-1][2] == 1020
+    assert any(p[2] is None for p in pts)
+
+
+def test_low_observation_ids_append_once_independent_of_core_reads():
+    h = History(retention=60, interval=1)
+    o = {"id": 1, "started": S, "completed": S, "collector": {"state": "ok"},
+         "data": {"targets": [{"address": "127.0.0.1", "port": 80, "connect_ms": 0.0}]}}
+    for _ in range(10):
+        h.append_observation("probe", 10, o)
+    series = h.view(S)[0]
+    assert series["observation/probe/127.0.0.1:80/connect_ms"] == [[1, 0.0, 0.0]]
+    h.append_observation("probe", 10, {**o, "id": 2, "started": 11*S, "completed": 11*S,
+        "data": {"targets": [{"address": "127.0.0.1", "port": 80, "connect_ms": None}]}})
+    assert h.view(11*S)[0]["observation/probe/127.0.0.1:80/connect_ms"][-1][2] is None
+
+
+@pytest.mark.parametrize("name,interval,data", [
+    ("storage", 30, {"filesystems": [{"major": 8, "minor": 1, "device": "sda1", "fstype": "ext4",
+                                     "source": "/dev/sda1", "used_bytes": 100, "available_bytes": 200}]}),
+    ("wifi", 5, {"scope": {"id": "ns:a"}, "interfaces": [{"name": "wlan0", "ifindex": 2,
+                                                         "connected": True, "signal_dbm": -60}]}),
+    ("probe", 10, {"targets": [{"address": "127.0.0.1", "port": 80, "connect_ms": 1.0}]}),
+])
+def test_slow_history_releases_expired_points_after_retention(name, interval, data):
+    h = History(retention=600, interval=1)
+    for second in range(interval, 1801, interval):
+        h.append_observation(name, interval, {"id": second // interval, "started": second*S,
+            "completed": second*S, "collector": {"state": "ok"}, "data": data})
+    visible = h.view(1800*S, points=600)[0]
+    for sid, retained in h._series.items():
+        assert retained[0][1] >= 1200*S  # filtering the HTTP response alone does not release memory
+        assert len(retained) == 600 // interval + 1
+        assert len(visible[sid]) == len(retained)
+
+
+def test_series_slot_is_freed_before_accepting_replacement():
+    h = History(retention=60, interval=1, max_series=1)
+    h.append({"sequence": 1, "started": S, "stats": {"memory": {"used": 1}}})
+    h.append({"sequence": 2, "started": 100*S, "stats": {"cpu": [{"id": 0, "usage": 2}]}})
+    assert list(h.view(100*S)[0]) == ["cpu/0/usage"]
+
+
+def test_slow_callback_observes_publish_once_and_never_runs_under_lock(capsys):
+    from collector.slow import Slow
+    c = Clock()
+    h = History(retention=60, interval=1)
+    g = Slow("probe", lambda group: {"targets": [group.got({"address": "127.0.0.1", "port": 80, "connect_ms": 1})]},
+             10, lambda: c.ns)
+    def published(name, interval, record):
+        assert g.view()["observation"]["id"] == record["id"]  # would deadlock under group lock
+        h.append_observation(name, interval, record)
+    g.on_publish = published
+    g.observe_once()
+    for _ in range(5):
+        g.view()
+        h.view(c.ns)
+    assert len(h.view(c.ns)[0]["observation/probe/127.0.0.1:80/connect_ms"]) == 1
+    g.on_publish = lambda *args: 1/0
+    g.observe_once()
+    g.observe_once()
+    assert capsys.readouterr().err.count("observation history append failed") == 1
+    assert g.view()["observation"]["id"] == 3
+
+
+def test_wifi_history_requires_namespace_and_index_and_breaks_disconnection():
+    from collector.history import observation_points
+    data = {"scope": {"id": "ns:a"}, "interfaces": [{"name": "wlan0", "ifindex": 2,
+                                                    "connected": True, "signal_dbm": -60}]}
+    first = observation_points("wifi", data)
+    assert first == {"observation/wifi/ns:a/2/wlan0/signal_dbm": -60}
+    assert observation_points("wifi", {**data, "scope": {}}) == {}
+    data["interfaces"][0]["ifindex"] = 3
+    assert not set(first) & set(observation_points("wifi", data))
+    data["interfaces"][0]["connected"] = False
+    assert list(observation_points("wifi", data).values()) == [None]
+
+
+def test_storage_history_identity_and_independent_cadence():
+    h = History(retention=600, interval=1)
+    fs = {"major": 8, "minor": 1, "device": "sda1", "source": "/dev/sda1", "fstype": "ext4",
+          "used_bytes": 0, "available_bytes": 100}
+    o = {"id": 1, "started": S, "completed": S, "collector": {"state": "ok"},
+         "data": {"filesystems": [fs]}}
+    h.append_observation("storage", 30, o)
+    for n in range(1, 20):
+        h.append(record(n, n*S))
+    series = h.view(20*S, prefix="observation/storage/")[0]
+    assert len(series) == 2 and all(len(p) == 1 for p in series.values())
+    assert set(h.intervals()[sid] for sid in series) == {30000}
+    assert any(pts[0][2] == 0 for pts in series.values())
+    h.append_observation("storage", 30, {**o, "id": 2, "started": 31*S, "completed": 122*S})
+    assert all(pts[-1][2] is None for pts in h.view(122*S, prefix="observation/storage/")[0].values())
+
+
+def test_point_and_series_limits_even_at_fastest_cadence():
+    from collector.history import MAX_POINTS_PER_SERIES
+    h = History(retention=3600, interval=0.1)
+    for n in range(MAX_POINTS_PER_SERIES + 50):
+        h.append({"sequence": n, "started": n*100000000,
+                  "stats": {"cpu": [{"id": i, "usage": float(i)} for i in range(70)]}})
+    assert len(h._series) == 64
+    assert all(len(points) == MAX_POINTS_PER_SERIES for points in h._series.values())
+    assert h.dropped_series == 6 * (MAX_POINTS_PER_SERIES + 50)

@@ -3,11 +3,16 @@ only (no file, no database), for trend graphs. One point per published snapshot,
 writer thread; reading never adds points. Contract: docs/history.md.
 """
 import collections
+import hashlib
+import json
+import math
 import threading
 
 from .sysfs import pointer
 
 MAX_SERIES = 64
+MAX_POINTS_PER_SERIES = 3602
+MAX_ID_LENGTH = 512
 
 
 def points_of(stats, sensor_meta):
@@ -37,46 +42,125 @@ def points_of(stats, sensor_meta):
     return out
 
 
+def observation_points(name, data):
+    """Numbers from one independent observation; never read devices or recompute rates."""
+    out = {}
+    data = data or {}
+    if name == "storage":
+        for fs in data.get("filesystems") or []:
+            identity = [fs.get(k) for k in ("major", "minor", "device", "fstype", "source")]
+            token = hashlib.sha256(json.dumps(identity, separators=(",", ":")).encode()).hexdigest()[:24]
+            base = f"observation/storage/{fs['major']}:{fs['minor']}/{token}"
+            for field in ("used_bytes", "available_bytes"):
+                out[f"{base}/{field}"] = fs.get(field)
+    elif name == "wifi":
+        ns = (data.get("scope") or {}).get("id")
+        for item in data.get("interfaces") or []:
+            if ns is None or item.get("ifindex") is None:
+                continue  # a name alone is not an interface identity
+            sid = f"observation/wifi/{ns}/{item['ifindex']}/{item['name']}/signal_dbm"
+            out[sid] = item.get("signal_dbm") if item.get("connected") else None
+    elif name == "probe":
+        for target in data.get("targets") or []:
+            address = target["address"]
+            host = f"[{address}]" if ":" in address else address
+            out[f"observation/probe/{host}:{target['port']}/connect_ms"] = target.get("connect_ms")
+    return out
+
+
 class History:
-    """retention: seconds kept; interval: the collection interval, for the point limit per series."""
+    """Bounded independent timelines. Point id is a core sequence or a group's observation id.
+    Only publication callbacks append; HTTP reads only copy. Missing values remain explicit gaps."""
 
     def __init__(self, retention, interval, max_series=MAX_SERIES):
         self.retention, self._retention_ns = retention, round(retention * 1e9)
-        self._maxlen = int(retention / interval) + 2
-        self._max_series = max_series
+        self._interval = interval
+        self._maxlen = min(MAX_POINTS_PER_SERIES, int(retention / min(interval, 1.0)) + 2)
+        self._max_series = min(max_series, MAX_SERIES)
         self._lock = threading.Lock()
-        self._series = {}       # id -> deque of (sequence, elapsed ns of the snapshot's start, value)
-        self.dropped_series = 0  # new series not kept because max_series were already there
+        self._series = {}
+        self._seen = {}       # last time an identity was present, not the time of its missing marker
+        self._owners = {}     # series -> core, storage, wifi, probe
+        self._periods = {"core": interval}
+        self._latest = {}     # fixed publication domains -> (last id, last start ns)
+        self.dropped_series = 0
 
     def append(self, record):
-        """One published Sampler record (never changed, only read here)."""
-        values = points_of(record["stats"], record.get("sensor_meta"))
-        point = (record["sequence"], record["started"])
+        self._append("core", record["sequence"], record["started"], self._interval,
+                     points_of(record["stats"], record.get("sensor_meta")), record.get("gap_before", False))
+
+    def append_observation(self, name, interval, record):
+        if name not in ("storage", "wifi", "probe"):
+            return
+        values = observation_points(name, record["data"])
+        stale = record["completed"] - record["started"] > round(3 * interval * 1e9)
+        if stale or record["collector"]["state"] in ("error", "unavailable"):
+            values = {sid: None for sid in values}
+        self._append(name, record["id"], record["started"], interval, values)
+
+    def _append(self, owner, sequence, started, interval, values, gap_before=False):
+        gap_ns = round(max(3 * interval, 5.0) * 1e9)
         with self._lock:
+            last = self._latest.get(owner)
+            if last is not None and (sequence <= last[0] or started < last[1]):
+                return  # repeated or out-of-order publication cannot add a second point
+            self._latest[owner] = (sequence, started)
+            self._periods[owner] = interval
+            cutoff = started - self._retention_ns
+            for sid in [sid for sid, t in self._seen.items() if t < cutoff]:
+                del self._series[sid], self._seen[sid], self._owners[sid]
+            # Missing identities keep gaps, but those gaps do not keep a vanished identity alive.
+            present = set(values)
+            for sid in self._series:
+                if self._owners[sid] == owner and sid not in values:
+                    values[sid] = None
             for sid, value in values.items():
+                if len(sid) > MAX_ID_LENGTH:
+                    self.dropped_series += 1
+                    continue
                 series = self._series.get(sid)
                 if series is None:
                     if len(self._series) >= self._max_series:
                         self.dropped_series += 1
                         continue
                     series = self._series[sid] = collections.deque(maxlen=self._maxlen)
-                series.append((*point, value))
-            cutoff = record["started"] - self._retention_ns  # series not seen within the retention go away
-            for sid in [s for s, d in self._series.items() if d[-1][1] < cutoff]:
-                del self._series[sid]
+                    self._owners[sid] = owner
+                if sid in present:
+                    self._seen[sid] = started
+                while series and series[0][1] < cutoff:
+                    series.popleft()  # slow publishers must release expired points before reaching the count cap
+                if series and (gap_before or started - series[-1][1] > gap_ns):
+                    series.append((sequence, started - 1, None))  # explicit break after a stalled publisher
+                number = value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+                if number is not None and (abs(number) > 2**64 or not math.isfinite(number)):
+                    number = None
+                series.append((sequence, started, number))
+
+    def intervals(self):
+        """Per-series observation cadence, copied independently of point serialization."""
+        with self._lock:
+            return {sid: round(self._periods[owner] * 1000, 3) for sid, owner in self._owners.items()}
 
     def view(self, now, prefix="", seconds=None, points=300):
-        """{series id: [[sequence, age_ms, value], ...]} of the series starting with prefix, at most
-        `points` per series (evenly picked, newest kept) from the last `seconds`. A copy: safe to
-        serialize without the lock."""
         seconds = self.retention if seconds is None else min(seconds, self.retention)
         since = now - round(seconds * 1e9)
         with self._lock:
-            picked = {sid: [p for p in d if p[1] >= since] for sid, d in self._series.items() if sid.startswith(prefix)}
+            captured = {sid: list(d) for sid, d in self._series.items() if sid.startswith(prefix)}
             dropped = self.dropped_series
         out = {}
-        for sid, ps in picked.items():
-            step = max(1, -(-len(ps) // points))
-            ps = ps[::-1][::step][::-1]  # every step-th point, counted from the newest
+        for sid, samples in captured.items():
+            ps = [p for p in samples if since <= p[1] <= now]
+            if len(ps) > points:
+                if points == 1:
+                    ps = ps[-1:]
+                else:
+                    # Keep newest exactly. A bucket containing missing data remains a gap; do not
+                    # decimate away nulls and draw a line across an outage.
+                    older, reduced = ps[:-1], []
+                    for i in range(points - 1):
+                        bucket = older[i * len(older) // (points - 1):(i + 1) * len(older) // (points - 1)]
+                        end = bucket[-1]
+                        reduced.append((end[0], end[1], None if any(p[2] is None for p in bucket) else end[2]))
+                    ps = reduced + ps[-1:]
             out[sid] = [[seq, round((now - t) / 1e6, 3), v] for seq, t, v in ps]
         return out, dropped

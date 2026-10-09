@@ -159,6 +159,7 @@ class Sampler:
             sensor_meta, oldest = self._provenance(recorded, stats, started, completed)
         with self._lock:
             self._collecting_since = None
+            gap_before = self._failures > 0
             self._failures = 0 if reason is None else self._failures + 1
             self._attempt_result = {"state": "error" if reason else "ok", "reason": reason,
                                     "completed_at": completed_at, "duration_ns": duration,
@@ -167,7 +168,8 @@ class Sampler:
                 self._sequence += 1
                 self._record = {"stats": stats, "sequence": self._sequence, "started_at": started_at,
                                 "completed_at": completed_at, "started": started, "completed": completed,
-                                "sensor_meta": sensor_meta, "oldest_read": oldest}
+                                "sensor_meta": sensor_meta, "oldest_read": oldest,
+                                "gap_before": gap_before}  # internal history hint; failed attempts have no sample
                 self._ready.set()
         if reason is None and self.on_publish is not None:  # outside the lock; a failure there is not the core's
             try:
