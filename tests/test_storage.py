@@ -352,3 +352,10 @@ def test_cli_storage_lines_and_ages():
     for odd in (None, {}, {"groups": {}}, {"groups": {"storage": {"state": "starting", "observation": None, "data": None}}},
                 {"groups": "x"}):
         assert storage_lines(odd) == []
+
+
+def test_only_local_filesystem_lines_are_converted():
+    text = MOUNTS + "26 1 x:y / /odd rw - tmpfs tmpfs rw\n"  # a broken line of a type that is never read
+    mounts, bad = parse_mountinfo(text, {"ext4"})
+    assert [m[2] for m in mounts] == ["/", "/srv/bind dir"] and bad == []
+    assert parse_mountinfo(text)[1] == [("line8", "invalid_data")]  # without the filter it is reported

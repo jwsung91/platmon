@@ -75,7 +75,8 @@ users (`/media/<user>/...`); like the rest of the API, run platmon on trusted ne
 `collector` ([observations.md](observations.md)) uses the optional-group rules: an unreadable
 `/proc/partitions` or `/proc/self/mountinfo` (target `partitions` / `mountinfo`) leaves out what it would
 have given and keeps the rest; a mountinfo line that does not parse is left out (`line<N>`, `invalid_data`);
-a `statvfs` that fails is reported under the filesystem's device (`disappeared` when it was unmounted in
+only lines of the listed filesystem types are converted and checked (others, such as a broken tmpfs line,
+are never reported); a `statvfs` that fails is reported under the filesystem's device (`disappeared` when it was unmounted in
 between) and that filesystem stays listed without numbers. Nothing found at all is `unavailable`
 (`not_detected`).
 
