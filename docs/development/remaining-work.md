@@ -9,6 +9,98 @@ Last update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7f
 (`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
 implementation; merging alone does **not** complete the expanded validation requirements.
 
+## Final candidate checkpoint — aggregate merge
+
+The owner authorized necessary merges on 2026-10-09. #40, #43, #41, #42 and #44 are merged;
+component main is `e3ff8bbd565fd8d080e104fe7cfac02f6a97a2e8`. No production rollout was performed.
+Six of the seven requested stages are complete; stage 7 has its reports/PRs prepared and closes
+with [#46's merge and merged-main CI](https://github.com/jwsung91/platmon/pull/46). This is the
+pre-merge checkpoint; the PR records the final aggregate merge SHA and CI outcome.
+
+| Requested stage | Completed evidence / disposition |
+| --- | --- |
+| 1 Current state | latest remote/board work audited; existing raw reused only where applicable |
+| 2 Frontend #40 | request lifecycle/age/escaping regressions, Node, actual 1280/390 Chromium, 661 s final-page soak |
+| 3 Disk #41 | independent current-classifier ARM ABBA twice; CPU/p95 pass; main merge verified |
+| 4 History #42 | independent IDs, gaps, strict expiry, native Wi-Fi identity, bounded 1830 s ARM retention and UI integration |
+| 5 Local integration | 676 passed / 3 skipped; Python 3.9 CI 678/1, Python 3.13 CI 677/2; compatibility/concurrency/API/resource bounds |
+| 6 Final ARM/deployment forms | both default CPU matrices pass; native cleanup and actual isolated Orin compose complete; systemd static-only and unsupported paths disclosed |
+| 7 Documentation/PR delivery | final report and component PR bodies updated; final aggregate disposition is linked above |
+
+Final measured runtime: `aac7ed796faf2be0e387312c04a78925198fe11d`. The
+[complete results and hashes](../performance/history-expiry-validation.md) distinguish it from
+preserved pre-correction `30d377a` and `65bcc39` measurements. Two reproduced History defects were
+fixed: a single failed core attempt hiding a graph gap, and expired slow observations remaining
+internally until the point cap filled. Focused 53/53 and failing-before regressions cover both.
+
+Default CPU: Orin 1.600–1.678%, Pi 1.529–1.583%, every window <=2%. Optional Orin short window
+2.174% and long all-on 2.079%/2.019% exceed 2%; Storage/Wi-Fi call p95 also exceeds 2 ms. These are
+not passes, no window was discarded and no threshold was raised. Network/Disk stay on; all other
+groups stay off. Final-period RSS settles with the documented small page variations; this finite
+observation is not an indefinite plateau claim. Every native candidate exits and releases its port.
+
+Orin compose is healthy under UID 65534, read-only rootfs/host binds, cap-drop and no-new-privileges.
+Network is container-only; host-visible sensors and Disk are available, Storage file-bind capacity
+is null/partial, Wi-Fi unavailable, and one startup loopback Probe failure is retained. Its test
+container/network/port are reclaimed, its local image is kept, and all 12 prior images/35 rollback
+files remain. Pi has no matching rollback directory in the recorded search scope.
+
+Production remains `85259427f20ba09c9541c52970243fc07645d21d` on both boards, with before/after
+identity/configuration/governor/power records unchanged. Actual DynamicUser execution is unavailable
+without administrator authentication (unit static verification passed); normal ARM PSI and remote
+TCP paths remain unvalidated. No production, kernel, power, tag, Release or registry operation.
+These limits remain explicit; they do not authorize privilege workarounds or a default-on change.
+
+PR #45's complete ancestry and validation work are preserved in #46; it must not be merged again
+as a separate aggregate. Raw/state/CI/scripts/screenshots remain in `.validation/expiry-rc-evidence/`
+and earlier evidence directories, with durable `~/platmon-expiry-rc-aac7ed7/` copies on both boards.
+No further performance round is scheduled. Deployment requires its own fixed-SHA backup/approval.
+
+## Historical checkpoint — resumed integration
+
+The eight requested stages have **4/8 completed within the documented support scope** (1, 2, 3, 5).
+Stages 4 and 6 have implementation/automated checks but environment or target validation gaps;
+stage 7 has working retention and bounded-allocation evidence but insufficient real post-fill duration
+for long-term stability; stage 8 remains Draft. No stage count includes merge or deployment.
+
+Main is unchanged at `e1e7c9f38bfac83e9844ddb8110a9eae08a7fb5a`. Production on both boards is
+`85259427f20ba09c9541c52970243fc07645d21d`, verified before/after the experiments. The original
+#32–#39 were already merged when this task resumed. They were reused, not rebuilt.
+
+| Stage | Current state | Follow-up PR / branch / verified code HEAD | Evidence / remaining limit |
+| --- | --- | --- | --- |
+| 1 Disk | complete, review ready | #41 `fix/disk-classification-identity` / `2aa7d793df552688ae39aced58020fe4c2ae551e` | measured `1eae3a4`, 8 windows per ARM, CPU and p95 pass; default on |
+| 2 UI | complete, review ready | #40 `fix/frontend-observation-contract` / `ee3142247093b95780a6e881232075c2b8264531` | bounded polling, age, units; actual Chromium 1280/390, XSS, 503, timeout, synthetic visibility event |
+| 3 Storage | complete for directory mounts, review ready | #43 `fix/storage-mount-race` / `e0dee298f6c50af9ec4c5e9adcdf5c6e3cf12ed5` | descriptor identity fix; ARM normal path; container file-bind capacities unavailable; off, call p95 fails |
+| 4 PSI | normal ARM validation blocked by unsupported kernels | existing #35 in main | fixtures and hosted Linux normal path pass; both ARM/WSL lack pressure files; off |
+| 5 Wi-Fi | complete for documented provider, review ready | #44 `fix/wifi-connection-state` / `ab875197e3708347f4031a25866126879f357a13` | carrier/ifindex validation; real negative dBm on both ARM; off, call p95 fails |
+| 6 TCP probe | remote validation waiting for approved target | existing #37 in main | fake/deadline/error and own loopback checks; no arbitrary target; off |
+| 7 History | implementation/tests complete; extended stability pending | #42 `feat/history-observation-contract` / `9555c235d999c45fd5899f4a48d1e77e099e44e1` | independent low-frequency append, gaps, strict limits; 660 s ARM retention; only 60 s after fill, no long-term plateau claim; off |
+| 8 Integration | Draft; systemd access blocked | #46 `integration/resumed-release-readiness` | measured `e919baf72a5c5100dd5468188fcc97b119b287f6`; combined #45 follow-up at `2a0e209`; final documentation HEAD is the commit containing this checkpoint |
+
+PR #45 (`integration/post-integration-rc`, `8df75e8`) was reconciled into #46, retaining its UI/tests/bench
+improvements and this task's Storage/Wi-Fi fixes. Its earlier open-gate report is historical context;
+[resumed results](../performance/resumed-integration-results.md) supersede the pending ARM entries.
+#42 depends on #41; #44 depends on #42; #46 includes #40–#45. Review component diffs against their PR
+bases, not the full aggregate as a new feature. No force-push, main merge or commit rewrite.
+
+Validation: final combined `pytest -v` **672 passed / 3 skipped** (Python 3.12); all Node harnesses run
+through pytest; actual Chromium fixture passed after reconciliation. Before the display-only
+reconciliation, #46 CI run 37898089620 passed 672/1 (3.9), 671/2 (3.13), including hosted real PSI and
+Node. Final exact-HEAD CI is linked in PR #46; its original logs are retained privately. See the release
+readiness page for the complete evidence boundaries and commands.
+
+Private raw/state/CI/screenshots: `.validation/20261009-resume/`, and durable board directories
+`~/platmon-diskbench-1eae3a4/` and `~/platmon-resume-e919baf/`. Both suites ended normally. Older raw and
+rollback material remain intact. Operational records are private; public reports contain anonymized
+summaries and hashes. No extra ARM performance rounds after the predeclared budget.
+
+Next executable gate: isolated production-style systemd validation with existing administrator
+authentication. `sudo -n true` requires a password on the available hosts; no credential request,
+new capability or production-unit change is used to bypass it. Extended history stability needs a
+separately recorded experiment budget. Remote TCP needs an owner-selected allowlisted target; PSI
+normal ARM validation needs an already-supported environment, without reboot/kernel changes.
+
 ## Merge checkpoint (2026-10-09)
 
 The owner authorized necessary merges. #40 is merged at `4b1bc080`; its lifecycle tests and

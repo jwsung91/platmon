@@ -4,6 +4,15 @@ What the opt-in groups of [../observations.md](../observations.md) (storage, Wi-
 the recent history ([../history.md](../history.md)) cost, judged by [budget.md](budget.md). All of them are
 **off by default**, so none of this enters the default configuration's 2.0 % target.
 
+Post-integration audit: the new #42 observation identity/gap implementation still needs real ARM
+retention and changed Wi-Fi cost evidence. Its cached latest-point age fix is in `9555c23`. A synthetic
+64 × 3602-point test with frequent gaps retained 21,667,030 bytes and peaked at 27,937,318 bytes including
+one 600-point read/JSON (900,411 bytes for the series object). This is Python 3.12 allocation accounting,
+**not ARM RSS**. The original 22.5/28.8 MB synthetic result remains in [history.md](../history.md).
+The new physical-board attempt was interrupted because another suite overlapped; no result from that
+attempt is counted. See [current validation gates](../development/post-integration-validation.md).
+All measured costs below remain attached to their original SHAs; Storage/Wi-Fi p95 misses are unchanged.
+
 A group observed every 30 s gives 4 observations per 120 s window, too few for an off/on process
 comparison. Each observation is therefore timed itself, on the product path
 (`Slow.observe_once` → the group's observe function), at the real cadence and at a shorter one for more
@@ -65,3 +74,11 @@ the runs is the same (round 1: a record before only). Raw files stay on the devi
 | rpi4 round 1 storage-30s.json / storage-5s.json | `ac0d60bc…` / `255ef1e3…` |
 | orin round 2 storage-30s / storage-5s / wifi-5s | `bafda063…` / `32b7921d…` / `cd27f805…` |
 | rpi4 round 2 storage-30s / storage-5s / wifi-5s | `242718b8…` / `52a77b3d…` / `cf7b08d7…` |
+
+## Resumed combined path
+
+The [2026-10-09 resumed results](resumed-integration-results.md) supersede earlier cost claims for
+Storage descriptor verification, Wi-Fi carrier checks and low-frequency history. Runtime `e919baf`:
+20 Storage calls at 30 s and 60 Wi-Fi calls at 5 s per board; 660 s real history retention plus two
+integrated ABBA blocks. All remain optional. The finite retention run does not prove a long-term
+RSS plateau. Old results above remain historical and are not relabeled as the corrected path.
