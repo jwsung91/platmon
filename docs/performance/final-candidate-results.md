@@ -53,16 +53,33 @@ null/io_error as documented; no unsupported sensor path is presented as tested h
 
 ## Retention and deployment forms
 
-The single 1830 s retention run is in progress on both boards. Final post-fill RSS/PSS, identity,
-point bounds and operational comparison are pending. Orin's isolated compose check follows the
-measurements, so a build cannot contaminate them. Pi `systemd-analyze verify platmon.service` exits
-0; actual DynamicUser execution is unavailable because administrator authentication is required.
+Both 1830 s baseline retention runs completed normally, with no HTTP errors, core diagnostic
+errors, logged failures/drops or observed overruns. All three slow groups were ok (final IDs:
+Storage 62, Wi-Fi 367, probe 184). Measured history IDs are unique; Wi-Fi namespace/index matches
+the network snapshot. Six threads remained constant; every test PID/listener exited cleanly.
+
+| Board | All-on CPU % over 1800 s | RSS KiB start / 600 s / 1200 s / final | Post-fill RSS slopes KiB/min | Series / max response points |
+| --- | --- | --- | --- | --- | --- |
+| orin | 2.092 | 23944 / 28180 / 28572 / 28620 | 20.03 / 21.03 | 41 / 600 |
+| pi | 1.993 | 24916 / 26436 / 26532 / 26560 | 6.35 / 2.31 | 20 / 600 |
+
+The longer Orin all-on result exceeds 2%; it is **not an all-on CPU pass**. The default CPU gate
+above passes independently. Selection remains explicit and all optional groups remain off.
+Small post-fill allocation growth remains: last-period endpoint RSS changed +44 KiB Orin / +28 KiB
+Pi; Orin also had nonmonotonic resident-page variation. Report these raw slopes and endpoints rather
+than claiming an exactly flat or indefinite plateau. Real RSS is separate from synthetic allocation
+bounds. Each retention poller missed one intermediate sequence; observed timing is not all-attempt timing.
+Full history responses were 557,968 / 230,263 JSON bytes. No synthetic result substitutes for these.
+
+Production checkout/INI/instance/governors and original process/container identity matched before/after
+at `8525942`, with ready health. The correction round, including Orin compose, follows separately.
+Pi unit static verification exits 0; actual DynamicUser execution still requires administrator access.
 
 ## Evidence
 
 Raw windows, source, INIs, before/after state, input hashes and scripts remain in
 `~/platmon-final-rc-30d377a/` on each board and private `.validation/final-rc-evidence/` locally.
-The final result manifest will be recorded when the bounded run completes. Production remains
+Both input manifests (6 entries each) and result manifests were verified locally against raw bytes. Production remains
 `8525942`; no deployment, release, tag, registry push or old-image/raw cleanup is part of this run.
 
 Executed window command (the INI alone selects A/B, in ABBAABBA order):
@@ -77,3 +94,10 @@ The separate retention command uses `--ini all.ini --warmup 30 --measure 1800 --
 The preserved `run_final.py` supplies the remaining identical arguments, refuses an exhausted
 budget, checks results and snapshots production before/after. These commands target only the
 isolated archived directory and loopback port, never the production checkout.
+
+Verified baseline result manifests and retention raw SHA-256:
+
+| Board | SHA256SUMS file | retention.json |
+| --- | --- | --- |
+| orin | `6d0449a1b83da258af6cb2d371dc52255c93dbf2d44938a0c0b7a0b0d30f5935` | `c9b58851935ad595c533b9fe2299466e97ce9eac14cffcb87f2f8c79cf870b98` |
+| pi | `b1ea2449caa9c28361a84140aa6e3524400a67572033f9fe2af7feb1e0e5216d` | `296c266b40fb22909896fb8aab2234ef7548676b6406600982e0c754a19be283` |
