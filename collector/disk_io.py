@@ -23,9 +23,10 @@ class InvalidFile(ValueError):
     """/proc/diskstats as a whole is not the expected format."""
 
 
-def parse(text, wanted=lambda name: True):
+def parse(text, wanted=lambda name: True, identify=None):
     """({(major, minor, name): (r ios, merges, sectors, ms, w ios, merges, sectors, ms, in_flight, io_ms)},
-    [(target, why)]). Only rows whose name wanted() accepts are converted and checked: the others (virtual
+    [(target, why)]). identify, when supplied, selects by (major, minor, name).
+    Only rows whose name wanted() accepts are converted and checked: the others (virtual
     devices, partitions) are not reported on, as they are not collected. A row that does not parse is left
     out and reported (target: its name if that is a plain device name, else "line<N>"); a name on several
     rows is ambiguous, so none of them is used. Raises InvalidFile for text without any row: every Linux host
@@ -47,9 +48,11 @@ def parse(text, wanted=lambda name: True):
         if not wanted(name):
             continue
         try:
+            major, minor = counter(fields[0]), counter(fields[1])
+            if identify is not None and not identify((major, minor, name)):
+                continue
             if len(fields) < 3 + MIN_FIELDS:
                 raise ValueError(line)
-            major, minor = counter(fields[0]), counter(fields[1])
             values = [counter(f) for f in fields[3:3 + MIN_FIELDS]]
             for f in fields[3 + MIN_FIELDS:]:
                 counter(f)  # later fields are not used, but must be counters too
@@ -81,14 +84,15 @@ def is_physical(name, sys_block=SYS_BLOCK):
 class DiskCounters:
     """Kept by the service between collections, like NetworkCounters: each sample() reads /proc/diskstats
     once and compares every physical disk with its previous successful reading of the same major:minor and
-    name. Whether a name is a physical disk is looked up once while it stays listed."""
+    name. Confirmed classification is reused only while that identity stays listed;
+    absent sysfs links and failed lookups are retried."""
 
     def __init__(self, clock=time.monotonic_ns, max_gap=None, path=DISKSTATS,
                  read=read_file, physical=is_physical):
         self.clock, self._path, self._read, self._physical = clock, path, read, physical
         self._max_gap = None if max_gap is None else round(max_gap * 1e9)
         self._last = None  # (elapsed ns the reading began, {(major, minor, name): counters})
-        self._kind = {}    # name -> is_physical() result (None: a partition), for the last reading's names only
+        self._kind = {}    # (major, minor, name) -> confirmed bool; missing sysfs entries are retried
 
     def sample(self, group):
         """(disk_io output, read span or None). Problems are noted in group; a broken file gives no disks and
@@ -97,6 +101,7 @@ class DiskCounters:
             return self._sample(group)
         except Exception:
             self._last = None
+            self._kind = {}
             raise
 
     def _sample(self, group):
@@ -106,29 +111,32 @@ class DiskCounters:
             text = self._read(self._path).decode()
             span = (start, self.clock())
             kind = {}
-            rows, bad = parse(text, lambda name: self._is_physical(name, kind, group))
+            rows, bad = parse(text, identify=lambda key: self._is_physical(key, kind, group))
         except FileNotFoundError:
             self._last = None
+            self._kind = {}
             group.note("diskstats", "not_exposed")
             return out, None
         except OSError as e:
             self._last = None
+            self._kind = {}
             group.note("diskstats", reason_of(e), f"{self._path}: {e.strerror}")
             return out, None
         except (UnicodeDecodeError, InvalidFile):
             self._last = None
+            self._kind = {}
             group.note("diskstats", "invalid_data", self._path)
             return out, None
         for target, why in bad:
             group.note(target, why, self._path)
 
-        self._kind = kind  # only the names listed now: devices that come and go do not pile up
+        self._kind = kind  # only confirmed identities listed now; no unbounded cache
 
         last, now = self._last, start
         window = None if last is None else now - last[0]
         kept = {}
         for key in sorted(rows, key=lambda k: k[2]):
-            if not kind.get(key[2]):  # virtual, a partition, or not known
+            if not kind.get(key):  # virtual, a partition, or not known
                 continue
             row, rates = rows[key], None
             before = None if last is None else last[1].get(key)
@@ -160,17 +168,23 @@ class DiskCounters:
         return out, span
 
 
-    def _is_physical(self, name, kind, group):
-        """Whether name is collected, from the last reading's lookup or a new one, recorded in kind."""
-        if name in self._kind:
-            kind[name] = self._kind[name]
+    def _is_physical(self, key, kind, group):
+        """Reuse only a confirmed classification of the same device number and name."""
+        if key in self._kind:
+            kind[key] = self._kind[key]
         else:
+            name = key[2]
             try:
-                kind[name] = self._physical(name)
-            except OSError as e:  # not known whether it is a disk: left out, reported, looked up again next time
+                result = self._physical(name)
+            except OSError as e:
                 group.note(name, reason_of(e), f"{SYS_BLOCK}/{name}: {e.strerror}")
                 return False
-        return bool(kind[name])
+            if result is None:
+                # No /sys/block link can mean a partition OR a temporarily absent/restricted entry.
+                # Do not turn that ambiguity into a permanent negative cache.
+                return False
+            kind[key] = result
+        return bool(kind[key])
 
 
 def _rate(delta, window_ns):

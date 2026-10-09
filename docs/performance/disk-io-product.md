@@ -103,3 +103,17 @@ Raw files stay on each device in `~/platmon-diskbench-<sha>/raw-<alias>/results.
 | 1 | rpi4 | `9c22089891354f501822595218aa1b91656ef8f443d6018aa17eba1bcdab89b1` |
 | 2 | orin | `6e31ab33677f8f2b834349ca75c8cef6ff6e4a443b77350243249b1ae6bba59b` |
 | 2 | rpi4 | `eb8e2379fbb50c01547898e97fff1886e72393565b56ca5fc2fb3d8f984d04b9` |
+
+## Classification correctness follow-up (measurement pending)
+
+The resumed audit found that the previous name-only cache survived device-number changes and whole-file
+failures, and permanently cached a missing sysfs link. The follow-up keys confirmed classifications by
+major/minor/name, clears the cache on failed reads and retries missing links (including partitions).
+This changes collection cost: **the historical numbers above are not validation of this new path**.
+
+Plan before measurement: same signed product/bench SHA, Disk off/on with Network on in both arms,
+reference instrumentation, native 1 s collector and one 1 s client; 30 s warmup + 120 s per window;
+two ABBA blocks per board, 8 windows, at most 50 minutes/16 windows per board including at most one
+cause-driven optimization round. Acceptance stays CPU ≤2% and call elapsed p95 ≤2 ms, no new errors,
+overruns, freshness fallback or sustained memory growth. No stress load, operating setting change or
+production restart. The existing default-on decision is historical until this follow-up is measured.

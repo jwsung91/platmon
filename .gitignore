@@ -9,3 +9,6 @@ __pycache__/
 /.agents/skills/validate-change/
 /.agents/skills/prepare-commit/
 /GEMINI.md
+
+# Private device state and local validation artifacts
+/.validation/

@@ -1,7 +1,7 @@
 # Disk I/O counters
 
 `/api/stats` has a `disk_io` object while `[disk_io] enabled = yes` (the default). It holds the read and
-write counters of each **physical disk** of the host, read from `/proc/diskstats` once per collection by
+write counters of each selected **whole disk** visible to the process, read from `/proc/diskstats` once per collection by
 the collector thread, and rates over the time between two such readings. Nothing is written, probed or
 timed with a test load. It is separate from `disk` (the root filesystem's size and usage), which keeps
 its keys. General API rules (freshness, `collectors`, 503): [api.md](api.md).
@@ -34,7 +34,7 @@ its keys. General API rules (freshness, `collectors`, 503): [api.md](api.md).
 ## Which disks
 
 Included: whole disks whose `/sys/block/<name>` link resolves outside `devices/virtual/`, found by this
-rule on every reading, never by a list of names. On the boards platmon is checked on that is the
+rule for each newly observed device identity, never by a list of names. On the boards platmon is checked on that is the
 Jetson Orin Nano's `nvme0n1` and the Raspberry Pi 4's `mmcblk0`. This is a selection rule for the supported
 environments, not a general definition of "physical": sysfs placement is the kernel's, and an unusual
 driver can be placed otherwise.
@@ -47,8 +47,13 @@ Left out by default:
   device-mapper (LVM, LUKS) and md (software RAID). Their I/O is another layer: it reaches a physical
   disk below (shown) or memory (zram, not a disk). Logical volumes and zram may become options later.
 
-Whether a name is a whole physical disk is looked up once (one `readlink`) and reused while the name
-stays listed; a name that disappears is forgotten, and comes back with a new lookup and `warmup`.
+A confirmed whole-disk or virtual-device classification is reused only while the same name **and
+major/minor** remain listed across successful diskstats reads. A changed number is looked up again.
+Missing `/sys/block` entries are ambiguous (partition, temporary disappearance or restricted sysfs), so
+absence is retried, never cached permanently. Other lookup errors are reported and retried. A failed
+whole-file read clears the classification cache and rate baselines. A vanished identity is forgotten.
+Replacement with the same name and number between consecutive reads cannot always be detected; a
+counter regression still resets rates. This is not a persistent hardware identity.
 
 ## Fields
 
@@ -120,3 +125,7 @@ Then platmon makes no `DiskCounters`, reads neither `/proc/diskstats` nor `/sys/
 Shown on the web page, in the `platmon` command and `/text` (see [api.md](api.md#web-page)). Not collected: partitions, logical volumes, zram, discard and flush
 counters, the weighted time field, per-process I/O, SMART data, filesystem usage beyond `disk`,
 pressure stall information (PSI). Measured cost: [performance/disk-io-product.md](performance/disk-io-product.md).
+
+Official references checked during the resumed audit:
+[block statistics](https://docs.kernel.org/block/stat.html) (512-byte sectors and in-flight gauge),
+[I/O statistics](https://docs.kernel.org/admin-guide/iostats.html) (counter resets and Linux 5.0+ I/O time limits).
