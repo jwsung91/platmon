@@ -5,18 +5,20 @@ readiness). Checked against the repository and devices whenever work resumes. St
 progress, waiting for validation, blocked (access), waiting for approval. Merging, production rollout
 and releases always wait for the owner's approval.
 
-Last update: 2026-10-09 13:30 KST. main: `85259427f20b` (#31, Network on by default). Merge order if approved: #32 → #33 → #34 → #36 → #37 → #38, and #35 after #33.
+Last update: 2026-10-09. main: `007a422` (#32–#38 merged).
 
-| # | Stage | Status | Branch / PR (base) | HEAD | Evidence |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Disk I/O product | ready for review | `feat/passive-disk-io`, #32 (main) | `2d2c0c5` | CI 3.9/3.13; Orin/Pi off/on rounds `60962e3`, `e184f8c` ([disk-io-product.md](../performance/disk-io-product.md)); default on |
-| 2 | Network / Disk I/O in CLI, web, `/text` | ready for review | `feat/network-disk-view`, #33 (#32) | `050cdba` | CI; Chromium desktop/narrow screenshots; no collection change |
-| 3 | Storage capacity, low-frequency contract (`/api/observations`) | draft (cost measured; call p95 criterion not met, default off) | `feat/storage-capacity`, #34 (#33) | `1803480` | CI; Orin/Pi functional; per-observation cost, 2 rounds ([low-frequency.md](../performance/low-frequency.md)) |
-| 4 | PSI | ready for review (normal path not verifiable on the boards; default off) | `feat/pressure-metrics`, #35 (#33) | `2a926d8` | CI incl. a real `/proc/pressure` read on the hosted runner |
-| 5 | Wi-Fi signal (passive) | draft (cost measurement) | `feat/wifi-quality`, #36 (#34) | `e4f0c02` | CI; Orin/Pi functional |
-| 6 | TCP connect probe (opt-in) | draft; no approved remote targets: loopback and fakes only | `feat/rtt-probe`, #37 (#36) | `9ea8af1` | CI; Orin/Pi loopback |
-| 7 | Recent history (opt-in) | draft | `feat/recent-history`, #38 (#37) | `abe034b` | CI; memory bound measured locally |
-| 8 | Integration, release readiness | in progress | `integration/release-candidate` (not for merging) | see branch | integrated service runs on Orin/Pi |
+| # | Stage | Status | PR | Evidence |
+| --- | --- | --- | --- | --- |
+| 1 | Disk I/O product | merged; default on | #32 | Orin/Pi off/on rounds `60962e3`, `e184f8c` ([disk-io-product.md](../performance/disk-io-product.md)) |
+| 2 | Network / Disk I/O in CLI, web, `/text` | merged | #33 | Chromium desktop/narrow screenshots |
+| 3 | Storage capacity, `/api/observations` | merged; off (call p95 above 2 ms) | #34 | per-observation cost, 2 rounds ([low-frequency.md](../performance/low-frequency.md)) |
+| 4 | PSI | merged; off (normal path not verifiable on the boards) | #35 | CI real `/proc/pressure` read on the hosted runner |
+| 5 | Wi-Fi signal (passive) | merged; off (elapsed p95 above 2 ms) | #36 | Orin/Pi functional and cost |
+| 6 | TCP connect probe | merged; off; no approved remote targets | #37 | loopback and fakes only |
+| 7 | Recent history | merged; off | #38 | memory bound, integrated runs |
+| 8 | Integration, release readiness | merged with this page | #39 | integrated service on Orin/Pi ([release-readiness.md](../release-readiness.md)) |
+
+Not rolled out: #32–#38 (the devices run `8525942`, #31). Rolling them out is a separate decision.
 
 ## Rollouts
 

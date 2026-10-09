@@ -1,8 +1,10 @@
 # Release readiness (integration of #32–#38)
 
 Status of the features built on top of main `85259427f20b` (#31), checked together on the
-`integration/release-candidate` branch. That branch is for checking only: each feature is merged through
-its own PR, in order, after review. Nothing here is released, tagged or deployed.
+`integration/release-candidate` branch before they were merged. All of them are on main now (#32 → #33 →
+#34 → #36 → #37 → #38, then #35; main `007a422`); each was merged on its own PR with its tree checked equal to
+the PR head and main's CI green after it. Nothing here is released, tagged or deployed: the devices run
+`8525942` (#31), see below.
 
 ## Contents and defaults
 
@@ -17,8 +19,8 @@ its own PR, in order, after review. Nothing here is released, tagged or deployed
 | #37 | TCP connect probe (active) | off, no targets | `/api/observations` `probe` | [probe.md](probe.md) |
 | #38 | Recent history | off | `/api/history` (new) | [history.md](history.md) |
 
-Merge order: #32 → #33 → #34 → #36 → #37 → #38; #35 after #33. Stacked PRs show their base; each one's own
-commits are listed in its description.
+Merged in that order on 2026-10-09; #35 last, after #38, so its conflicts with the storage to history
+features were resolved once (taking the integration branch's resolution, checked against main).
 
 ## Compatibility
 
@@ -101,8 +103,9 @@ For each device, at a fixed merged SHA (the procedure used for earlier rollouts)
    Roll back (ROLLBACK.md) on a failed health check, a non-ready status for more than a minute, or CPU
    well above 2 % of one core.
 
-Pending approval as of 2026-10-09: the rollout of #31 (`8525942`) itself; the Orin candidate for it is
-built and smoke-tested and its rollback material exists ([development/remaining-work.md](development/remaining-work.md)).
+Rolled out on 2026-10-09: #31 (`8525942`) on the Orin (14:09 KST, container) and the Raspberry Pi
+(14:20 KST, native process), with this procedure ([development/remaining-work.md](development/remaining-work.md)).
+#32–#38 are merged but not rolled out.
 
 ## Raw data
 
