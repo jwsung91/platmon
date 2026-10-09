@@ -52,7 +52,7 @@ def test_points_are_bounded_and_old_series_go_away():
     for n in range(1, 500):
         h.append(record(n, n * S))
     series, dropped = h.view(499 * S)
-    assert len(h._series["memory/used_bytes"]) == 62  # memory: retention / interval + 2 points at most
+    assert len(h._series["memory/used_bytes"]) == 61  # includes the point exactly at the retention boundary
     assert len(series["memory/used_bytes"]) == 61 and series["memory/used_bytes"][-1] == [499, 0.0, 1499]  # last 60 s
     later = {"stats": {"memory": {"used": 1}}, "sensor_meta": {}, "sequence": 550, "started": 550 * S}
     h.append(later)  # eth0, sda and the CPUs are not in it: kept until they are older than the retention
@@ -224,6 +224,25 @@ def test_low_observation_ids_append_once_independent_of_core_reads():
     h.append_observation("probe", 10, {**o, "id": 2, "started": 11*S, "completed": 11*S,
         "data": {"targets": [{"address": "127.0.0.1", "port": 80, "connect_ms": None}]}})
     assert h.view(11*S)[0]["observation/probe/127.0.0.1:80/connect_ms"][-1][2] is None
+
+
+@pytest.mark.parametrize("name,interval,data", [
+    ("storage", 30, {"filesystems": [{"major": 8, "minor": 1, "device": "sda1", "fstype": "ext4",
+                                     "source": "/dev/sda1", "used_bytes": 100, "available_bytes": 200}]}),
+    ("wifi", 5, {"scope": {"id": "ns:a"}, "interfaces": [{"name": "wlan0", "ifindex": 2,
+                                                         "connected": True, "signal_dbm": -60}]}),
+    ("probe", 10, {"targets": [{"address": "127.0.0.1", "port": 80, "connect_ms": 1.0}]}),
+])
+def test_slow_history_releases_expired_points_after_retention(name, interval, data):
+    h = History(retention=600, interval=1)
+    for second in range(interval, 1801, interval):
+        h.append_observation(name, interval, {"id": second // interval, "started": second*S,
+            "completed": second*S, "collector": {"state": "ok"}, "data": data})
+    visible = h.view(1800*S, points=600)[0]
+    for sid, retained in h._series.items():
+        assert retained[0][1] >= 1200*S  # filtering the HTTP response alone does not release memory
+        assert len(retained) == 600 // interval + 1
+        assert len(visible[sid]) == len(retained)
 
 
 def test_series_slot_is_freed_before_accepting_replacement():
