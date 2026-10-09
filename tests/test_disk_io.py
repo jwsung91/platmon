@@ -47,7 +47,7 @@ class Host:
         self.lookups.append(name)
         if name in self.lookup_error:
             raise self.lookup_error[name]
-        return self.disks[name][2]
+        return self.disks[name][2] if name in self.disks else True  # a name only in h.text: a disk
 
     def counters(self, max_gap=5.0):
         return DiskCounters(self.clock, max_gap, read=self.read, physical=self.physical)
@@ -165,6 +165,16 @@ def test_bad_rows_are_left_out_and_others_kept():
     assert sorted(k[2] for k in rows) == ["sda", "sdf"]
     assert [t for t, _ in bad] == ["sdb", "sdc", "sdd", "sde", "dup", "line8", "line9"]
     assert all(r == "invalid_data" for _, r in bad)
+
+
+def test_rows_of_left_out_devices_are_not_converted_or_reported():
+    h = Host(sda=disk(8, 0), loop0=disk(7, 0, False), sda1=disk(8, 1, None))
+    h.text = (row(8, 0, "sda") + "\n7 0 loop0 x y\n8 1 sda1 -1\n").encode()
+    out, _, status = sample(h.counters())
+    assert [d["name"] for d in out["disks"]] == ["sda"] and status == {"state": "ok", "reason": None, "issues": [],
+                                                                     "issues_truncated": 0}
+    rows, bad = parse("7 0 loop0 x y\n", lambda name: False)
+    assert rows == {} and bad == []  # listed, so the file is not empty, but nothing to collect
 
 
 @pytest.mark.parametrize("text", [b"\xff\xfe", b"", b"\n\n"])

@@ -81,7 +81,8 @@ wrap; a wrap shows as `counter_regressed` for one reading.
 `collectors.disk_io` follows the optional-group rules ([api.md](api.md#optional-metrics)), as network does:
 a row that does not parse (fewer than 11 counters, a value that is not an unsigned 64-bit integer, an
 invalid name, a later field that is not a counter) is left out and reported as `invalid_data`, and a name
-on several rows leaves out all of them. A file that cannot be read, is not text or has no rows gives
+on several rows leaves out all of them. Only rows of collected disks are converted and checked; rows of
+left-out devices (virtual ones, partitions) are matched by name only and never reported. A file that cannot be read, is not text or has no rows gives
 `disks: []` and state `error` (`unavailable` with `not_exposed` if the file is not there). A host without
 a physical disk is `unavailable` with `not_detected`. A `/sys/block` lookup that fails is reported under
 the disk's name; that disk is left out and looked up again next time. An unexpected exception is

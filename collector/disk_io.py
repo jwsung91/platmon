@@ -23,11 +23,13 @@ class InvalidFile(ValueError):
     """/proc/diskstats as a whole is not the expected format."""
 
 
-def parse(text):
+def parse(text, wanted=lambda name: True):
     """({(major, minor, name): (r ios, merges, sectors, ms, w ios, merges, sectors, ms, in_flight, io_ms)},
-    [(target, why)]). A row that does not parse is left out and reported (target: its name if that is a
-    plain device name, else "line<N>"); a name on several rows is ambiguous, so none of them is used. Raises
-    InvalidFile for text that has no rows at all: every Linux host lists at least one block device."""
+    [(target, why)]). Only rows whose name wanted() accepts are converted and checked: the others (virtual
+    devices, partitions) are not reported on, as they are not collected. A row that does not parse is left
+    out and reported (target: its name if that is a plain device name, else "line<N>"); a name on several
+    rows is ambiguous, so none of them is used. Raises InvalidFile for text without any row: every Linux host
+    lists at least one block device."""
     rows, bad, seen = {}, [], {}
     for n, line in enumerate(text.split("\n"), 1):
         fields = line.split()
@@ -42,6 +44,8 @@ def parse(text):
             bad.append((name, "invalid_data"))
             continue
         seen[name] = None
+        if not wanted(name):
+            continue
         try:
             if len(fields) < 3 + MIN_FIELDS:
                 raise ValueError(line)
@@ -54,7 +58,7 @@ def parse(text):
             continue
         seen[name] = (major, minor, name)
         rows[seen[name]] = (*values[0:8], values[8], values[9])
-    if not rows and not bad:
+    if not seen and not bad:
         raise InvalidFile("no rows")
     return rows, bad
 
@@ -101,7 +105,8 @@ class DiskCounters:
         try:
             text = self._read(self._path).decode()
             span = (start, self.clock())
-            rows, bad = parse(text)
+            kind = {}
+            rows, bad = parse(text, lambda name: self._is_physical(name, kind, group))
         except FileNotFoundError:
             self._last = None
             group.note("diskstats", "not_exposed")
@@ -117,15 +122,6 @@ class DiskCounters:
         for target, why in bad:
             group.note(target, why, self._path)
 
-        kind = {}
-        for _, _, name in rows:
-            if name in self._kind:
-                kind[name] = self._kind[name]
-                continue
-            try:
-                kind[name] = self._physical(name)
-            except OSError as e:  # not known whether it is a disk: left out, reported, looked up again next time
-                group.note(name, reason_of(e), f"{SYS_BLOCK}/{name}: {e.strerror}")
         self._kind = kind  # only the names listed now: devices that come and go do not pile up
 
         last, now = self._last, start
@@ -162,6 +158,19 @@ class DiskCounters:
         if not out["disks"] and not group.reasons:
             group.note("disks", "not_detected")
         return out, span
+
+
+    def _is_physical(self, name, kind, group):
+        """Whether name is collected, from the last reading's lookup or a new one, recorded in kind."""
+        if name in self._kind:
+            kind[name] = self._kind[name]
+        else:
+            try:
+                kind[name] = self._physical(name)
+            except OSError as e:  # not known whether it is a disk: left out, reported, looked up again next time
+                group.note(name, reason_of(e), f"{SYS_BLOCK}/{name}: {e.strerror}")
+                return False
+        return bool(kind[name])
 
 
 def _rate(delta, window_ns):
