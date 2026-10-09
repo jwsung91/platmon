@@ -40,8 +40,9 @@ network counters: [docs/network.md](docs/network.md); disk I/O counters: [docs/d
 authentication. Run it on trusted networks only.
 
 The web page opens with an Overview of CPU, RAM, root filesystem capacity and available GPU,
-temperature and network readings. CPU is the mean of measured cores; network names the first
-non-loopback interface rather than summing overlapping interfaces. Resources, Network, Storage and
+temperature and network readings. CPU is the mean of measured cores; Network lists separate readings
+for up to four non-loopback interfaces, shows any omission count and links to the full Network tab.
+It does not infer an uplink or sum overlapping interfaces. Resources, Network, Storage and
 Temperature & power tabs show details and related recent history. System lists the platform, uptime,
 OS, kernel, architecture, hostname and available board-specific information such as L4T; power mode
 remains in Temperature & power. System updates only changed values and makes no optional API requests.

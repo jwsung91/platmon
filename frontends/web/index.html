@@ -34,6 +34,7 @@
   .metric strong { display: block; font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 8px 0; }
   .metric small { display: block; color: var(--muted); overflow-wrap: anywhere; }
   .metric h2 { margin: 0; overflow-wrap: anywhere; }
+  #overview-network-details a { color: var(--bar); }
   .empty { padding: 16px 0; color: var(--muted); }
   #history-panel { margin-top: 20px; }
   .history-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
@@ -81,6 +82,7 @@
   </div>
   <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
     <div id="overview" class="grid summary"><p class="empty">Waiting for data…</p></div>
+    <p id="overview-network-details" hidden><a href="#network">All network interfaces and details →</a></p>
   </div>
   <div id="panel-resources" role="tabpanel" aria-labelledby="tab-resources" tabindex="0" hidden>
     <div class="grid">
@@ -384,11 +386,16 @@ function overviewRows(s) {
     const [name, value] = temps.reduce((max, entry) => entry[1] > max[1] ? entry : max);
     html += metric('Highest temperature', value.toFixed(1) + ' °C', name);
   }
-  // Name the representative interface explicitly; summing physical and virtual interfaces double-counts traffic.
-  const iface = listOf(s.network, 'interfaces').find(i => i.name !== 'lo');
-  if (iface) html += metric('Network', iface.rates ? '↓ ' + perS(iface.rates.rx_bytes_per_s) : 'Unavailable',
-    iface.name + ' · ' + (iface.rates ? '↑ ' + perS(iface.rates.tx_bytes_per_s) + ' · first non-loopback interface'
-      : RATE_REASONS[iface.reason] || iface.reason));
+  // Show individual readings: names and traffic volume do not identify the host's uplink.
+  const interfaces = listOf(s.network, 'interfaces').filter(i => i.name !== 'lo');
+  if (interfaces.length) {
+    const shown = interfaces.slice(0, 4);
+    html += `<article class="metric"><h2>Network · ${interfaces.length} ${interfaces.length === 1 ? 'interface' : 'interfaces'}</h2>` +
+      shown.map(i => kv(esc(i.name), i.rates
+        ? `↓ ${perS(i.rates.rx_bytes_per_s)} · ↑ ${perS(i.rates.tx_bytes_per_s)}` : why(i))).join('') +
+      (shown.length < interfaces.length ? `<small>Showing ${shown.length} of ${interfaces.length}</small>` : '') +
+      '</article>';
+  }
   return html;
 }
 function renderResources(s) {
@@ -426,7 +433,10 @@ function renderSystem(s) {
 function renderActive() {
   if (!latestStats || !visible()) return;
   const s = latestStats;
-  if (activeTab === 'overview') $('overview').innerHTML = overviewRows(s);
+  if (activeTab === 'overview') {
+    $('overview').innerHTML = overviewRows(s);
+    $('overview-network-details').hidden = !listOf(s.network, 'interfaces').some(i => i.name !== 'lo');
+  }
   else if (activeTab === 'resources') renderResources(s);
   else if (activeTab === 'network') $('net').innerHTML = netRows(s);
   else if (activeTab === 'storage') {

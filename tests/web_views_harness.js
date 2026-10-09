@@ -38,6 +38,18 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   assert(el('overview').innerHTML.includes('Mean of 2 measured cores'));
   assert(el('overview').innerHTML.includes('60.0 °C') && el('overview').innerHTML.includes('&#60;b&#62;hot'));
   assert(el('overview').innerHTML.includes('eth0') && !el('overview').innerHTML.includes('999999'));
+  const networkOverview = interfaces => run('overviewRows({...latestStats, network: ' + JSON.stringify({interfaces}) + '})');
+  const rate = (name, rx) => ({name, rates: {rx_bytes_per_s: rx, tx_bytes_per_s: 0}});
+  const mixed = networkOverview([rate('br-example', 0), rate('eth0', 1024), rate('lo', 999999), rate('wlan0', 2048)]);
+  assert(mixed.includes('br-example') && mixed.includes('eth0') && mixed.includes('wlan0'), 'bridge does not hide physical interface readings');
+  assert(mixed.includes('1.0 KiB/s') && mixed.includes('2.0 KiB/s') && mixed.includes('0 B/s'));
+  assert(mixed.includes('3 interfaces') && !mixed.includes('first non-loopback'));
+  const many = networkOverview(Array.from({length: 20}, (_, n) => rate('iface-' + n, n)));
+  assert(many.includes('Showing 4 of 20') && !many.includes('iface-4<'), 'overview rows stay bounded');
+  const missing = networkOverview([{name: '<b>wifi</b>', rates: null, reason: 'warmup'}]);
+  assert(missing.includes('warming up') && missing.includes('&#60;b&#62;wifi') && !missing.includes('<b>'));
+  assert(!networkOverview([rate('lo', 1)]).includes('Network ·'));
+  assert(!networkOverview([]).includes('Network ·'));
   assert.equal(el('cpu').innerHTML, '', 'inactive resource view is not rendered');
   const overview = el('overview').innerHTML;
   await switchTo('resources');
