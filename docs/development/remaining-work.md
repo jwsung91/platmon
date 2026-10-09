@@ -9,11 +9,22 @@ Last update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7f
 (`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
 implementation; merging alone does **not** complete the expanded validation requirements.
 
-## Resumed work checkpoint
+## Merge checkpoint (2026-10-09)
 
-- Branch: `fix/frontend-observation-contract`, based on the baseline above; follow-up PR pending.
+The owner authorized necessary merges. #40 is merged at `4b1bc080`; its lifecycle tests and
+viewer fixes are preserved in this branch. #41 retains the independently measured classifier
+`1eae3a4` and the completed two-block ARM results in the Disk report. This merge resolves
+documentation only; classifier and measured collector code are unchanged. Integration #46
+contains the combined History, Storage and Wi-Fi work and is undergoing final bounded validation.
+Production rollout and release publication remain unapproved.
+
+## Historical resumed work checkpoint
+
+- Branch: `fix/disk-classification-identity`, based on the baseline above; Disk follow-up PR pending.
+  UI follow-up: #40, `33ada21`, signed; branch `fix/frontend-observation-contract`.
   Clean worktree at entry. No user changes were present.
-- Stage 1: previous implementation and ARM results retained; raw SHA-256 prefixes for the integrated
+- Stage 1: **in progress**. Three classification-cache regressions reproduced and fixed; focused
+  Disk/Network/provenance tests: **179 passed**. New ARM measurement required (plan in disk report); raw SHA-256 prefixes for the integrated
   `c2752c1` runs checked on both boards and matched. No collection changes in the UI follow-up.
 - Stage 2: in progress. Reproduced missing observation windows, hidden zero in-flight counters, duplicate
   hanging optional HTTP requests and cached observations not becoming stale. CLI/web fixes and regression
@@ -32,7 +43,7 @@ implementation; merging alone does **not** complete the expanded validation requ
   Node-backed web tests and real hosted-runner PSI tests executed. These are baseline, not follow-up CI.
 - Local baseline: `pytest -v`, Python 3.12, **640 passed / 3 skipped** with loopback allowed. The initial
   sandbox run failed on denied sockets; no assertions were weakened to accommodate the sandbox.
-- Next: finish the UI follow-up PR, then independently complete history and integration verification.
+- Next: commit and measure the Disk correctness fix; retain #40 for review, then complete history and integration verification.
   Nothing in this resumed task authorizes merging, production deployment or release publication.
 
 ## Historical implementation

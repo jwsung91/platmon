@@ -87,16 +87,17 @@ def test_only_physical_disks_with_rates_over_the_observed_window():
     assert by_name(sample(c)[0])["nvme0n1"]["rates"]["write_bytes_per_s"] == 0.0
 
 
-def test_kinds_are_looked_up_once_while_listed():
+def test_confirmed_kinds_are_reused_and_missing_links_retried():
     h = Host(sda=disk(8, 0), sda1=disk(8, 1, None), loop0=disk(7, 0, False))
     c = h.counters()
     for _ in range(3):
         sample(c)
         h.t += S
-    assert sorted(h.lookups) == ["loop0", "sda", "sda1"]
+    assert h.lookups.count("loop0") == h.lookups.count("sda") == 1
+    assert h.lookups.count("sda1") == 3
     del h.disks["sda"], h.disks["sda1"]
     sample(c)
-    assert set(c._kind) == {"loop0"}  # names that are gone are not kept
+    assert set(c._kind) == {(7, 0, "loop0")}  # names that are gone are not kept
     h.disks["sda"] = disk(8, 0)  # back: looked up again, and a new baseline
     h.t += S
     assert by_name(sample(c)[0])["sda"]["reason"] == "warmup" and h.lookups.count("sda") == 2
@@ -371,3 +372,33 @@ def test_real_host_reading():
         assert span is not None
         for d in out["disks"]:
             assert is_physical(d["name"]) is True
+
+
+def test_changed_device_number_rechecks_classification():
+    h = Host(sda=disk(8, 0, True))
+    c = h.counters()
+    assert by_name(sample(c)[0])["sda"]["reason"] == "warmup"
+    h.disks["sda"] = disk(8, 32, False)
+    h.t += S
+    assert sample(c)[0]["disks"] == []
+    assert h.lookups == ["sda", "sda"]
+
+
+def test_missing_sysfs_entry_is_retried_while_diskstats_name_remains():
+    h = Host(sda=disk(8, 0, None))
+    c = h.counters()
+    assert sample(c)[0]["disks"] == []
+    h.disks["sda"] = disk(8, 0, True)
+    h.t += S
+    assert by_name(sample(c)[0])["sda"]["reason"] == "warmup"
+
+
+def test_file_failure_discards_classification_cache():
+    h = Host(sda=disk(8, 0, True))
+    c = h.counters()
+    sample(c)
+    h.error = OSError(5, "unreadable")
+    sample(c)
+    h.error = None
+    h.disks["sda"] = disk(8, 0, False)
+    assert sample(c)[0]["disks"] == []
