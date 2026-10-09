@@ -6,7 +6,8 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const output = process.argv[3]; fs.mkdirSync(output, {recursive: true});
 const bad = '<img src=x onerror="globalThis.injected=1">';
-const snap = {platform: 'Linux', model: 'Fixture board', uptime: 60, power_mode: null, system: {},
+const snap = {platform: 'Linux', model: 'Fixture board', uptime: 3 * 86400 + 7 * 3600 + 41 * 60, power_mode: 'MAXN_SUPER',
+  system: {os: 'Ubuntu 22.04.5 LTS', kernel: '5.15.199-tegra', arch: 'aarch64', hostname: bad, l4t: 'R36.5.2'},
   cpu: [{id: 0, usage: 1, freq: null}], gpu: null, memory: {total: 8e9, used: 2e9, swap_total: 0},
   disk: {total: 10e9, used: 5e9}, temperature: {[bad]: 40}, power: {[bad]: 2}, fans: [{name: bad, rpm: 0, percent: null}],
   network: {interfaces: [{name: bad, rx: {errors: 0, dropped: 0}, tx: {errors: 0, dropped: 0}, window_ms: 1234,
@@ -51,6 +52,8 @@ const history = {retention_s: 600, series: {
       await page.setViewportSize({width, height: 900}); await page.goto('http://platmon.test/');
       await page.waitForFunction(() => document.querySelector('#overview').textContent.includes('Root filesystem'));
       assert(await page.locator('#panel-overview').isVisible());
+      assert(!(await page.locator('header').innerText()).includes('Ubuntu 22.04.5 LTS'));
+      assert(!(await page.locator('header').innerText()).includes('MAXN_SUPER'));
       assert.equal(await page.locator('#history-panel').isVisible(), false);
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'overview fits long interface names');
       await page.screenshot({path: path.join(output, `overview-${width}.png`), fullPage: true});
@@ -94,10 +97,21 @@ const history = {retention_s: 600, series: {
       await page.keyboard.press('ArrowRight');
       await page.keyboard.press('Enter');
       assert(await page.locator('#panel-network').isVisible());
-      for (const tab of ['storage', 'thermal']) {
+      for (const tab of ['storage', 'thermal', 'system']) {
         await page.locator('#tab-' + tab).click();
         assert(await page.locator('#panel-' + tab).isVisible());
         if (tab === 'storage') assert((await page.locator('#dio').innerText()).includes('in flight 0'));
+        if (tab === 'thermal') assert((await page.locator('#pwr').innerText()).includes('MAXN_SUPER'));
+        if (tab === 'system') {
+          assert.equal(await page.locator('#system-os').innerText(), 'Ubuntu 22.04.5 LTS');
+          assert.equal(await page.locator('#system-uptime').innerText(), '3d 07:41');
+          assert.equal(await page.locator('#system-hostname').innerText(), bad);
+          assert.equal(await page.locator('#system-hostname img').count(), 0);
+          assert.equal(await page.locator('#history-panel').isVisible(), false);
+          const before = [counts['/api/observations'], counts['/api/history']];
+          await page.waitForTimeout(1100);
+          assert.deepEqual([counts['/api/observations'], counts['/api/history']], before);
+        }
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), tab + ' fits narrow width');
         await page.screenshot({path: path.join(output, `${tab}-${width}.png`), fullPage: true});
       }
