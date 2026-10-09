@@ -120,7 +120,8 @@ def storage_lines(obs):
     head = f"STORAGE  observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
     out = [head]
     for f in data.get("filesystems") or []:
-        where = " ".join(m["path"] + (" (ro)" if m["read_only"] else "") for m in f["mount_points"])
+        first, more = f["mount_points"][0], len(f["mount_points"]) - 1  # bind mounts can be dozens
+        where = first["path"] + (" (ro)" if first["read_only"] else "") + (f" +{more} more" if more else "")
         dev = f["device"] or f"{f['major']}:{f['minor']}"
         if f["total_bytes"] is not None:  # a measured 0 is shown as 0
             pct = f" ({100 * f['used_bytes'] / f['total_bytes']:.0f}%)" if f["total_bytes"] else ""
