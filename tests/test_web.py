@@ -203,3 +203,10 @@ def test_history_uses_elapsed_spacing_and_low_frequency_units(steps):
     assert "latest point 2 s ago" in hist
     probe = hist.split("TCP 127.0.0.1:80")[1].split("</svg>")[0]
     assert "M0.0,26.0L20.0,14.0L200.0,2.0" in probe  # irregular 1 s then 9 s interval
+
+
+def test_cached_history_age_keeps_advancing():
+    if NODE is None:
+        pytest.skip("node not installed")
+    subprocess.run([NODE, str(ROOT / "tests/web_history_age_harness.js"),
+                    str(ROOT / "frontends/web/index.html")], check=True, timeout=30)

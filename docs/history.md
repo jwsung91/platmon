@@ -76,7 +76,7 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 With history on, the page shows a "History" panel: a small line per CPU, memory, temperature, network, disk and low-frequency
 series (at most 12, with an omission notice), the latest value next to it, "no value" when the latest point is a gap; a gap breaks the
 line. Horizontal position uses actual elapsed age, not equally spaced indexes. Each row says the latest
-point age; these are historical values, not a fresh live reading. It asks `/api/history?points=120` at most every 10 s while visible and stops after a 404. The
+point age, advanced with browser elapsed time between responses; these are historical values, not a fresh live reading. It asks `/api/history?points=120` at most every 10 s while visible and stops after a 404. The
 `platmon` command and `/text` do not show history.
 
 ## Not included

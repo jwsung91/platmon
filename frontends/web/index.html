@@ -164,7 +164,7 @@ function storageRows() {
 
 // Recent history (/api/history, off unless the service enables it): asked for at most every 10 s while
 // visible, never again after a 404. A null is a gap in the line (warmup, missing sample), never 0.
-let hist = null, histAsked = -Infinity, histSupported = true;
+let hist = null, histAt = 0, histAsked = -Infinity, histSupported = true;
 const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^observation\/storage\/([^/]+)\/[^/]+\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
   [/^observation\/wifi\/[^/]+\/\d+\/([^/]+)\/signal_dbm$/, m => `${m[1]} signal`],
@@ -196,7 +196,7 @@ function histRows() {
     rows.push(kv(esc(rule[1](id.match(rule[0]))), last == null ? 'no value' : id.startsWith('temperature') ? last.toFixed(1) + ' °C'
       : id.startsWith('cpu/') ? last.toFixed(1) + '%' : id.includes('/wifi/') ? last.toFixed(1) + ' dBm'
       : id.includes('/probe/') ? last.toFixed(1) + ' ms' : id.startsWith('memory') || id.includes('/storage/') ? gib(last) : perS(last)) +
-      `<div class="muted">latest point ${Math.round(latest[1] / 1000)} s ago</div>` + spark(points));
+      `<div class="muted">latest point ${Math.round((latest[1] + performance.now() - histAt) / 1000)} s ago</div>` + spark(points));
   }
   return rows.length ? `<div class="muted">last ${Math.round(hist.retention_s / 60)} min</div>` + rows.join('') +
     (Object.keys(series).filter(id => HIST_LABEL.some(([re]) => re.test(id))).length > rows.length
@@ -209,7 +209,7 @@ async function pollHist() {
   try {
     const r = await fetch('api/history?points=120', {cache: 'no-store'});
     if (r.status === 404) { histSupported = false; hist = null; }
-    else if (r.ok) hist = await r.json();
+    else if (r.ok) { hist = await r.json(); histAt = performance.now(); }
   } catch (e) { hist = null; }
   $('hist').innerHTML = histRows();
 }
@@ -318,7 +318,12 @@ async function tick() {
     showAge();
   }
 }
-setInterval(() => { showAge(); pollObs(); pollHist(); if (obs) { $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); } }, 1000);  // ages keep moving while a request hangs
+setInterval(() => {
+  showAge(); pollObs(); pollHist();
+  if (document.visibilityState !== 'visible') return;
+  if (obs) { $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); }
+  if (hist) $('hist').innerHTML = histRows();
+}, 1000);  // ages keep moving while a request hangs
 pollObs();
 pollHist();
 document.addEventListener('visibilitychange', () => {
