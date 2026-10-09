@@ -2,7 +2,7 @@
 
 A low-frequency group ([observations.md](observations.md)) named `probe`: the time to open a TCP
 connection to each configured target, every `[probe] interval` seconds (10 by default). This is the only
-**active** feature: it sends packets. It is **off by default**, probes nothing without configured targets,
+**active** feature: it sends packets. It is **enabled by default**, probes nothing without configured targets,
 and never picks a target by itself (no gateway, DNS server or public address).
 
 ```json
@@ -49,14 +49,16 @@ time never mixes in.
 
 ```ini
 [probe]
-enabled = no
+enabled = yes
 interval = 10       ; seconds, 1 to 3600
 timeout = 2         ; seconds per attempt, 0.1 to 10
 targets =           ; e.g. 192.0.2.10:443, [2001:db8::1]:22 (IP literals, at most 4)
 ```
 
-`enabled = yes` without targets, a host name, an IPv6 address without brackets, a duplicate, more than 4
-targets, or an interval not longer than timeout × targets are refused at start.
+With no targets, Probe stays idle: no worker, observation group or connection is created.
+Set targets and restart to begin probing; `enabled = no` disables it even with targets configured.
+A host name, an IPv6 address without brackets, a duplicate, more than 4 targets, or an interval
+not longer than timeout × targets are refused at start.
 
 Shown on the web page ("TCP connect") and in the `platmon` command and `/text` (`TCP` lines) with the
 observation's age.

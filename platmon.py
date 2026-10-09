@@ -31,11 +31,11 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "core": {"interval": 1.0},
     "network": {"enabled": True},  # measured cost: docs/performance/budget.md
     "disk_io": {"enabled": True},
-    "storage": {"enabled": False, "interval": 30.0},
-    "wifi": {"enabled": False, "interval": 5.0},
-    "probe": {"enabled": False, "interval": 10.0, "timeout": 2.0, "targets": ""},
-    "history": {"enabled": False, "retention": 600.0},
-    "pressure": {"enabled": False},
+    "storage": {"enabled": True, "interval": 30.0},
+    "wifi": {"enabled": True, "interval": 5.0},
+    "probe": {"enabled": True, "interval": 10.0, "timeout": 2.0, "targets": ""},
+    "history": {"enabled": True, "retention": 600.0},
+    "pressure": {"enabled": True},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
@@ -85,8 +85,6 @@ def load_config(path=None, frontends=None):
         targets = parse_targets(probe.get("targets"))
     except ValueError as e:
         raise ValueError(f"[probe] targets: {e}")
-    if probe.getboolean("enabled") and not targets:
-        raise ValueError("[probe] enabled = yes needs targets (address:port, comma-separated); nothing is probed by default")
     if targets and len(targets) * probe.getfloat("timeout") >= probe.getfloat("interval"):
         raise ValueError("[probe] interval must be longer than timeout × number of targets (they are probed one after another)")
     if frontends is not None:
@@ -124,18 +122,20 @@ def main(argv=None):
     network = NetworkCounters(clock[0], max_gap=max(3 * interval, 5.0)) if cfg["network"].getboolean("enabled") else None
     # per physical disk I/O counters of the host, the same way
     disk_io = DiskCounters(clock[0], max_gap=max(3 * interval, 5.0)) if cfg["disk_io"].getboolean("enabled") else None
-    # pressure stall information, where the kernel provides it (off by default: see docs/pressure.md)
+    # pressure stall information, where the kernel provides it (see docs/pressure.md)
     pressure = Pressure(clock[0]) if cfg["pressure"].getboolean("enabled") else None
     # {} keeps what was logged about unreadable optional sensors, so a lasting failure is logged once.
     # The same clock times the CPU readings, every sensor read and the Sampler's collections.
     sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io, pressure), interval,
                       clock=clock)
-    # low-frequency groups, each on its own thread and cadence, served by /api/observations
+    # Low-frequency groups, each on its own thread and cadence. With no configured targets,
+    # Probe stays idle: no worker, observation group or connection is created.
     slow = [Slow(name, observe(), cfg[name].getfloat("interval"), clock[0])
             for name, observe in (("storage", Storage), ("wifi", Wifi),
                                   ("probe", lambda: Probe(parse_targets(cfg["probe"].get("targets")),
                                                           cfg["probe"].getfloat("timeout"))))
-            if cfg[name].getboolean("enabled")]
+            if cfg[name].getboolean("enabled")
+            and (name != "probe" or parse_targets(cfg["probe"].get("targets")))]
     observations = Observations(slow, sampler.instance_id, clock[1])
     # recent numbers of the published snapshots, in memory only (docs/history.md)
     history = None

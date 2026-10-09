@@ -1,6 +1,6 @@
 # Pressure stall information (PSI)
 
-`/api/stats` has a `pressure` object while `[pressure] enabled = yes`. It is **off by default**. It holds
+`/api/stats` has a `pressure` object while `[pressure] enabled = yes`. It is **on by default**. It holds
 the kernel's pressure stall information from `/proc/pressure/{cpu,memory,io}`, read once per collection
 by the collector thread. Format and meaning: the kernel's Documentation/accounting/psi.rst.
 
@@ -65,8 +65,9 @@ The normal path (PSI present) is covered by fixtures and, where a CI host has PS
 
 Measured only in a tight loop on WSL, not as an ARM off/on comparison: the unsupported path (one directory
 check) takes about 1.8 µs per collection; parsing and building the output for three files, without the
-file reads, about 6 µs. Neither is the cost of the normal path on a board, which is unmeasured. That is
-why the default is off.
+file reads, about 6 µs. Neither is the cost of the normal path on a board, which is unmeasured.
+The default is now on by user policy; unavailable kernels retain their explicit unsupported result,
+and this does not establish a normal-path ARM performance result.
 
 ## Not included
 

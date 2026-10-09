@@ -228,30 +228,38 @@ def test_start_twice_is_one_thread():
 
 # ---------- config, wiring, HTTP ----------
 
-def test_storage_is_off_by_default_and_its_interval_is_checked(monkeypatch, tmp_path):
+def test_storage_is_on_by_default_and_its_interval_is_checked(monkeypatch, tmp_path):
     cfg = platmon.load_config()
-    assert not cfg["storage"].getboolean("enabled") and cfg["storage"].getfloat("interval") == 30.0
+    assert cfg["storage"].getboolean("enabled") and cfg["storage"].getfloat("interval") == 30.0
     for text, error in (("[storage]\ninterval = 1\n", "out of range"), ("[storage]\nenabled = sometimes\n", "valid bool")):
         with pytest.raises(ValueError, match=error):
             platmon.load_config(ini_file(tmp_path, text))
 
 
-@pytest.mark.parametrize("text, groups", [(None, []), ("[storage]\nenabled = yes\ninterval = 60\n", [("storage", 60.0)]),
-                                         ("[wifi]\nenabled = yes\n", [("wifi", 5.0)]),
-                                         ("[storage]\nenabled = yes\n[wifi]\nenabled = yes\n", [("storage", 30.0), ("wifi", 5.0)])])
-def test_storage_runs_as_its_own_group_only_when_enabled(monkeypatch, tmp_path, text, groups):
+@pytest.mark.parametrize("text, groups, history_on", [
+    (None, [("storage", 30.0), ("wifi", 5.0)], True),
+    ("[storage]\ninterval = 60\n", [("storage", 60.0), ("wifi", 5.0)], True),
+    ("[storage]\nenabled = no\n", [("wifi", 5.0)], True),
+    ("[wifi]\nenabled = no\n", [("storage", 30.0)], True),
+    ("[storage]\nenabled = no\n[wifi]\nenabled = no\n[history]\nenabled = no\n", [], False),
+    ("[probe]\ntargets = 127.0.0.1:9797\n", [("storage", 30.0), ("wifi", 5.0), ("probe", 10.0)], True),
+    ("[probe]\nenabled = no\ntargets = 127.0.0.1:9797\n", [("storage", 30.0), ("wifi", 5.0)], True),
+    ("[probe]\ntargets = , ,\n", [("storage", 30.0), ("wifi", 5.0)], True),
+])
+def test_slow_groups_and_history_follow_configuration(monkeypatch, tmp_path, text, groups, history_on):
     class Stop(Exception):
         pass
 
     class FakeSampler:
         instance_id, clock = "x", {"source": "fake"}
+        on_publish = None
 
         def start(self):
             return self
     seen = {}
 
     def frontend(sampler, cfg, observations, history=None):
-        seen["observations"] = observations
+        seen.update(observations=observations, sampler=sampler, history=history)
         raise Stop
     monkeypatch.setattr(platmon, "Sampler", lambda *a, **k: FakeSampler())
     monkeypatch.setitem(platmon.FRONTENDS, "http", frontend)
@@ -260,6 +268,11 @@ def test_storage_runs_as_its_own_group_only_when_enabled(monkeypatch, tmp_path, 
     with pytest.raises(Stop):
         platmon.main([ini_file(tmp_path, text)] if text else [])
     assert [(g.name, g.interval) for g in seen["observations"].groups] == groups
+    if history_on:
+        assert seen["sampler"].on_publish.__self__ is seen["history"]
+        assert all(g.on_publish.__self__ is seen["history"] for g in seen["observations"].groups)
+    else:
+        assert seen["history"] is None and seen["sampler"].on_publish is None
 
 
 def test_observations_endpoint():

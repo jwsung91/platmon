@@ -1,5 +1,5 @@
 """TCP connect time to configured targets, a low-frequency observation (collector/slow.py). Active: it opens
-a TCP connection to each target and closes it at once, so it is off by default and probes only the
+a TCP connection to each target and closes it at once. Enabled by default, but idle without
 targets listed in the config. This is the time to complete a TCP handshake (the SYN / SYN-ACK round trip
 plus the target's accept), not an ICMP echo round trip. Contract: docs/probe.md.
 """

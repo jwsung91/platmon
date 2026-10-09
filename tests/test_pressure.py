@@ -89,16 +89,16 @@ def test_the_read_spans_the_three_files():
     assert span == (1, 4)  # before the first read to after the last
 
 
-def test_off_by_default_and_on_when_asked(monkeypatch, tmp_path):
-    assert started(monkeypatch).args[5] is None
-    collect = started(monkeypatch, ini_file(tmp_path, "[pressure]\nenabled = yes\n"))
+def test_on_by_default_and_off_when_asked(monkeypatch, tmp_path):
+    assert started(monkeypatch, ini_file(tmp_path, "[pressure]\nenabled = no\n")).args[5] is None
+    collect = started(monkeypatch)
     assert isinstance(collect.args[5], Pressure) and collect.args[5].clock is collect.args[2]  # the service's clock
 
 
 def test_disabled_reads_nothing(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(Pressure, "sample", lambda *a: calls.append(a))
-    stats = started(monkeypatch).__call__().stats
+    stats = started(monkeypatch, ini_file(tmp_path, "[pressure]\nenabled = no\n")).__call__().stats
     assert calls == [] and "pressure" not in stats and "pressure" not in stats["collectors"]
 
 

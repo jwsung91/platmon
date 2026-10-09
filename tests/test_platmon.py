@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from platmon import load_config
+from platmon import DEFAULTS, load_config
 
 SHIPPED_INI = str(Path(__file__).parent.parent / "platmon.ini")
 
@@ -16,11 +16,24 @@ def test_defaults():
     assert enabled(cfg) == {"http"}
     assert cfg["http"].getint("port") == 9797 and cfg["http"].getboolean("web")
     assert cfg["core"].getfloat("interval") == 1.0
+    assert all(cfg[name].getboolean("enabled") for name in
+               ("network", "disk_io", "storage", "wifi", "pressure", "probe", "history"))
 
 
 def test_shipped_ini_matches_defaults():
-    assert {s: dict(load_config(SHIPPED_INI)[s]) for s in ("core", "network", "http")} == \
-           {s: dict(load_config()[s]) for s in ("core", "network", "http")}
+    shipped, builtin = load_config(SHIPPED_INI), load_config()
+    for section, options in DEFAULTS.items():
+        for key, default in options.items():
+            getter = {bool: "getboolean", int: "getint", float: "getfloat", str: "get"}[type(default)]
+            assert getattr(shipped[section], getter)(key) == getattr(builtin[section], getter)(key)
+
+
+def test_explicit_disabled_features_override_defaults(tmp_path):
+    features = ("network", "disk_io", "storage", "wifi", "pressure", "probe", "history")
+    ini = tmp_path / "disabled.ini"
+    ini.write_text("".join(f"[{name}]\nenabled = no\n" for name in features))
+    cfg = load_config(str(ini))
+    assert all(not cfg[name].getboolean("enabled") for name in features)
 
 
 def test_file_overrides_defaults(tmp_path):

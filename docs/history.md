@@ -2,7 +2,8 @@
 
 With `[history] enabled = yes`, the service keeps the last `retention` seconds (600 by default, 60 to
 3600) of selected numbers from its published snapshots, **in memory only** (no file, no database; a
-restart starts empty), and serves them at `/api/history` for trend graphs. **Off by default.**
+restart starts empty), and serves them at `/api/history` for trend graphs. **On by default**;
+`[history] enabled = no` disables recording and the endpoint.
 
 ```json
 {
