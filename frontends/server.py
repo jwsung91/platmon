@@ -36,7 +36,7 @@ def make_handler(sampler, web=True, observations=None, history=None):
     """observations: the service's collector.slow.Observations (low-frequency groups), or None.
     history: its collector.history.History, or None (then /api/history is 404)."""
     def observed():
-        return observations.view() if observations else {"schema_version": 1, "instance_id": sampler.instance_id,
+        return observations.view() if observations else {"schema_version": 2, "instance_id": sampler.instance_id,
                                                           "clock": dict(sampler.clock), "groups": {}}
 
     class Handler(BaseHTTPRequestHandler):

@@ -9,7 +9,7 @@ import time
 
 from . import sysfs
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class Slow:
