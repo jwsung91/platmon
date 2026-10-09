@@ -653,3 +653,28 @@ def test_service_cpu_measures_the_real_service(tmp_path):
     r = json.loads(out.read_text())
     assert r["exit"] == 0 and r["requests"]["stats"]["n"] >= 2 and r["requests"]["stats"]["errors"] == 0
     assert r["cpu_pct_one_core"] >= 0 and r["memory_end"]["rss_kib"] > 0
+    assert r['pid_gone'] and r['port_closed'] and not r['forced_kill']
+    assert r['requests']['history']['statuses'] == {}  # 2 s window: next optional poll not due
+    assert r['history_samples'] and len(r['health']) == 2
+    assert r['final_documents']['history_full']['retention_s'] == 600
+    assert r['observed_samples']['count'] >= 2 and r['observed_samples']['missing_sequences'] == 0
+    assert r['collection_failures_logged'] == r['stale_collections_dropped_logged'] == 0
+    # A stopped HTTPServer may leave TIME_WAIT sockets; the next window must still start.
+    service_cpu.main(["--ini", str(ini), "--port", str(port), "--warmup", "0", "--measure", "1",
+                      "--out", str(out)])
+    restarted = json.loads(out.read_text())
+    assert restarted['exit'] == 0 and restarted['port_closed'] and restarted['pid_gone']
+    assert restarted['health'][0]['instance_id'] != r['health'][0]['instance_id']
+
+
+def test_service_bench_rejects_an_occupied_port(tmp_path):
+    import socket
+    from benchmarks import service_cpu
+    with socket.socket() as occupied:
+        occupied.bind(('127.0.0.1', 0))
+        occupied.listen()
+        ini = tmp_path / 'test.ini'
+        ini.write_text('[http]\nbind = 127.0.0.1\n')
+        with pytest.raises(OSError):
+            service_cpu.main(['--ini', str(ini), '--port', str(occupied.getsockname()[1]),
+                              '--out', str(tmp_path / 'result.json')])

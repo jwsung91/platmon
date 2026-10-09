@@ -19,6 +19,16 @@ const obs = {groups: {wifi: {state: 'ok', stale_after_ms: 15000,
   storage: {state: 'ok', observation: {id: 1, data_age_ms: 1000, stale: false}, data: {filesystems: [
     {mount_points: [{path: '/long/' + 'mount'.repeat(40), read_only: true}], fstype: 'ext4', device: 'sda1',
       total_bytes: 4e9, used_bytes: 1e9, available_bytes: 3e9}], partitions: []}}}};
+const points = Array.from({length: 120}, (_, i) => [i + 1, (121 - i) * 1000, i % 7 === 0 ? null : i]);
+const history = {retention_s: 600, series: {
+  'memory/used_bytes': points,
+  'cpu/0/usage': points,
+  'observation/wifi/ns:1/2/wlan0/signal_dbm': [[1, 12000, -65], [2, 11000, null], [3, 2000, -64]],
+  'observation/probe/127.0.0.1:80/connect_ms': [[1, 12000, 1], [2, 11000, 2], [3, 2000, 3]],
+  'observation/storage/8:1/token/used_bytes': [[1, 30000, 1e9]],
+  'network/ns:1/3/<b>/rx_bytes_per_s': [[1, 3000, 5], [2, 2000, null]],
+  ...Object.fromEntries(Array.from({length: 58}, (_, i) => [`cpu/${i+1}/usage`, points]))
+}};
 (async () => {
   const browser = await chromium.launch({executablePath: process.argv[2], headless: true});
   try {
@@ -34,6 +44,7 @@ const obs = {groups: {wifi: {state: 'ok', stale_after_ms: 15000,
         return route.fulfill({status: mode === '503' ? 503 : 200, json: snap});
       }
       if (url.pathname === '/api/observations') return route.fulfill({json: obs});
+      if (url.pathname === '/api/history') return route.fulfill({json: history});
       return route.fulfill({status: 404, json: {}});
     });
     for (const width of [1280, 390]) {
@@ -46,6 +57,14 @@ const obs = {groups: {wifi: {state: 'ok', stale_after_ms: 15000,
       assert.equal(await page.locator('section img').count(), 0);
       assert(await page.locator('.brand img').evaluate(img => img.complete && img.naturalWidth > 0));
       assert.equal(await page.evaluate(() => !!globalThis.injected), false);
+      assert.equal(await page.locator('#hist svg').count(), 12);
+      const histText = await page.locator('#hist').innerText();
+      assert(histText.includes('showing first 12') && histText.includes('-64.0 dBm') && histText.includes('3.0 ms'));
+      assert(histText.includes('<b> rx') && histText.includes('no value'));
+      assert(histText.includes('latest point 4 s ago') || histText.includes('latest point 5 s ago'), 'history age advances between responses');
+      assert.equal(await page.locator('#hist b').count(), 0);
+      const graph = await page.locator('#hist svg path').first().getAttribute('d');
+      assert(graph.split('M').length > 2, 'missing buckets break paths');
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no horizontal overflow');
       await page.screenshot({path: path.join(output, `browser-${width}.png`), fullPage: true});
     }
@@ -60,7 +79,8 @@ const obs = {groups: {wifi: {state: 'ok', stale_after_ms: 15000,
     await page.waitForFunction(() => !document.querySelector('#err').textContent);
     assert.deepEqual(errors, []);
     fs.writeFileSync(path.join(output, 'browser.json'), JSON.stringify({browser: await browser.version(),
-      fixtures: true, widths: [1280, 390], repeat_renders: 120, dom_nodes: before, errors, requests: counts,
+      fixtures: true, widths: [1280, 390], history_series: 64, displayed_series: 12, points_per_series: 120,
+      repeat_renders: 120, dom_nodes: before, errors, requests: counts,
       visibility: 'synthetic visibilitychange in real Chromium', timeout: 'real 5 second deadline'}, null, 2));
     console.log('Chromium desktop/narrow, XSS, stale, repeat DOM, 503, timeout, tab-return event: passed');
   } finally { await browser.close(); }

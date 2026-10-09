@@ -4,6 +4,15 @@ What the opt-in groups of [../observations.md](../observations.md) (storage, Wi-
 the recent history ([../history.md](../history.md)) cost, judged by [budget.md](budget.md). All of them are
 **off by default**, so none of this enters the default configuration's 2.0 % target.
 
+Post-integration audit: the new #42 observation identity/gap implementation still needs real ARM
+retention and changed Wi-Fi cost evidence. Its cached latest-point age fix is in `9555c23`. A synthetic
+64 × 3602-point test with frequent gaps retained 21,667,030 bytes and peaked at 27,937,318 bytes including
+one 600-point read/JSON (900,411 bytes for the series object). This is Python 3.12 allocation accounting,
+**not ARM RSS**. The original 22.5/28.8 MB synthetic result remains in [history.md](../history.md).
+The new physical-board attempt was interrupted because another suite overlapped; no result from that
+attempt is counted. See [current validation gates](../development/post-integration-validation.md).
+All measured costs below remain attached to their original SHAs; Storage/Wi-Fi p95 misses are unchanged.
+
 A group observed every 30 s gives 4 observations per 120 s window, too few for an off/on process
 comparison. Each observation is therefore timed itself, on the product path
 (`Slow.observe_once` → the group's observe function), at the real cadence and at a shorter one for more

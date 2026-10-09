@@ -9,6 +9,21 @@ Last update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7f
 (`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
 implementation; merging alone does **not** complete the expanded validation requirements.
 
+## Post-integration stabilization checkpoint
+
+The seven-stage follow-up has **3/7 complete**: latest remote/existing bench audit, #40 final review,
+and #41 classifier/ARM verification. #40 is Ready at `ee31422`; #41 is Ready at `2aa7d79` (measured
+runtime `1eae3a4`). #42 remains Draft at `9555c23`; its cached History point-age defect is fixed and
+its independent local/3.9/3.13 CI passes. The isolated `integration/post-integration-rc` branch combines
+these changes without modifying the concurrently used primary checkout. Its full local suite is
+659 passed / 3 skipped; real Chromium 1280/390 and three Node harnesses pass.
+
+ARM History/Wi-Fi, final combined CPU/RSS and deployment-shape validation remain open. This task's
+new Wi-Fi attempt was interrupted when another session began a board suite; no partial or overlapping
+result is counted as passing. Details, exact SHAs, CI counts, raw paths and remaining gates are in
+[post-integration-validation.md](post-integration-validation.md). Production remains `8525942`.
+The earlier checkpoint below is retained as historical context, not the current completion status.
+
 ## Resumed work checkpoint
 
 - Branch: `integration/resumed-release-readiness`, combining history PR #42 (`0589fc4`),
