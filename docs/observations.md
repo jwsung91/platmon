@@ -50,3 +50,8 @@ Clients ask for `/api/observations` on the groups' cadence, not every second: th
 answer to the ages shown. A server without the endpoint (404) is not asked again.
 
 Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `probe` ([probe.md](probe.md)).
+
+The viewers also compare the growing age to `stale_after_ms` between answers, so a cached observation
+becomes not current without waiting for a new server response. The web page limits each optional
+endpoint to one outstanding request with a 5 s deadline. Tab return invalidates older requests and
+clears their panels until fresh answers arrive; hidden tabs skip optional rendering and polling.

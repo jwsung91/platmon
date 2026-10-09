@@ -90,6 +90,7 @@ const perS = v => {
   while (Math.abs(v) >= 1024 && i < 3) { v /= 1024; i++; }
   return (i ? v.toFixed(1) : v.toFixed(0)) + ' ' + ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'][i];
 };
+const windowText = x => Number.isFinite(x.window_ms) ? ` · window ${(x.window_ms / 1000).toFixed(3)} s` : '';
 const why = x => esc(RATE_REASONS[x.reason] || x.reason);
 const listOf = (obj, key) => obj && Array.isArray(obj[key]) ? obj[key] : [];
 function netRows(s) {
@@ -97,6 +98,7 @@ function netRows(s) {
   return items.length ? '<div class="muted">bytes/s · this process\'s network namespace</div>' + items.map(i => {
     const r = i.rates, bad = ['errors', 'dropped'].filter(k => i.rx[k] || i.tx[k]).map(k => `${k} ${i.rx[k]}/${i.tx[k]}`);
     return kv(esc(i.name), r ? `rx ${perS(r.rx_bytes_per_s)} · tx ${perS(r.tx_bytes_per_s)}` : why(i)) +
+      (r ? `<div class="muted">rx ${r.rx_packets_per_s.toFixed(1)} · tx ${r.tx_packets_per_s.toFixed(1)} packets/s${windowText(i)}</div>` : '') +
       (bad.length ? `<div class="muted">${bad.join(' · ')} (rx/tx, total)</div>` : '');
   }).join('') : '';
 }
@@ -106,26 +108,39 @@ function diskRows(s) {
     const r = d.rates;
     return kv(esc(d.name), r ? `read ${perS(r.read_bytes_per_s)} · write ${perS(r.write_bytes_per_s)}` : why(d)) +
       (r ? `<div class="muted">reads ${r.reads_per_s.toFixed(1)}/s · writes ${r.writes_per_s.toFixed(1)}/s · I/O time ${(100 * r.io_time_ratio).toFixed(1)}%` +
-        (d.in_flight ? ` · in flight ${d.in_flight}` : '') + '</div>' : '');
+        windowText(d) + '</div>' : '') +
+      (d.in_flight != null ? `<div class="muted">in flight ${d.in_flight}</div>` : '');
   }).join('');
 }
 
 // Low-frequency groups (/api/observations) change on their own cadence: asked for at most every 10 s, only
 // while the page is visible, on the same 1 s timer as the age line; an older server (404) is not asked again.
 // Their age is the server's data_age_ms plus browser time since that answer, like the sample age.
-let obs = null, obsAt = 0, obsAsked = -Infinity, obsSupported = true;
+let obs = null, obsAt = 0, obsAsked = -Infinity, obsSupported = true, obsRequest = null;
 async function pollObs() {
   const now = performance.now();
-  if (!obsSupported || document.visibilityState !== 'visible' || now - obsAsked < 10000) return;
+  if (obsRequest || !obsSupported || document.visibilityState !== 'visible' || now - obsAsked < 10000) return;
   obsAsked = now;
+  const ctl = obsRequest = new AbortController(), mine = epoch;
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const r = await fetch('api/observations', {cache: 'no-store'});
+    const r = await fetch('api/observations', {signal: ctl.signal, cache: 'no-store'});
+    const body = r.ok ? await r.json() : null;
+    if (mine !== epoch || ctl.signal.aborted) return;
     if (r.status === 404) { obsSupported = false; obs = null; }
-    else if (r.ok) { obs = await r.json(); obsAt = performance.now(); }
-  } catch (e) { obs = null; }  // the main view goes on without it
+    else if (r.ok) { obs = body; obsAt = performance.now(); }
+    else obs = null;
+  } catch (e) { if (mine === epoch) obs = null; } finally {
+    clearTimeout(timer); obsRequest = null;
+  }  // the main view goes on without it
   $('sto').innerHTML = storageRows();
   $('wifi').innerHTML = wifiRows();
   $('probe').innerHTML = probeRows();
+  hideEmptyPanels();
+}
+function observationStale(g) {
+  const o = g.observation;
+  return o.stale || (Number.isFinite(g.stale_after_ms) && o.data_age_ms + performance.now() - obsAt > g.stale_after_ms);
 }
 // TCP connect time to the configured targets (not ICMP ping): the latest attempt, and recent failures
 function probeRows() {
@@ -133,7 +148,7 @@ function probeRows() {
   const items = d && Array.isArray(d.targets) ? d.targets : [];
   if (!o || !items.length) return '';
   const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
-  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` + items.map(t =>
+  return `<div class="muted">observed ${age} s ago${observationStale(g) ? ' (not current)' : ''}</div>` + items.map(t =>
     kv(esc(t.address.includes(':') ? `[${t.address}]:${t.port}` : `${t.address}:${t.port}`),
       (t.connect_ms != null ? t.connect_ms.toFixed(1) + ' ms' : esc(t.reason)) + ` · failed ${t.failures}/${t.attempts}`)).join('');
 }
@@ -143,7 +158,7 @@ function wifiRows() {
   const items = d && Array.isArray(d.interfaces) ? d.interfaces : [];
   if (!o || !items.length) return '';
   const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
-  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` + items.map(i => kv(esc(i.name),
+  return `<div class="muted">observed ${age} s ago${observationStale(g) ? ' (not current)' : ''}</div>` + items.map(i => kv(esc(i.name),
     !i.connected ? 'not connected' : i.signal_dbm != null ? i.signal_dbm + ' dBm'
       : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a') +
     (i.connected && i.link_quality != null ? `<div class="muted">link quality ${i.link_quality}</div>` : '')).join('');
@@ -153,7 +168,7 @@ function storageRows() {
   if (!o || !d) return '';
   const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
   const fss = Array.isArray(d.filesystems) ? d.filesystems : [], parts = Array.isArray(d.partitions) ? d.partitions : [];
-  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` +
+  return `<div class="muted">observed ${age} s ago${observationStale(g) ? ' (not current)' : ''}</div>` +
     fss.map(f => kv(esc(f.mount_points[0].path + (f.mount_points[0].read_only ? ' (ro)' : '') +
         (f.mount_points.length > 1 ? ` +${f.mount_points.length - 1} more` : '')),
       f.total_bytes != null ? `${gib(f.used_bytes)}/${gib(f.total_bytes)} · ${gib(f.available_bytes)} free` : 'capacity unknown') +
@@ -164,7 +179,7 @@ function storageRows() {
 
 // Recent history (/api/history, off unless the service enables it): asked for at most every 10 s while
 // visible, never again after a 404. A null is a gap in the line (warmup, missing sample), never 0.
-let hist = null, histAt = 0, histAsked = -Infinity, histSupported = true;
+let hist = null, histAt = 0, histAsked = -Infinity, histSupported = true, histRequest = null;
 const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^observation\/storage\/([^/]+)\/[^/]+\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
   [/^observation\/wifi\/[^/]+\/\d+\/([^/]+)\/signal_dbm$/, m => `${m[1]} signal`],
@@ -204,14 +219,22 @@ function histRows() {
 }
 async function pollHist() {
   const now = performance.now();
-  if (!histSupported || document.visibilityState !== 'visible' || now - histAsked < 10000) return;
+  if (histRequest || !histSupported || document.visibilityState !== 'visible' || now - histAsked < 10000) return;
   histAsked = now;
+  const ctl = histRequest = new AbortController(), mine = epoch;
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const r = await fetch('api/history?points=120', {cache: 'no-store'});
+    const r = await fetch('api/history?points=120', {signal: ctl.signal, cache: 'no-store'});
+    const body = r.ok ? await r.json() : null;
+    if (mine !== epoch || ctl.signal.aborted) return;
     if (r.status === 404) { histSupported = false; hist = null; }
-    else if (r.ok) { hist = await r.json(); histAt = performance.now(); }
-  } catch (e) { hist = null; }
+    else if (r.ok) { hist = body; histAt = performance.now(); }
+    else hist = null;
+  } catch (e) { if (mine === epoch) hist = null; } finally {
+    clearTimeout(timer); histRequest = null;
+  }
   $('hist').innerHTML = histRows();
+  hideEmptyPanels();
 }
 
 // pressure stall information: the kernel's 10 s averages of the share of time tasks were stalled (not usage)
@@ -229,6 +252,10 @@ function collectionNote(s) {
   return bad.length ? 'Collection: ' + bad.join(', ') : '';
 }
 
+function hideEmptyPanels() {
+  document.querySelectorAll('section').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
+}
+
 function render(s) {
   const up = Math.floor(s.uptime);
   $('model').textContent = s.model;
@@ -244,13 +271,13 @@ function render(s) {
     row('RAM', 100 * m.used / m.total, `${gib(m.used)}/${gib(m.total)}`) +
     (m.swap_total ? row('SWAP', 100 * m.swap_used / m.swap_total, `${gib(m.swap_used)}/${gib(m.swap_total)}`) : '') +
     row('DISK', 100 * d.used / d.total, `${gib(d.used)}/${gib(d.total)}`);
-  $('temp').innerHTML = Object.entries(s.temperature).map(([k, v]) => kv(k, v.toFixed(1) + ' °C')).join('');
-  $('pwr').innerHTML = Object.entries(s.power).map(([k, v]) => kv(k, v.toFixed(2) + ' W')).join('') +
-    s.fans.map(f => kv('Fan ' + f.name, ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
+  $('temp').innerHTML = Object.entries(s.temperature).map(([k, v]) => kv(esc(k), v.toFixed(1) + ' °C')).join('');
+  $('pwr').innerHTML = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
+    s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
   $('net').innerHTML = netRows(s);
   $('dio').innerHTML = diskRows(s);
   $('psi').innerHTML = psiRows(s);
-  document.querySelectorAll('section').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
+  hideEmptyPanels();
 }
 
 const TIMEOUT_MS = 5000;  // a request that hangs must not stop the updates
@@ -329,6 +356,12 @@ pollHist();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   epoch++;
+  if (obsRequest) obsRequest.abort();
+  if (histRequest) histRequest.abort();
+  obs = hist = null;
+  obsAsked = histAsked = -Infinity;
+  for (const id of ['sto', 'wifi', 'probe', 'hist']) $(id).innerHTML = '';
+  hideEmptyPanels();
   checking = true;
   showAge();
   if (inflight) inflight.abort();  // its answer would not count; its finally starts the new request

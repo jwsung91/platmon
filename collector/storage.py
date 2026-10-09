@@ -4,6 +4,7 @@ and the size, use and free space of local block-backed filesystems. Reads /proc/
 changes anything. Contract: docs/storage.md.
 """
 import os
+import errno
 import re
 
 from .disk_io import is_physical
@@ -72,10 +73,23 @@ def parent_of(name, root=SYS_CLASS_BLOCK):
     return os.path.basename(os.path.dirname(os.readlink(f"{root}/{name}")))
 
 
+def filesystem_capacity(path, device):
+    """Pin a directory, verify its filesystem, then read capacity through the same descriptor.
+    A mount replaced after mountinfo must not lend its capacity to the previous device."""
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        st = os.fstat(fd)
+        if (os.major(st.st_dev), os.minor(st.st_dev)) != device:
+            raise OSError(errno.ESTALE, "mount changed")
+        return os.fstatvfs(fd)
+    finally:
+        os.close(fd)
+
+
 class Storage:
     """observe(group) for collector/slow.py. Paths and lookups are injectable for tests."""
 
-    def __init__(self, read=None, statvfs=os.statvfs, parent=parent_of, physical=is_physical):
+    def __init__(self, read=None, statvfs=filesystem_capacity, parent=parent_of, physical=is_physical):
         self._read, self._statvfs, self._parent, self._physical = read or read_text, statvfs, parent, physical
 
     def __call__(self, group):
@@ -103,9 +117,10 @@ class Storage:
         for fs in filesystems.values():
             path = fs["mount_points"][0]["path"]
             try:
-                st = self._statvfs(path)
+                st = self._statvfs(path, (fs["major"], fs["minor"]))
             except OSError as e:  # unmounted since, or unreadable: listed without numbers, never as 0
-                why = "disappeared" if isinstance(e, FileNotFoundError) else reason_of(e)
+                why = ("mount_changed" if e.errno == errno.ESTALE else
+                       "disappeared" if isinstance(e, FileNotFoundError) else reason_of(e))
                 group.note(fs["device"] or f"{fs['major']}:{fs['minor']}", why, f"statvfs {path}: {e.strerror}")
                 continue
             fs.update(total_bytes=group.got(st.f_blocks * st.f_frsize), used_bytes=(st.f_blocks - st.f_bfree) * st.f_frsize,

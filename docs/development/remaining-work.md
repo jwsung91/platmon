@@ -9,7 +9,16 @@ Last update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7f
 (`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
 implementation; merging alone does **not** complete the expanded validation requirements.
 
-## Resumed work checkpoint
+## Merge checkpoint (2026-10-09)
+
+The owner authorized necessary merges. #40 is merged at `4b1bc080`; its lifecycle tests and
+viewer fixes are preserved in this branch. #41 retains the independently measured classifier
+`1eae3a4` and the completed two-block ARM results in the Disk report. This merge resolves
+documentation only; classifier and measured collector code are unchanged. Integration #46
+contains the combined History, Storage and Wi-Fi work and is undergoing final bounded validation.
+Production rollout and release publication remain unapproved.
+
+## Historical resumed work checkpoint
 
 - Branch: `feat/history-observation-contract`, stacked on Disk PR #41 at
   `1eae3a4bd5ddc6395d6c9c871e6af60b61041f27`; history follow-up PR pending.

@@ -343,3 +343,7 @@ recomputed from the counters, on the page ("Network", "Disk I/O") and in the `pl
   ("+4 more interfaces (all in /api/stats)"); the page lists all.
 - Nothing is shown for a server without these fields (older, or the feature off) or with an empty list;
   a failed reading appears in the "Collection:" line like any optional group.
+
+Storage observations can report the additive issue reason `mount_changed` when the directory opened
+for capacity no longer belongs to mountinfo's device number. The filesystem entry remains present
+with null capacity, and the group is partial/error under the existing C1 rules.
