@@ -74,3 +74,11 @@ the runs is the same (round 1: a record before only). Raw files stay on the devi
 | rpi4 round 1 storage-30s.json / storage-5s.json | `ac0d60bc…` / `255ef1e3…` |
 | orin round 2 storage-30s / storage-5s / wifi-5s | `bafda063…` / `32b7921d…` / `cd27f805…` |
 | rpi4 round 2 storage-30s / storage-5s / wifi-5s | `242718b8…` / `52a77b3d…` / `cf7b08d7…` |
+
+## Resumed combined path
+
+The [2026-10-09 resumed results](resumed-integration-results.md) supersede earlier cost claims for
+Storage descriptor verification, Wi-Fi carrier checks and low-frequency history. Runtime `e919baf`:
+20 Storage calls at 30 s and 60 Wi-Fi calls at 5 s per board; 660 s real history retention plus two
+integrated ABBA blocks. All remain optional. The finite retention run does not prove a long-term
+RSS plateau. Old results above remain historical and are not relabeled as the corrected path.

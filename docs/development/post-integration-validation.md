@@ -1,5 +1,11 @@
 # Post-integration stabilization evidence (2026-10-09)
 
+Historical checkpoint for PR #45. Its changes are now incorporated into PR #46; consult
+[remaining-work.md](remaining-work.md) and [resumed results](../performance/resumed-integration-results.md)
+for the later ARM, Storage/Wi-Fi and container evidence. Earlier pending entries below are retained
+for provenance and are not the latest status.
+
+
 Three of seven requested stages are complete. The local History and integration checks are complete;
 ARM retention, changed Wi-Fi cost, final integrated performance and deployment-shape checks remain
 open. This is a review candidate, **not release approval**. No main merge, tag, release, registry push

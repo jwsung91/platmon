@@ -98,7 +98,7 @@ in the API.
 ## Not included
 
 Unmounted filesystems' contents or types, partition tables, LVM / md topology, inode counts, quotas,
-per-directory usage, network filesystems, history.
+per-directory usage, network filesystems. Numeric capacity history is available when history is enabled.
 
 ## Mount replacement during observation
 
@@ -112,5 +112,11 @@ but not readable by the service is reported unavailable with `permission_denied`
 This pins the filesystem being measured, not a mount-table transaction. A same-device remount or
 replacement reusing the same device number cannot always be distinguished; mount options and mount
 list remain the earlier mountinfo observation. Blocking remains isolated to the existing single storage
-worker. No new thread or raw device access is introduced. Previous cost measurements predate the
-descriptor verification; remeasure this optional path in integration before claiming its cost.
+worker. No new thread or raw device access is introduced. The [resumed integration report](performance/resumed-integration-results.md) measures this descriptor
+path; its call p95 exceeds 2 ms, so it remains off by default.
+
+Directory bind mounts are supported under the same identity check; **file bind mounts are not**.
+The isolated Docker test exposed file mounts whose capacity read returns `io_error` and null values.
+Overlay and pseudo filesystems remain excluded. Core snapshots stay fresh even when these optional
+capacity observations fail. This is a documented provider limit, not successful file-mount capacity
+validation or evidence that container mounts describe the whole host.
