@@ -117,3 +117,31 @@ two ABBA blocks per board, 8 windows, at most 50 minutes/16 windows per board in
 cause-driven optimization round. Acceptance stays CPU ≤2% and call elapsed p95 ≤2 ms, no new errors,
 overruns, freshness fallback or sustained memory growth. No stress load, operating setting change or
 production restart. The existing default-on decision is historical until this follow-up is measured.
+
+### Corrected-path result (`1eae3a4`, 2026-10-09)
+
+Both boards completed all eight valid reference windows (two ABBA blocks); Network on in both arms,
+30 s warmup + 120 s windows, one 1 s client. No optimization/retry round was used.
+
+| board | off CPU % (run order) | on CPU % (run order) | block deltas pp | disk elapsed p95 ms (480 calls) | attempt CPU mean off/on ms |
+| --- | --- | --- | --- | --- | --- |
+| Orin | 1.593, 1.597, 1.596, 1.570 | 1.715, 1.713, 1.717, 1.692 | +0.119, +0.121 | 1.263 | 13.848 / 15.036 |
+| Pi | 1.436, 1.315, 1.437, 1.439 | 1.603, 1.623, 1.598, 1.634 | +0.238, +0.178 | 1.555 | 9.709 / 11.691 |
+
+Default CPU ≤2% and call p95 ≤2 ms passed on each board. Additional attempt CPU was 1.188/1.982 ms,
+within the approximate 2 ms design criterion. No failed collection, overrun, fallback or HTTP error;
+Disk calls while off: zero. Handler mean CPU off/on: 0.753/0.778 ms (Orin), 1.421/1.536 ms (Pi).
+Response off/on: 10.3/11.0 KiB and 4.3/4.9 KiB respectively. These are parent/component accounting,
+not quantities to add to process CPU. No performance-cause claim is made from the run-to-run spread.
+
+Production checkout, clean status, INI hash, process start identity and governors matched before/after
+on both boards; Orin container ID/image/restart count/start time also matched. Dynamic health timestamps
+are not required to be byte-identical. Production remained `8525942`. Sources, commands, manifests and
+raw stay in `~/platmon-diskbench-1eae3a4/` on each board; private local archives and comparison results are
+under `.validation/20261009-resume/`. No older directory was removed. The corrected Disk default can
+remain on; the final combined runtime still requires its own integration verdict.
+
+Raw SHA-256 (`results.jsonl`):
+
+- orin: `f22e6285e48b5979246261f7f561611c5b415efe647f32064e930483a62bdea7`
+- rpi4: `381de384e9bbb0fb4394ed6bf591fa4c04bc3385d463a708049610119a6caee2`
