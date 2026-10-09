@@ -1,10 +1,17 @@
-# Final candidate results (2026-10-09)
+# Candidate baseline results before recovery-gap correction (2026-10-09)
+
+A later targeted test reproduced a short core failure being connected across the graph. The
+correction in #42 at `00781fd` changes Sampler/History, so these CPU results are now a baseline,
+not the corrected-runtime gate. Retention raw is preserved. Corrected-runtime validation follows
+the separately bounded [recovery-gap plan](recovery-gap-validation.md). The unchanged frontend
+reuses the browser evidence below.
 
 Measured commit: `30d377a9b7cd470d655367398dab39c3b1f5313a` on both boards, archived before
 measurement. [Predeclared plan](final-candidate-plan.md), 60 minutes maximum per board.
 Source tar SHA-256: `6c77a153f5a80c084af5668aa198548337b0d855e30a8646120d3a78ff73df97`.
 Service benchmark SHA-256: `159e5ce3da350cb5f99c4a70de140437b67c8d6c876aba545f16cc7256b38b2a`.
-Later merge/documentation commits preserve this runtime and benchmark byte-for-byte.
+Initial merge/documentation commits preserved this runtime and benchmark byte-for-byte;
+the later recovery-gap correction is a distinct measured runtime.
 
 ## Whole-service CPU
 
