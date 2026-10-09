@@ -58,7 +58,7 @@ class Host:
             raise v
         return v
 
-    def statvfs(self, path):
+    def statvfs(self, path, device):
         self.statted.append(path)
         if path in self.stat_error:
             raise self.stat_error[path]
@@ -104,7 +104,7 @@ def test_local_block_filesystems_once_each_with_all_mount_points():
 
 def test_a_measured_zero_is_zero():
     h = Host()
-    h.statvfs = lambda path: Stat(0, 0, 0)
+    h.statvfs = lambda path, device: Stat(0, 0, 0)
     out, _ = observe(h)
     assert (out["filesystems"][0]["total_bytes"], out["filesystems"][0]["available_bytes"]) == (0, 0)
 
@@ -359,3 +359,43 @@ def test_only_local_filesystem_lines_are_converted():
     mounts, bad = parse_mountinfo(text, {"ext4"})
     assert [m[2] for m in mounts] == ["/", "/srv/bind dir"] and bad == []
     assert parse_mountinfo(text)[1] == [("line8", "invalid_data")]  # without the filter it is reported
+
+
+def test_capacity_is_bound_to_verified_mount_descriptor(monkeypatch):
+    from collector import storage
+    from types import SimpleNamespace
+    opened, queried, closed = [], [], []
+    monkeypatch.setattr(storage.os, "open", lambda path, flags: opened.append(path) or 42)
+    monkeypatch.setattr(storage.os, "fstat", lambda fd: SimpleNamespace(st_dev=os.makedev(8, 1)))
+    monkeypatch.setattr(storage.os, "fstatvfs", lambda fd: queried.append(fd) or Stat(10, 5, 5))
+    monkeypatch.setattr(storage.os, "close", closed.append)
+    result = storage.filesystem_capacity("/mount", (8, 1))
+    assert result.f_blocks == 10 and opened == ["/mount"] and queried == closed == [42]
+    with pytest.raises(OSError, match="mount changed"):
+        storage.filesystem_capacity("/mount", (8, 2))
+    assert queried == [42] and closed == [42, 42]  # replacement is never queried as the old filesystem
+
+
+def test_replaced_mount_has_no_capacity_and_an_explicit_reason():
+    import errno
+    h = Host()
+    h.stat_error["/"] = OSError(errno.ESTALE, "mount changed")
+    out, status = observe(h)
+    assert out["filesystems"][0]["total_bytes"] is None
+    assert status["state"] == "partial"
+    assert status["issues"] == [{"target": "nvme0n1p1", "reason": "mount_changed"}]
+
+
+def test_capacity_descriptor_closes_on_statvfs_failure(monkeypatch):
+    from collector import storage
+    from types import SimpleNamespace
+    closed = []
+    monkeypatch.setattr(storage.os, "open", lambda *args: 42)
+    monkeypatch.setattr(storage.os, "fstat", lambda fd: SimpleNamespace(st_dev=os.makedev(8, 1)))
+    def failed(fd):
+        raise PermissionError(13, "denied")
+    monkeypatch.setattr(storage.os, "fstatvfs", failed)
+    monkeypatch.setattr(storage.os, "close", closed.append)
+    with pytest.raises(PermissionError):
+        storage.filesystem_capacity("/mount", (8, 1))
+    assert closed == [42]
