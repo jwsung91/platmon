@@ -60,8 +60,8 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
   obsAnswers.push(ok({schema_version: 1, groups: {storage: {state: 'stale', interval_ms: 30000,
     observation: {id: 3, data_age_ms: 95000, stale: true}, data: {
       filesystems: [{device: 'nvme0n1p1', major: 259, minor: 1, fstype: 'ext4', source: '/dev/nvme0n1p1', total_bytes: 4 * 2 ** 30,
-                     used_bytes: 2 ** 30, available_bytes: 3 * 2 ** 30, mount_points: [{path: '/', read_only: false},
-                     {path: '/mnt/<b>x</b>', read_only: true}]},
+                     used_bytes: 2 ** 30, available_bytes: 3 * 2 ** 30, mount_points: [{path: '/mnt/<b>x</b>', read_only: true},
+                     ...Array.from({length: 60}, (_, i) => ({path: '/bind/' + i, read_only: false}))]},
                     {device: null, major: 0, minor: 40, fstype: 'btrfs', source: '/dev/sdb', total_bytes: null,
                      used_bytes: null, available_bytes: null, mount_points: [{path: '/data', read_only: false}]}],
       partitions: [{name: 'nvme0n1p1', disk: 'nvme0n1', size_bytes: 4 * 2 ** 30, mount_points: ['/']},
