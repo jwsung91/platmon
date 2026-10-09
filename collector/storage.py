@@ -18,15 +18,19 @@ SYS_CLASS_BLOCK = "/sys/class/block"
 LOCAL_FS = frozenset(("ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "vfat", "exfat", "ntfs3", "jfs", "reiserfs"))
 
 
+ESCAPE = re.compile(r"\\([0-7]{3})")
+
+
 def unescape(field):
     """mountinfo escapes space, tab, newline and backslash as \\040, \\011, \\012, \\134."""
-    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+    return ESCAPE.sub(lambda m: chr(int(m.group(1), 8)), field) if "\\" in field else field
 
 
-def parse_mountinfo(text):
-    """[(major, minor, mount point, read only, fstype, source)] of every mount, and [(target, why)] for
-    lines that do not parse (left out). Format (proc(5)): id parent major:minor root mount-point options
-    [optional fields...] - fstype source super-options."""
+def parse_mountinfo(text, fstypes=None):
+    """[(major, minor, mount point, read only, fstype, source)] of the mounts (only those of fstypes, if
+    given: the other lines are not converted), and [(target, why)] for lines that do not parse (left out).
+    Format (proc(5)): id parent major:minor root mount-point options [optional fields...] - fstype source
+    super-options."""
     mounts, bad = [], []
     for n, line in enumerate(text.split("\n"), 1):
         if not line.strip():
@@ -34,8 +38,11 @@ def parse_mountinfo(text):
         f = line.split(" ")
         try:
             sep = f.index("-", 6)
+            fstype = f[sep + 1]
+            if fstypes is not None and fstype not in fstypes:
+                continue
             major, minor = (int(x) for x in f[2].split(":"))
-            fstype, source = f[sep + 1], unescape(f[sep + 2])
+            source = unescape(f[sep + 2])
         except (ValueError, IndexError):
             bad.append((f"line{n}", "invalid_data"))
             continue
@@ -78,7 +85,7 @@ class Storage:
             group.note("partitions", reason_of(e) if isinstance(e, OSError) else "invalid_data", PARTITIONS)
             names = {}
         try:
-            mounts, bad = parse_mountinfo(self._read(MOUNTINFO))
+            mounts, bad = parse_mountinfo(self._read(MOUNTINFO), LOCAL_FS)
         except (OSError, UnicodeDecodeError) as e:
             group.note("mountinfo", reason_of(e) if isinstance(e, OSError) else "invalid_data", MOUNTINFO)
             mounts, bad = [], []
