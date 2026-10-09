@@ -30,23 +30,23 @@ def detect(compatible, has_dmi):
 PLATFORM, BOARD = detect(read(f"{DEVICE_TREE}/compatible", ""), os.path.isdir("/sys/class/dmi/id"))
 
 
-def collect(cpu=None, logged=None, network=None, disk_io=None):
+def collect(cpu=None, logged=None, network=None, disk_io=None, pressure=None):
     """cpu: a common.CpuCounters kept between calls (the service); None for a one-off reading.
     logged: a dict the service keeps between calls, so lasting read problems are logged once (sysfs.summarize).
     network: a network.NetworkCounters kept between calls; None leaves out "network" and its collector.
-    disk_io: a disk_io.DiskCounters, the same way for "disk_io".
+    disk_io: a disk_io.DiskCounters, the same way for "disk_io"; pressure: a pressure.Pressure for "pressure".
     stats["collectors"] has the optional groups' state; the Sampler adds "core"."""
-    return _collect(cpu, logged, None, network, disk_io)[0]
+    return _collect(cpu, logged, None, network, disk_io, pressure)[0]
 
 
-def collect_recorded(cpu, logged, clock, network=None, disk_io=None):
+def collect_recorded(cpu, logged, clock, network=None, disk_io=None, pressure=None):
     """The service's collect(): the same stats, plus for the Sampler where each sensor value came from and
     when it and the required data were read (all on clock, the Sampler's and cpu's elapsed clock).
-    network, disk_io: as for collect(); their reads are recorded only if they read on the same clock."""
+    network, disk_io, pressure: as for collect(); their reads are recorded only if they read on the same clock."""
     trace = sysfs.Trace(clock)
-    stats, groups = _collect(cpu, logged, trace, network, disk_io)
+    stats, groups = _collect(cpu, logged, trace, network, disk_io, pressure)
     return Collected(stats, sensor_entries(stats, groups), {name: trace.required.get(name) for name in REQUIRED_READS},
-                     clock, trace.network, trace.disk_io)
+                     clock, trace.network, trace.disk_io, trace.pressure)
 
 
 def sensor_entries(stats, groups):
@@ -65,7 +65,7 @@ def sensor_entries(stats, groups):
     return out
 
 
-def _collect(cpu, logged, trace, network=None, disk_io=None):
+def _collect(cpu, logged, trace, network=None, disk_io=None, pressure=None):
     groups = sysfs.groups(trace=trace)
     stats = {"platform": PLATFORM, **common.collect(cpu, groups, trace)}
     if BOARD:
@@ -87,5 +87,12 @@ def _collect(cpu, logged, trace, network=None, disk_io=None):
             stats["disk_io"], span = disk_io.sample(g)
         if trace and disk_io.clock is trace.clock:
             trace.disk_io = span
+    if pressure is not None:  # likewise
+        g = groups["pressure"] = sysfs.Group("pressure", trace)
+        stats["pressure"], span = {"scope": {"kind": "host"}, "provider": "proc_pressure", "resources": {}, "read": None}, None
+        with sysfs.guard(g):
+            stats["pressure"], span = pressure.sample(g)
+        if trace and pressure.clock is trace.clock:
+            trace.pressure = span
     stats["collectors"] = sysfs.summarize(groups, logged)
     return stats, groups

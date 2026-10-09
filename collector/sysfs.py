@@ -188,6 +188,7 @@ class Trace:
         self.clock, self.required = clock, {}
         self.network = None  # (start, end) of the network counters' read, when there is one
         self.disk_io = None  # the same for the disk counters
+        self.pressure = None  # and for the pressure files (one span for the three)
 
     def timed(self, name, fn, *args):
         start = self.clock()
