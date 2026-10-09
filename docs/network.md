@@ -135,3 +135,6 @@ A one-off `collect(network=NetworkCounters())` has all interfaces in `warmup` an
 Shown on the web page, in the `platmon` command and `/text` (see [api.md](api.md#web-page)). Not
 collected: Wi-Fi signal (RSSI), round-trip time or ping, packet capture, link speed and duplex, access
 point scans, pressure stall information (PSI), filesystem usage, history (disk I/O: [disk-io.md](disk-io.md)). Measured cost: [performance/network-product.md](performance/network-product.md).
+
+The CLI, `/text` and web page show the server's RX/TX bytes/s, packets/s and actual `window_ms`
+(converted to seconds). No viewer differences cumulative counters or substitutes the configured interval.

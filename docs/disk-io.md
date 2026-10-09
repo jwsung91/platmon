@@ -120,3 +120,6 @@ Then platmon makes no `DiskCounters`, reads neither `/proc/diskstats` nor `/sys/
 Shown on the web page, in the `platmon` command and `/text` (see [api.md](api.md#web-page)). Not collected: partitions, logical volumes, zram, discard and flush
 counters, the weighted time field, per-process I/O, SMART data, filesystem usage beyond `disk`,
 pressure stall information (PSI). Measured cost: [performance/disk-io-product.md](performance/disk-io-product.md).
+
+The CLI, `/text` and web page show the actual rate window in seconds when supplied. `in_flight` is
+shown even when zero or while rates are warming up: it is a current gauge, not a cumulative counter.

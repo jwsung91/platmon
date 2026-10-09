@@ -5,7 +5,37 @@ readiness). Checked against the repository and devices whenever work resumes. St
 progress, waiting for validation, blocked (access), waiting for approval. Merging, production rollout
 and releases always wait for the owner's approval.
 
-Last update: 2026-10-09. main: `007a422` (#32–#38 merged).
+Last update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7fb5a`
+(`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
+implementation; merging alone does **not** complete the expanded validation requirements.
+
+## Resumed work checkpoint
+
+- Branch: `fix/frontend-observation-contract`, based on the baseline above; follow-up PR pending.
+  Clean worktree at entry. No user changes were present.
+- Stage 1: previous implementation and ARM results retained; raw SHA-256 prefixes for the integrated
+  `c2752c1` runs checked on both boards and matched. No collection changes in the UI follow-up.
+- Stage 2: in progress. Reproduced missing observation windows, hidden zero in-flight counters, duplicate
+  hanging optional HTTP requests and cached observations not becoming stale. CLI/web fixes and regression
+  tests added; `pytest -v`: **643 passed / 3 skipped**, focused CLI/web: **68 passed**; final CI pending. Real Chromium fixture checks cover 1280/390 px, PSI/Wi-Fi panels, escaped
+  labels, 503, a real 5 s timeout and 120 repeated renders (not a long-duration stability claim).
+- Stages 3–6: implementations retained; validation still required against the complete work order.
+  PSI normal-path ARM support and approved external probe targets remain unavailable; defaults stay off.
+- Stage 7: **in progress, not complete**. Existing history explicitly excludes low-frequency groups;
+  observation-ID-based append and graph missing-interval handling still need implementation/validation.
+- Stage 8: **waiting for validation**. Container/systemd isolation, board history retention, the second
+  integrated ABBA block, and final exact-HEAD CI/measurement reconciliation remain outstanding.
+- Devices rechecked over SSH: both production checkouts are `8525942`; Orin's original container and
+  Pi's original process are running. No production modifications. Private state and local validation
+  logs are in `.validation/20261009-resume/` (ignored), with original ARM raw still on the boards.
+- Main CI run `37890446587`: Python 3.9 **642 passed / 1 skipped**, Python 3.13 **641 passed / 2 skipped**;
+  Node-backed web tests and real hosted-runner PSI tests executed. These are baseline, not follow-up CI.
+- Local baseline: `pytest -v`, Python 3.12, **640 passed / 3 skipped** with loopback allowed. The initial
+  sandbox run failed on denied sockets; no assertions were weakened to accommodate the sandbox.
+- Next: finish the UI follow-up PR, then independently complete history and integration verification.
+  Nothing in this resumed task authorizes merging, production deployment or release publication.
+
+## Historical implementation
 
 | # | Stage | Status | PR | Evidence |
 | --- | --- | --- | --- | --- |
