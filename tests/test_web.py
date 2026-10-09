@@ -147,6 +147,47 @@ def test_counters_absent_or_odd_show_nothing(steps):
         assert steps[step]["net"] == "" and steps[step]["dio"] == "" and steps[step]["err"] == "", step
 
 
+def test_storage_from_observations(steps):
+    sto = steps["ok"]["sto"]
+    assert "observed 95 s ago (not current)" in sto  # the server's age, and stale says so
+    assert "1.0G/4.0G · 3.0G free" in sto and "/mnt/&#60;b&#62;x&#60;/b&#62; (ro) +60 more" in sto and "<b>" not in sto
+    assert "/bind/" not in sto  # dozens of bind mounts: counted, not listed
+    assert "capacity unknown" in sto and "0:40" in sto  # no numbers made up when statvfs gave none
+    assert "nvme0n1p2" in sto and "not mounted" in sto
+    assert steps["ok"]["obs_fetches"] == 1
+
+
+def test_observations_404_stops_asking(steps):
+    """The next poll gets a 404 (an older server): the panel is cleared and never asked for again."""
+    assert steps["read_based_age"]["sto"] == "" and steps["read_based_age"]["obs_fetches"] == 2
+
+
+def test_wifi_from_observations(steps):
+    wifi = steps["ok"]["wifi"]
+    assert "observed 2 s ago" in wifi and "-64 dBm" in wifi and "link quality 46" in wifi
+    assert "wlan1</span><span>not connected" in wifi  # no last signal, no 0
+    assert "signal 70 (unit not reported)" in wifi and "&#60;i&#62;x&#60;/i&#62;" in wifi and "<i>" not in wifi
+    assert steps["read_based_age"]["wifi"] == ""  # cleared after the server stopped answering it (404)
+
+
+def test_probe_from_observations(steps):
+    probe = steps["ok"]["probe"]
+    assert "192.0.2.1:443</span><span>12.3 ms · failed 1/10" in probe
+    assert "[2001:db8::1]:22</span><span>timeout · failed 3/3" in probe and "0.0 ms" not in probe
+    assert steps["read_based_age"]["probe"] == ""
+
+
+def test_history_graphs(steps):
+    hist = steps["ok"]["hist"]
+    assert "last 10 min" in hist and "RAM used</span><span>2.0G" in hist and "<svg" in hist
+    assert "eth0 rx</span><span>no value" in hist  # the latest point is a gap: said so, not 0
+    assert "&#60;b&#62; tx" in hist and "<b>" not in hist
+    assert "cpu/0" not in hist and "unknown" not in hist  # only the series the page knows how to label
+    eth0 = hist.split("eth0 rx")[1].split("</svg>")[0]
+    assert eth0.count("M") == 1 and "L" not in eth0  # one point between two gaps: no line drawn across them
+    assert steps["read_based_age"]["hist"] == "" and steps["read_based_age"]["hist_fetches"] == 2  # 404: stopped
+
+
 def test_pressure_rows(steps):
     psi = steps["pressure"]["psi"]
     assert "avg10 · share of time stalled" in psi and "some 1.3%" in psi and "some 3.0% · full 0.5%" in psi

@@ -24,6 +24,9 @@
   .track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
   .fill { height: 100%; background: var(--bar); transition: width .3s; }
   .fill.hot { background: var(--warn); }
+  .spark { display: block; width: 100%; height: 28px; }
+  .spark path { fill: none; stroke: var(--bar); stroke-width: 1.5; }
+  .kv span:first-child { overflow-wrap: anywhere; min-width: 0; margin-right: 8px; }
   .kv { display: flex; justify-content: space-between; margin: 3px 0; font-variant-numeric: tabular-nums; }
   #err, #coll { color: var(--warn); }
 </style>
@@ -48,6 +51,10 @@
   <section><h2>Power · Fan</h2><div id="pwr"></div></section>
   <section><h2>Network</h2><div id="net"></div></section>
   <section><h2>Disk I/O</h2><div id="dio"></div></section>
+  <section><h2>Storage</h2><div id="sto"></div></section>
+  <section><h2>Wi-Fi</h2><div id="wifi"></div></section>
+  <section><h2>TCP connect</h2><div id="probe"></div></section>
+  <section><h2>History</h2><div id="hist"></div></section>
   <section><h2>Pressure</h2><div id="psi"></div></section>
 </div>
 <script>
@@ -101,6 +108,101 @@ function diskRows(s) {
       (r ? `<div class="muted">reads ${r.reads_per_s.toFixed(1)}/s · writes ${r.writes_per_s.toFixed(1)}/s · I/O time ${(100 * r.io_time_ratio).toFixed(1)}%` +
         (d.in_flight ? ` · in flight ${d.in_flight}` : '') + '</div>' : '');
   }).join('');
+}
+
+// Low-frequency groups (/api/observations) change on their own cadence: asked for at most every 10 s, only
+// while the page is visible, on the same 1 s timer as the age line; an older server (404) is not asked again.
+// Their age is the server's data_age_ms plus browser time since that answer, like the sample age.
+let obs = null, obsAt = 0, obsAsked = -Infinity, obsSupported = true;
+async function pollObs() {
+  const now = performance.now();
+  if (!obsSupported || document.visibilityState !== 'visible' || now - obsAsked < 10000) return;
+  obsAsked = now;
+  try {
+    const r = await fetch('api/observations', {cache: 'no-store'});
+    if (r.status === 404) { obsSupported = false; obs = null; }
+    else if (r.ok) { obs = await r.json(); obsAt = performance.now(); }
+  } catch (e) { obs = null; }  // the main view goes on without it
+  $('sto').innerHTML = storageRows();
+  $('wifi').innerHTML = wifiRows();
+  $('probe').innerHTML = probeRows();
+}
+// TCP connect time to the configured targets (not ICMP ping): the latest attempt, and recent failures
+function probeRows() {
+  const g = obs && obs.groups && obs.groups.probe, o = g && g.observation, d = g && g.data;
+  const items = d && Array.isArray(d.targets) ? d.targets : [];
+  if (!o || !items.length) return '';
+  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
+  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` + items.map(t =>
+    kv(esc(t.address.includes(':') ? `[${t.address}]:${t.port}` : `${t.address}:${t.port}`),
+      (t.connect_ms != null ? t.connect_ms.toFixed(1) + ' ms' : esc(t.reason)) + ` · failed ${t.failures}/${t.attempts}`)).join('');
+}
+// the signal while connected, never the last one after; a value without dBm is shown without a unit
+function wifiRows() {
+  const g = obs && obs.groups && obs.groups.wifi, o = g && g.observation, d = g && g.data;
+  const items = d && Array.isArray(d.interfaces) ? d.interfaces : [];
+  if (!o || !items.length) return '';
+  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
+  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` + items.map(i => kv(esc(i.name),
+    !i.connected ? 'not connected' : i.signal_dbm != null ? i.signal_dbm + ' dBm'
+      : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a') +
+    (i.connected && i.link_quality != null ? `<div class="muted">link quality ${i.link_quality}</div>` : '')).join('');
+}
+function storageRows() {
+  const g = obs && obs.groups && obs.groups.storage, o = g && g.observation, d = g && g.data;
+  if (!o || !d) return '';
+  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
+  const fss = Array.isArray(d.filesystems) ? d.filesystems : [], parts = Array.isArray(d.partitions) ? d.partitions : [];
+  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` +
+    fss.map(f => kv(esc(f.mount_points[0].path + (f.mount_points[0].read_only ? ' (ro)' : '') +
+        (f.mount_points.length > 1 ? ` +${f.mount_points.length - 1} more` : '')),
+      f.total_bytes != null ? `${gib(f.used_bytes)}/${gib(f.total_bytes)} · ${gib(f.available_bytes)} free` : 'capacity unknown') +
+      `<div class="muted">${esc(f.fstype)} · ${esc(f.device || f.major + ':' + f.minor)}</div>`).join('') +
+    parts.map(p => kv(esc(p.name), `${gib(p.size_bytes)} · ${p.mount_points.length ? esc(p.mount_points[0] +
+      (p.mount_points.length > 1 ? ` +${p.mount_points.length - 1} more` : '')) : 'not mounted'}`)).join('');
+}
+
+// Recent history (/api/history, off unless the service enables it): asked for at most every 10 s while
+// visible, never again after a 404. A null is a gap in the line (warmup, missing sample), never 0.
+let hist = null, histAsked = -Infinity, histSupported = true;
+const HIST_LABEL = [[/^memory\/used_bytes$/, () => 'RAM used'],
+  [/^temperature\/(?:name:)?(.+)$/, m => 'temp ' + m[1].slice(0, 12)],
+  [/^network\/[^/]+\/\d+\/([^/]+)\/(rx|tx)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
+  [/^disk_io\/[^/]+\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`]];
+function spark(points) {
+  const vs = points.map(p => p[2]).filter(v => v != null), lo = Math.min(...vs), hi = Math.max(...vs);
+  if (!vs.length) return '';
+  const n = points.length, y = v => hi > lo ? 26 - 24 * (v - lo) / (hi - lo) : 14;
+  let d = '', pen = false;
+  points.forEach((p, i) => {
+    if (p[2] == null) { pen = false; return; }
+    d += `${pen ? 'L' : 'M'}${(n > 1 ? 200 * i / (n - 1) : 0).toFixed(1)},${y(p[2]).toFixed(1)}`;
+    pen = true;
+  });
+  return `<svg class="spark" viewBox="0 0 200 28" preserveAspectRatio="none"><path d="${d}"/></svg>`;
+}
+function histRows() {
+  const series = hist && hist.series && typeof hist.series === 'object' ? hist.series : {};
+  const rows = [];
+  for (const [id, points] of Object.entries(series)) {
+    const rule = HIST_LABEL.find(([re]) => re.test(id));
+    if (!rule || !Array.isArray(points) || !points.length || rows.length >= 12) continue;
+    const last = points[points.length - 1][2];
+    rows.push(kv(esc(rule[1](id.match(rule[0]))), last == null ? 'no value' : id.startsWith('temperature') ? last.toFixed(1) + ' °C'
+      : id.startsWith('memory') ? gib(last) : perS(last)) + spark(points));
+  }
+  return rows.length ? `<div class="muted">last ${Math.round(hist.retention_s / 60)} min</div>` + rows.join('') : '';
+}
+async function pollHist() {
+  const now = performance.now();
+  if (!histSupported || document.visibilityState !== 'visible' || now - histAsked < 10000) return;
+  histAsked = now;
+  try {
+    const r = await fetch('api/history?points=120', {cache: 'no-store'});
+    if (r.status === 404) { histSupported = false; hist = null; }
+    else if (r.ok) hist = await r.json();
+  } catch (e) { hist = null; }
+  $('hist').innerHTML = histRows();
 }
 
 // pressure stall information: the kernel's 10 s averages of the share of time tasks were stalled (not usage)
@@ -207,7 +309,9 @@ async function tick() {
     showAge();
   }
 }
-setInterval(showAge, 1000);  // the age keeps moving while a request hangs
+setInterval(() => { showAge(); pollObs(); pollHist(); if (obs) { $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); } }, 1000);  // ages keep moving while a request hangs
+pollObs();
+pollHist();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   epoch++;

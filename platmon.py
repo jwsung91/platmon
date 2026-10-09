@@ -15,9 +15,14 @@ import sys
 from collector import BOARD, PLATFORM, collect_recorded
 from collector.common import CpuCounters
 from collector.disk_io import DiskCounters
+from collector.history import History
 from collector.network import NetworkCounters
+from collector.probe import Probe, parse_targets
 from collector.pressure import Pressure
 from collector.sampler import Sampler, pick_clock
+from collector.slow import Observations, Slow
+from collector.storage import Storage
+from collector.wifi import Wifi
 from frontends import server
 
 FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outputs that run inside the core
@@ -26,11 +31,16 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "core": {"interval": 1.0},
     "network": {"enabled": True},  # measured cost: docs/performance/budget.md
     "disk_io": {"enabled": True},
+    "storage": {"enabled": False, "interval": 30.0},
+    "wifi": {"enabled": False, "interval": 5.0},
+    "probe": {"enabled": False, "interval": 10.0, "timeout": 2.0, "targets": ""},
+    "history": {"enabled": False, "retention": 600.0},
     "pressure": {"enabled": False},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
-RANGES = {("core", "interval"): (0.1, 3600), ("http", "port"): (1, 65535)}
+RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("wifi", "interval"): (1, 3600), ("probe", "interval"): (1, 3600),
+          ("probe", "timeout"): (0.1, 10), ("history", "retention"): (60, 3600), ("http", "port"): (1, 65535)}
 
 
 def check(cfg):
@@ -70,6 +80,15 @@ def load_config(path=None, frontends=None):
     except configparser.Error as e:
         raise ValueError(f"cannot parse config {path}: {e}")
     check(cfg)
+    probe = cfg["probe"]
+    try:
+        targets = parse_targets(probe.get("targets"))
+    except ValueError as e:
+        raise ValueError(f"[probe] targets: {e}")
+    if probe.getboolean("enabled") and not targets:
+        raise ValueError("[probe] enabled = yes needs targets (address:port, comma-separated); nothing is probed by default")
+    if targets and len(targets) * probe.getfloat("timeout") >= probe.getfloat("interval"):
+        raise ValueError("[probe] interval must be longer than timeout × number of targets (they are probed one after another)")
     if frontends is not None:
         unknown = set(frontends) - FRONTENDS.keys()
         if unknown:
@@ -111,8 +130,20 @@ def main(argv=None):
     # The same clock times the CPU readings, every sensor read and the Sampler's collections.
     sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io, pressure), interval,
                       clock=clock).start()
+    # low-frequency groups, each on its own thread and cadence, served by /api/observations
+    slow = [Slow(name, observe(), cfg[name].getfloat("interval"), clock[0])
+            for name, observe in (("storage", Storage), ("wifi", Wifi),
+                                  ("probe", lambda: Probe(parse_targets(cfg["probe"].get("targets")),
+                                                          cfg["probe"].getfloat("timeout"))))
+            if cfg[name].getboolean("enabled")]
+    observations = Observations(slow, sampler.instance_id, clock[1]).start()
+    # recent numbers of the published snapshots, in memory only (docs/history.md)
+    history = None
+    if cfg["history"].getboolean("enabled"):
+        history = History(cfg["history"].getfloat("retention"), interval)
+        sampler.on_publish = history.append
     threads = [t for name, start in FRONTENDS.items()
-               if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name]))]
+               if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name], observations, history))]
     if not threads:
         p.error("no frontend is running; enable one in the config or with --frontends")
     try:

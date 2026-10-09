@@ -37,18 +37,47 @@ const held = body => () => new Promise(resolve => { release = () => resolve(repl
 
 const answers = [];  // what the next requests get, in order
 let fetches = 0;
-global.fetch = (url, opts) => { fetches++; return answers.shift()((opts || {}).signal); };
+const obsAnswers = [];  // what /api/observations requests get, in order; a 404 (older server) when none is queued
+let obsFetches = 0;
+const histAnswers = [];  // /api/history answers, in order; 404 (off, or an older server) when none is queued
+let histFetches = 0;
+global.fetch = (url, opts) => {
+  if (url === 'api/observations') { obsFetches++; return (obsAnswers.shift() || (() => Promise.resolve(reply(404, {}))))(); }
+  if (url.startsWith('api/history')) { histFetches++; return (histAnswers.shift() || (() => Promise.resolve(reply(404, {}))))(); }
+  fetches++; return answers.shift()((opts || {}).signal);
+};
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
-  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML,
+  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
 (async () => {
-  // an older server without sample metadata, through every kind of failure
+  // an older server without sample metadata, through every kind of failure; its observations answer once, then 404
+  obsAnswers.push(ok({schema_version: 1, groups: {storage: {state: 'stale', interval_ms: 30000,
+    observation: {id: 3, data_age_ms: 95000, stale: true}, data: {
+      filesystems: [{device: 'nvme0n1p1', major: 259, minor: 1, fstype: 'ext4', source: '/dev/nvme0n1p1', total_bytes: 4 * 2 ** 30,
+                     used_bytes: 2 ** 30, available_bytes: 3 * 2 ** 30, mount_points: [{path: '/mnt/<b>x</b>', read_only: true},
+                     ...Array.from({length: 60}, (_, i) => ({path: '/bind/' + i, read_only: false}))]},
+                    {device: null, major: 0, minor: 40, fstype: 'btrfs', source: '/dev/sdb', total_bytes: null,
+                     used_bytes: null, available_bytes: null, mount_points: [{path: '/data', read_only: false}]}],
+      partitions: [{name: 'nvme0n1p1', disk: 'nvme0n1', size_bytes: 4 * 2 ** 30, mount_points: ['/']},
+                   {name: 'nvme0n1p2', disk: 'nvme0n1', size_bytes: 2 ** 27, mount_points: []}]}},
+    wifi: {state: 'ok', observation: {id: 9, data_age_ms: 2000, stale: false}, data: {interfaces: [
+      {name: 'wlan0', connected: true, signal_dbm: -64, signal_raw: null, link_quality: 46, noise_dbm: null},
+      {name: 'wlan1', connected: false, signal_dbm: null, signal_raw: null, link_quality: null, noise_dbm: null},
+      {name: '<i>x</i>', connected: true, signal_dbm: null, signal_raw: 70, link_quality: null, noise_dbm: null}]}},
+    probe: {state: 'ok', observation: {id: 4, data_age_ms: 1000, stale: false}, data: {provider: 'tcp_connect', timeout_ms: 2000, targets: [
+      {address: '192.0.2.1', port: 443, connect_ms: 12.34, reason: null, attempts: 10, failures: 1, failure_ratio: 0.1},
+      {address: '2001:db8::1', port: 22, connect_ms: null, reason: 'timeout', attempts: 3, failures: 3, failure_ratio: 1}]}}}}));
+  histAnswers.push(ok({schema_version: 1, retention_s: 600, interval_ms: 1000, dropped_series: 0, series: {
+    'memory/used_bytes': [[1, 3000, 2 ** 30], [2, 2000, 2 ** 31], [3, 1000, 2 ** 31]],
+    'network/netns1:x/2/eth0/rx_bytes_per_s': [[1, 3000, null], [2, 2000, 1024], [3, 1000, null]],
+    'network/netns1:x/3/<b>/tx_bytes_per_s': [[3, 1000, 5]],
+    'cpu/0/usage': [[1, 3000, 5]], 'unknown/series': [[1, 1, 1]]}}));
   answers.push(ok(SNAP));
   eval(code);  // the page script ends with tick()
   await settle(); report('ok');
