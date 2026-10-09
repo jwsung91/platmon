@@ -1,5 +1,23 @@
 # Release readiness (integration of #32–#38)
 
+## Post-integration candidate status (2026-10-09)
+
+The follow-up on main `e1e7c9f` is **not yet release-ready**. PR #40 (`ee31422`) and #41 (`2aa7d79`)
+are Ready for review; #42 (`9555c23`) remains Draft. The three-PR combination lives only on
+`integration/post-integration-rc`, with successful local/Chromium/Node and Python 3.9/3.13 integration
+checks. A reproduced cached History age issue was fixed. New classifier-only ARM evidence meets
+2.0% CPU and 2 ms p95 on both boards; it does not substitute for final combined service measurement.
+
+ARM History retention, changed Wi-Fi cost, exact combined CPU/RSS and isolated container/native/systemd
+execution are still open. A new attempt was interrupted to avoid overlapping another session's board
+suite; no partial result is a pass. See the [current evidence and gate report](development/post-integration-validation.md)
+for SHAs, CI counts, full scope, raw preservation and coordination limits. This candidate excludes
+concurrent #43/#44; their different code and measurements must be reconciled before release selection.
+
+All defaults and production `8525942` remain unchanged. No merge to main, release, tag, image push or
+deployment was performed. The integrated `c2752c1` numbers below and its earlier verification summary
+are historical evidence only; they are not acceptance of the follow-up candidate.
+
 Status of the features built on top of main `85259427f20b` (#31), checked together on the
 `integration/release-candidate` branch before they were merged. All of them are on main now (#32 → #33 →
 #34 → #36 → #37 → #38, then #35; main `007a422`); each was merged on its own PR with its tree checked equal to
