@@ -513,8 +513,11 @@ def test_product_network_on_and_off_change_the_real_calls(tmp_path, capsys):
     attempts = len(on["tables"]["attempt"]["rows"])
     assert len(on["tables"]["network"]["rows"]) == attempts > 0  # one product network call per collection
     assert off["tables"]["network"]["rows"] == []
-    assert on["scope"] == off["scope"] and on["scope"]["product_network"]["interfaces"] > 0
+    assert on["scope"]["product_network"]["interfaces"] > 0 and off["scope"]["product_network"]["interfaces"] > 0
     assert "network" not in on["scope"]["collectors"]  # the intended difference is not a scope change
+    assert {k: v for k, v in on["scope"].items() if k != "product_network"} == \
+           {k: v for k, v in off["scope"].items() if k != "product_network"}
+    nics_changed = on["scope"]["product_network"] != off["scope"]["product_network"]  # a shared CI host can
     assert all(r[-1] == 0 for r in on["tables"]["attempt"]["rows"])  # no data-age fallback
     results = tmp_path / "results.jsonl"
     results.write_text("".join(json.dumps(run_rec(s)) + "\n" for s in (off, on, on, off)))
@@ -523,8 +526,12 @@ def test_product_network_on_and_off_change_the_real_calls(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["comparisons"] == [] and len(out["network_comparisons"]) == 1
     c = out["network_comparisons"][0]
-    assert c["arms"] == {"b0": "network off", "b1": "network on"} and c["problems"] == []
-    assert c["network_calls_when_off"] == 0 and c["network_ms"]["n"] > 0 and c["blocks"]["c0-1"]["delta_pp"] is not None
+    assert c["arms"] == {"b0": "network off", "b1": "network on"}
+    if nics_changed:  # ... add or drop an interface between the two runs: then they must not be compared
+        assert "scope differs" in c["problems"][0] and c["blocks"]["c0-1"]["delta_pp"] is None
+    else:
+        assert c["problems"] == [] and c["blocks"]["c0-1"]["delta_pp"] is not None
+    assert c["network_calls_when_off"] == 0 and c["network_ms"]["n"] > 0
     cadence.main(["report", "--md", str(results)])
     assert "| t | 0 |" in capsys.readouterr().out
 
