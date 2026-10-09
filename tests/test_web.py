@@ -159,3 +159,11 @@ def test_storage_from_observations(steps):
 def test_observations_404_stops_asking(steps):
     """The next poll gets a 404 (an older server): the panel is cleared and never asked for again."""
     assert steps["read_based_age"]["sto"] == "" and steps["read_based_age"]["obs_fetches"] == 2
+
+
+def test_wifi_from_observations(steps):
+    wifi = steps["ok"]["wifi"]
+    assert "observed 2 s ago" in wifi and "-64 dBm" in wifi and "link quality 46" in wifi
+    assert "wlan1</span><span>not connected" in wifi  # no last signal, no 0
+    assert "signal 70 (unit not reported)" in wifi and "&#60;i&#62;x&#60;/i&#62;" in wifi and "<i>" not in wifi
+    assert steps["read_based_age"]["wifi"] == ""  # cleared after the server stopped answering it (404)

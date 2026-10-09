@@ -146,6 +146,28 @@ def aged(body, seconds):
     return {**body, "groups": groups}
 
 
+def wifi_lines(obs):
+    """Wireless interfaces from /api/observations: the signal while connected, never the last one after."""
+    groups = obs.get("groups") if isinstance(obs, dict) else None
+    g = groups.get("wifi") if isinstance(groups, dict) else None
+    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
+    items = data.get("interfaces") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items or not isinstance(o, dict):
+        return []
+    age = f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
+    out = [f"WIFI  {age}"]
+    for i in items:
+        if not i["connected"]:
+            out.append(f"  {i['name']}  not connected")
+            continue
+        signal = (f"{i['signal_dbm']} dBm" if i["signal_dbm"] is not None
+                  else f"signal {i['signal_raw']} (unit not reported)" if i["signal_raw"] is not None else "signal n/a")
+        extra = [f"link quality {i['link_quality']}" if i["link_quality"] is not None else "",
+                 f"noise {i['noise_dbm']} dBm" if i["noise_dbm"] is not None else ""]
+        out.append(f"  {i['name']}  {signal}" + "".join(f"  {e}" for e in extra if e))
+    return out
+
+
 def collection_note(s):
     """Optional groups that could not read everything ("Collection: temperature partial, gpu error");
     empty when all read fine or are just absent (no GPU, no fans), and for servers without collectors."""
@@ -191,7 +213,7 @@ def render(s, obs=None):
     for f in s["fans"]:
         vals = [f"{f['rpm']} rpm" if f["rpm"] is not None else "", f"{f['percent']}%" if f["percent"] is not None else ""]
         lines.append(f"FAN   {f['name']}  " + ("  ".join(v for v in vals if v) or "n/a"))  # n/a: unreadable
-    extra = counters_lines(s) + storage_lines(obs)
+    extra = counters_lines(s) + storage_lines(obs) + wifi_lines(obs)
     if extra and lines[-1]:
         lines.append("")
     return "\n".join(lines + extra)

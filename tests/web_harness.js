@@ -48,7 +48,7 @@ const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
-  net: el('net').innerHTML, dio: el('dio').innerHTML, sto: el('sto').innerHTML, obs_fetches: obsFetches,
+  net: el('net').innerHTML, dio: el('dio').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, obs_fetches: obsFetches,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -62,7 +62,11 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
                     {device: null, major: 0, minor: 40, fstype: 'btrfs', source: '/dev/sdb', total_bytes: null,
                      used_bytes: null, available_bytes: null, mount_points: [{path: '/data', read_only: false}]}],
       partitions: [{name: 'nvme0n1p1', disk: 'nvme0n1', size_bytes: 4 * 2 ** 30, mount_points: ['/']},
-                   {name: 'nvme0n1p2', disk: 'nvme0n1', size_bytes: 2 ** 27, mount_points: []}]}}}}));
+                   {name: 'nvme0n1p2', disk: 'nvme0n1', size_bytes: 2 ** 27, mount_points: []}]}},
+    wifi: {state: 'ok', observation: {id: 9, data_age_ms: 2000, stale: false}, data: {interfaces: [
+      {name: 'wlan0', connected: true, signal_dbm: -64, signal_raw: null, link_quality: 46, noise_dbm: null},
+      {name: 'wlan1', connected: false, signal_dbm: null, signal_raw: null, link_quality: null, noise_dbm: null},
+      {name: '<i>x</i>', connected: true, signal_dbm: null, signal_raw: 70, link_quality: null, noise_dbm: null}]}}}}));
   answers.push(ok(SNAP));
   eval(code);  // the page script ends with tick()
   await settle(); report('ok');
