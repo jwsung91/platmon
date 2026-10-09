@@ -7,7 +7,8 @@ const elements = {}, requests = [], timers = new Map(), intervals = [], listener
 let now = 0, next = 0;
 const context = vm.createContext({
   AbortController, console, performance: {now: () => now},
-  document: {visibilityState: 'visible', getElementById: id => elements[id] ||= {innerHTML: '', textContent: ''},
+  document: {visibilityState: 'visible', getElementById: id => elements[id] ||= {innerHTML: '', textContent: '', value: '',
+    setAttribute() {}, addEventListener() {}, focus() {}},
     querySelectorAll: () => [], addEventListener: (_, fn) => listeners.push(fn)},
   setTimeout: (fn, ms) => { timers.set(++next, {fn, ms}); return next; },
   clearTimeout: id => timers.delete(id), setInterval: fn => intervals.push(fn),
@@ -20,6 +21,7 @@ const flush = async () => { for (let n = 0; n < 6; n++) await new Promise(setImm
 const count = path => requests.filter(r => r.url.startsWith(path)).length;
 (async () => {
   vm.runInContext(code, context);
+  vm.runInContext("activateTab('network')", context);
   await flush();
   now = 11000; intervals.forEach(fn => fn()); await flush();
   assert.equal(count('api/observations'), 1, 'a hanging observation request must not overlap another');

@@ -218,3 +218,10 @@ def test_cached_history_age_keeps_advancing():
         pytest.skip("node not installed")
     subprocess.run([NODE, str(ROOT / "tests/web_history_age_harness.js"),
                     str(ROOT / "frontends/web/index.html")], check=True, timeout=30)
+
+
+def test_views_share_polling_and_suspend_when_hidden():
+    if NODE is None:
+        pytest.skip("node not installed")
+    subprocess.run([NODE, str(ROOT / "tests/web_views_harness.js"),
+                    str(ROOT / "frontends/web/index.html")], check=True, timeout=30)

@@ -39,6 +39,14 @@ network counters: [docs/network.md](docs/network.md); disk I/O counters: [docs/d
 [docs/history.md](docs/history.md); pressure stall information: [docs/pressure.md](docs/pressure.md)). The API has no
 authentication. Run it on trusted networks only.
 
+The web page opens with an Overview of CPU, RAM, root filesystem capacity and available GPU,
+temperature and network readings. CPU is the mean of measured cores; network names the first
+non-loopback interface rather than summing overlapping interfaces. Resources, Network, Storage and
+Temperature & power tabs show details and related recent history. The common header keeps connection
+errors and data age visible in every view. Tabs support arrow-key focus and Enter/Space activation.
+Only the active view renders; detail tabs share cached history, and a hidden browser page suspends
+polling until it returns. This does not pause the device's collector or history recording.
+
 To run the server in the foreground instead (e.g. while developing):
 `python3 platmon.py [platmon.ini]`. `platmon.ini` lists every option with its default (collection
 interval, collector on/off switches, HTTP bind/port, web page on/off).

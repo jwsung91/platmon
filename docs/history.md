@@ -79,10 +79,15 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 
 ## Web page
 
-With history on, the page shows a "History" panel: a small line per CPU, memory, temperature, network, disk and low-frequency
-series (at most 12, with an omission notice), the latest value next to it, "no value" when the latest point is a gap; a gap breaks the
+With history on, each detail tab shows a "Recent history" panel with that topic's CPU, memory,
+temperature, network, disk or low-frequency series (at most 12, with an omission notice). The series
+selector can show any individual series, including those beyond the first 12. Each graph uses its own
+scale and shows the latest value next to it, "no value" when the latest point is a gap; a gap breaks the
 line. Horizontal position uses actual elapsed age, not equally spaced indexes. Each row says the latest
-point age, advanced with browser elapsed time between responses; these are historical values, not a fresh live reading. It asks `/api/history?points=120` at most every 10 s while visible and stops after a 404. The
+point age, advanced with browser elapsed time between responses; these are historical values, not a fresh live reading.
+Only the age text changes each second; SVG graphs change on a response or view/series selection.
+Detail tabs share one `/api/history?points=120` cache, polled at most every 10 s while the page is visible;
+switching tabs does not reset that deadline. Overview does not request history. A 404 stops polling. The
 `platmon` command and `/text` do not show history.
 
 ## Not included

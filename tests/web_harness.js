@@ -5,7 +5,8 @@ const fs = require('fs');
 const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 
 const els = {};
-const el = id => (els[id] ||= {innerHTML: '', textContent: '', hidden: false, lastElementChild: null});
+const el = id => (els[id] ||= {innerHTML: '', textContent: '', value: '', hidden: false, lastElementChild: null,
+  setAttribute() {}, addEventListener() {}, focus() {}});
 const listeners = [];
 global.document = {getElementById: el, querySelectorAll: () => [], visibilityState: 'visible',
   addEventListener: (type, fn) => type === 'visibilitychange' && listeners.push(fn)};
@@ -47,12 +48,12 @@ global.fetch = (url, opts) => {
   fetches++; return answers.shift()((opts || {}).signal);
 };
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
-const report = step => console.log(JSON.stringify({
+const report = step => { captureViews(); console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
   net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches,
-}));
+})); };
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
 (async () => {
@@ -82,7 +83,22 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
     'observation/wifi/ns:a/2/wlan0/signal_dbm': [[1, 2000, -64]],
     'observation/storage/8:1/token/used_bytes': [[1, 3000, 2 ** 30]], 'unknown/series': [[1, 1, 1]]}}));
   answers.push(ok(SNAP));
-  eval(code);  // the page script ends with tick()
+  // Exercise all existing row-format contracts independently of which view is selected.
+  // The separate view harness checks that the real polling path renders only the active view.
+  eval(code + `
+    activateTab('network');
+    globalThis.captureViews = () => {
+      if (latestStats) {
+        renderResources(latestStats);
+        $('net').innerHTML = netRows(latestStats);
+        $('dio').innerHTML = diskRows(latestStats);
+      }
+      $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows();
+      const saved = activeTab; let all = '';
+      for (const tab of TABS.slice(1)) { activeTab = tab; all += histRows(); }
+      activeTab = saved; $('hist').innerHTML = all;
+    };
+  `);
   await settle(); report('ok');
   await next(() => Promise.resolve(reply(503, {error: 'no current data'})), '503');
   await next(hang);
