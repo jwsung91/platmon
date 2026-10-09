@@ -46,6 +46,8 @@
   <section><h2>GPU · Memory · Disk</h2><div id="res"></div></section>
   <section><h2>Temperature</h2><div id="temp"></div></section>
   <section><h2>Power · Fan</h2><div id="pwr"></div></section>
+  <section><h2>Network</h2><div id="net"></div></section>
+  <section><h2>Disk I/O</h2><div id="dio"></div></section>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -69,6 +71,35 @@ function cpuNote(s) {
   if (!whys.length) return '';
   return 'CPU sampling: ' + (!s.cpu.length && whys.length === 1 ? whys[0]
     : whys.map(why => groups[why].join(' ') + ' ' + why).join('; '));
+}
+
+// network interfaces and disks with the rates the server computed (same wording as cli.py); a counter
+// without a rate says why, it is never shown as 0. I/O time is the share of the window with I/O in flight.
+const RATE_REASONS = {warmup: 'warming up', gap: 'restarting after a gap', counter_regressed: 'counter went backwards',
+  invalid_interval: 'invalid interval', identity_unavailable: 'identity unknown', namespace_changed: 'namespace changed'};
+const perS = v => {
+  let i = 0;
+  while (Math.abs(v) >= 1024 && i < 3) { v /= 1024; i++; }
+  return (i ? v.toFixed(1) : v.toFixed(0)) + ' ' + ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'][i];
+};
+const why = x => esc(RATE_REASONS[x.reason] || x.reason);
+const listOf = (obj, key) => obj && Array.isArray(obj[key]) ? obj[key] : [];
+function netRows(s) {
+  const items = listOf(s.network, 'interfaces');
+  return items.length ? '<div class="muted">bytes/s · this process\'s network namespace</div>' + items.map(i => {
+    const r = i.rates, bad = ['errors', 'dropped'].filter(k => i.rx[k] || i.tx[k]).map(k => `${k} ${i.rx[k]}/${i.tx[k]}`);
+    return kv(esc(i.name), r ? `rx ${perS(r.rx_bytes_per_s)} · tx ${perS(r.tx_bytes_per_s)}` : why(i)) +
+      (bad.length ? `<div class="muted">${bad.join(' · ')} (rx/tx, total)</div>` : '');
+  }).join('') : '';
+}
+function diskRows(s) {
+  const items = listOf(s.disk_io, 'disks');
+  return items.map(d => {
+    const r = d.rates;
+    return kv(esc(d.name), r ? `read ${perS(r.read_bytes_per_s)} · write ${perS(r.write_bytes_per_s)}` : why(d)) +
+      (r ? `<div class="muted">reads ${r.reads_per_s.toFixed(1)}/s · writes ${r.writes_per_s.toFixed(1)}/s · I/O time ${(100 * r.io_time_ratio).toFixed(1)}%` +
+        (d.in_flight ? ` · in flight ${d.in_flight}` : '') + '</div>' : '');
+  }).join('');
 }
 
 // optional groups that could not read everything, as in cli.py; nothing for absent sensors or older servers
@@ -97,6 +128,8 @@ function render(s) {
   $('temp').innerHTML = Object.entries(s.temperature).map(([k, v]) => kv(k, v.toFixed(1) + ' °C')).join('');
   $('pwr').innerHTML = Object.entries(s.power).map(([k, v]) => kv(k, v.toFixed(2) + ' W')).join('') +
     s.fans.map(f => kv('Fan ' + f.name, ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
+  $('net').innerHTML = netRows(s);
+  $('dio').innerHTML = diskRows(s);
   document.querySelectorAll('section').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
 }
 

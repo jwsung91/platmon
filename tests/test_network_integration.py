@@ -310,7 +310,8 @@ def test_http_answers_with_network(service):
     assert answers["/nope"][0] == 404
     stats = json.loads(answers["/api/stats"][2])
     assert stats["schema_version"] == 1 and stats["network"]["interfaces"][0]["name"] == "eth0"
-    assert b"eth0" not in answers["/text"][2]  # no network panel in the text view
+    text = answers["/text"][2].decode()  # the same renderer as the platmon command
+    assert "NET   bytes/s, this process's network namespace" in text and "  eth0  " in text
 
 
 def test_generic_callable_with_a_network_key_is_passed_through():

@@ -165,3 +165,45 @@ def test_render_collection_note_only_for_read_failures():
 def test_render_odd_collectors(collectors):
     out = render(dict(FULL, collectors=collectors))  # no exception for unknown shapes, groups or reasons
     assert out.startswith("Test Board\n")
+
+
+C0 = {"errors": 0, "dropped": 0}
+
+
+def iface(name, rates=None, reason=None, rx=C0, tx=C0):
+    return {"name": name, "ifindex": 2, "rx": {"bytes": 1, "packets": 1, **rx}, "tx": {"bytes": 1, "packets": 1, **tx},
+            "rates": rates, "window_ms": 1000.0 if rates else None, "reason": reason}
+
+
+NET_RATES = {"rx_bytes_per_s": 1536.0, "tx_bytes_per_s": 0.0, "rx_packets_per_s": 2.0, "tx_packets_per_s": 0.4}
+DISK_RATES = {"read_bytes_per_s": 3 * 2**20, "write_bytes_per_s": 512.0, "reads_per_s": 4.0, "writes_per_s": 0.5,
+              "io_time_ratio": 0.034}
+
+
+def test_render_network_and_disk_io():
+    s = dict(FULL, network={"interfaces": [iface("eth0", NET_RATES, rx={"errors": 3, "dropped": 0}),
+                                           iface("wlan0", reason="warmup"), iface("x", reason="new_code")]},
+             disk_io={"disks": [{"name": "nvme0n1", "in_flight": 2, "rates": DISK_RATES, "reason": None},
+                                {"name": "sda", "in_flight": 0, "rates": None, "reason": "counter_regressed"}]})
+    out = render(s).splitlines()
+    i = out.index("NET   bytes/s, this process's network namespace")
+    assert out[i + 1:i + 4] == ["  eth0   rx 1.5 KiB/s  tx 0 B/s  2.0/0.4 pkt/s  errors 3/0 (rx/tx, total)",
+                                "  wlan0  warming up", "  x      new_code"]
+    assert out[i + 4:] == ["IO    bytes/s per disk",
+                           "  nvme0n1  read 3.0 MiB/s (4.0/s)  write 512 B/s (0.5/s)  I/O time 3.4%  in flight 2",
+                           "  sda      counter went backwards"]
+    assert out[i - 1] == ""  # one blank line before, never two
+
+
+def test_render_limits_rows_and_says_how_many_were_left_out():
+    names = [f"veth{n:02d}" for n in range(15)] + ["a-very-long-interface-name"]
+    out = render(dict(FULL, network={"interfaces": [iface(n, NET_RATES) for n in names]})).splitlines()
+    rows = out[out.index("NET   bytes/s, this process's network namespace") + 1:]
+    assert len(rows) == 13 and rows[-1] == "  +4 more interfaces (all in /api/stats)"
+    assert rows[0].startswith("  veth00            rx")  # names padded to at most 16 columns
+
+
+@pytest.mark.parametrize("extra", [{}, {"network": None, "disk_io": None}, {"network": {"interfaces": []}},
+                                   {"network": {"interfaces": "odd"}, "disk_io": {"disks": 5}}, {"network": "odd"}])
+def test_render_without_counters_is_unchanged(extra):
+    assert render(dict(FULL, **extra)) == render(FULL)

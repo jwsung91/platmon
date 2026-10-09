@@ -132,7 +132,6 @@ A one-off `collect(network=NetworkCounters())` has all interfaces in `warmup` an
 
 ## Not included
 
-No numbers on the web page, in the `platmon` command or `/text` (a `partial`/`error` group is named in
-the existing "Collection:" line). Not collected: Wi-Fi signal (RSSI), round-trip time or ping, packet
-capture, link speed and duplex, access point scans, disk I/O, pressure stall information (PSI),
-filesystem usage, history. Measured cost: [performance/network-product.md](performance/network-product.md).
+Shown on the web page, in the `platmon` command and `/text` (see [api.md](api.md#web-page)). Not
+collected: Wi-Fi signal (RSSI), round-trip time or ping, packet capture, link speed and duplex, access
+point scans, pressure stall information (PSI), filesystem usage, history (disk I/O: [disk-io.md](disk-io.md)). Measured cost: [performance/network-product.md](performance/network-product.md).
