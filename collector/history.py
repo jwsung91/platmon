@@ -87,7 +87,7 @@ class History:
 
     def append(self, record):
         self._append("core", record["sequence"], record["started"], self._interval,
-                     points_of(record["stats"], record.get("sensor_meta")))
+                     points_of(record["stats"], record.get("sensor_meta")), record.get("gap_before", False))
 
     def append_observation(self, name, interval, record):
         if name not in ("storage", "wifi", "probe"):
@@ -98,7 +98,7 @@ class History:
             values = {sid: None for sid in values}
         self._append(name, record["id"], record["started"], interval, values)
 
-    def _append(self, owner, sequence, started, interval, values):
+    def _append(self, owner, sequence, started, interval, values, gap_before=False):
         gap_ns = round(max(3 * interval, 5.0) * 1e9)
         with self._lock:
             last = self._latest.get(owner)
@@ -127,7 +127,7 @@ class History:
                     self._owners[sid] = owner
                 if sid in present:
                     self._seen[sid] = started
-                if series and started - series[-1][1] > gap_ns:
+                if series and (gap_before or started - series[-1][1] > gap_ns):
                     series.append((sequence, started - 1, None))  # explicit break after a stalled publisher
                 number = value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
                 if number is not None and (abs(number) > 2**64 or not math.isfinite(number)):
