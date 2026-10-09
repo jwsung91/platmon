@@ -653,3 +653,20 @@ def test_service_cpu_measures_the_real_service(tmp_path):
     r = json.loads(out.read_text())
     assert r["exit"] == 0 and r["requests"]["stats"]["n"] >= 2 and r["requests"]["stats"]["errors"] == 0
     assert r["cpu_pct_one_core"] >= 0 and r["memory_end"]["rss_kib"] > 0
+    assert r['pid_gone'] and r['port_closed'] and not r['forced_kill']
+    assert r['requests']['history']['statuses'] == {}  # 2 s window: next optional poll not due
+    assert r['history_samples'] and len(r['health']) == 2
+    assert r['final_documents']['history_full']['retention_s'] == 600
+
+
+def test_service_bench_rejects_an_occupied_port(tmp_path):
+    import socket
+    from benchmarks import service_cpu
+    with socket.socket() as occupied:
+        occupied.bind(('127.0.0.1', 0))
+        occupied.listen()
+        ini = tmp_path / 'test.ini'
+        ini.write_text('[http]\nbind = 127.0.0.1\n')
+        with pytest.raises(OSError):
+            service_cpu.main(['--ini', str(ini), '--port', str(occupied.getsockname()[1]),
+                              '--out', str(tmp_path / 'result.json')])
