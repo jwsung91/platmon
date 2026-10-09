@@ -24,7 +24,11 @@ Last update: 2026-10-09 13:30 KST. main: `85259427f20b` (#31, Network on by defa
   ready, network collector ok in the container's namespace (`eth0`, `lo`), the same 20 source records; the
   service used 1.32 % of one core over 60 s without clients. Rollback to `e1bc82a`:
   `~/platmon-rollback-e1bc82a-20261009-114530/ROLLBACK.md` (image `platmon:rollback-e1bc82a`; SHA256SUMS verify).
-- Raspberry Pi: still `e1bc82a`; its rollout was not requested.
+- Raspberry Pi: fast-forwarded to `8525942` and restarted the same way it was started (detached
+  `python3 platmon.py platmon.ini`) on 2026-10-09 14:20 KST at the owner's request. `/api/status` ready,
+  network ok (`eth0`, `lo`, `wlan0`), the same 5 source records, 0.97 % of one core over 60 s without
+  clients, `get_throttled` 0x0. Previous log: `~/platmon.log.e1bc82a`; to go back, `git switch --detach
+  e1bc82a` in its checkout and restart the same way.
 
 ## Device records
 
