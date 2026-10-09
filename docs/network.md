@@ -1,7 +1,7 @@
 # Network counters
 
-`/api/stats` has a `network` object when `[network] enabled = yes` is set; it is **off by default**
-(see [Configuration](#configuration-and-direct-calls)). It holds the
+`/api/stats` has a `network` object while `[network] enabled = yes` (the default; see
+[Configuration](#configuration-and-direct-calls)). It holds the
 per-interface counters of **platmon's own network namespace**, read from `/proc/self/net/dev` once per
 collection by the collector thread, and rates over the time between two such readings. Nothing is sent,
 probed or captured. General API rules (freshness, `collectors`, 503): [api.md](api.md).
@@ -108,24 +108,23 @@ the fallback.
 
 ## Configuration and direct calls
 
-Network collection is **opt-in**. Without a config file, with an INI that has no `[network]` section
-(written before it existed) or no `enabled` key, and with `enabled = no`, platmon makes no
-`NetworkCounters` and never reads the counters: there is no `network` and no `collectors.network`. To
-turn it on:
+Network collection is **on by default**: also without a config file, and with an INI that has no
+`[network]` section (written before it existed) or no `enabled` key. To turn it off:
 
 ```ini
 [network]
-enabled = yes
+enabled = no
 ```
 
-Everything above then applies unchanged. The collection interval is `[core] interval`; there is no
-separate one.
+Then platmon makes no `NetworkCounters` and never reads the counters: there is no `network` and no
+`collectors.network`. An INI that already says `no` stays off. The collection interval is
+`[core] interval`; there is no separate one.
 
-Why it is off by default: switched on, it measured +0.160 pp (Jetson Orin Nano, 10 interfaces) and
-+0.175 pp (Raspberry Pi 4, 3 interfaces) of one core at a 1 s interval with one client polling every
-second, above the 0.1 pp budget set for it; latency, memory and error limits were met
-([performance/network-product.md](performance/network-product.md)). The default keeps that cost off
-installations that do not use the counters. It does not make the feature cheaper when enabled.
+Cost when on: +0.160 pp (Jetson Orin Nano, 10 interfaces) and +0.175 pp (Raspberry Pi 4, 3 interfaces)
+of one core for the whole process at a 1 s interval with one client polling every second; the default
+configuration stays within the 2.0 % release target of [performance/budget.md](performance/budget.md).
+It missed the earlier per-feature 0.1 pp target, which stays recorded as not met
+([performance/network-product.md](performance/network-product.md)).
 
 `collector.collect()` and `collect_recorded()` take an optional `network` (a
 `collector.network.NetworkCounters` kept between calls); without it they return what they did before.

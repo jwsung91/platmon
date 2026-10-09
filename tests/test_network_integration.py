@@ -40,26 +40,28 @@ def started(monkeypatch, ini=None):
     return made["collect"]
 
 
-def enabled_ini(tmp_path, text="[network]\nenabled = yes\n"):
+def ini_file(tmp_path, text):
     ini = tmp_path / "p.ini"
     ini.write_text(text)
     return str(ini)
 
 
-def test_enabled_when_asked_and_kept_by_the_service(monkeypatch, tmp_path):
-    collect = started(monkeypatch, enabled_ini(tmp_path))
+@pytest.mark.parametrize("text", [None, "[core]\ninterval = 1\n", "[network]\n", "[network]\nenabled = yes\n"])
+def test_on_unless_disabled_and_kept_by_the_service(monkeypatch, tmp_path, text):
+    """No config file, an INI without [network] (from before it existed), an empty [network], or yes."""
+    collect = started(monkeypatch, None if text is None else ini_file(tmp_path, text))
     assert collect.func is collector.collect_recorded
     cpu, logged, clock, network = collect.args
     assert isinstance(network, NetworkCounters) and network.clock is clock is cpu._clock
     assert network._max_gap == cpu._max_gap == 5 * S
 
 
-@pytest.mark.parametrize("text", [None, "[core]\ninterval = 1\n", "[network]\n", "[network]\nenabled = no\n"])
-def test_off_unless_enabled_and_never_reads(monkeypatch, tmp_path, text):
-    """No config file, an INI without [network] (from before it existed), an empty [network], or no."""
+@pytest.mark.parametrize("text", ["[network]\nenabled = no\n", "[core]\ninterval = 2\n[network]\nenabled = false\n"])
+def test_disabled_never_reads(monkeypatch, tmp_path, text):
+    """An explicit no is kept: no counters made, nothing read."""
     made, calls = [], []
     monkeypatch.setattr(platmon, "NetworkCounters", lambda *a, **k: made.append(a))
-    collect = started(monkeypatch, None if text is None else enabled_ini(tmp_path, text))
+    collect = started(monkeypatch, ini_file(tmp_path, text))
     assert collect.args[3] is None and made == []
     monkeypatch.setattr(NetworkCounters, "sample", lambda *a: calls.append(a))
     stats = collect().stats
@@ -75,8 +77,8 @@ def test_bad_network_config_is_refused(tmp_path, text, error):
         platmon.load_config(str(ini))
 
 
-def test_network_default_is_off():
-    assert not platmon.load_config()["network"].getboolean("enabled")
+def test_network_default_is_on():
+    assert platmon.load_config()["network"].getboolean("enabled")
 
 
 def test_direct_collect_without_network_is_unchanged():

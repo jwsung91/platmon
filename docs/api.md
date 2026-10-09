@@ -19,7 +19,7 @@ service starts; `/api/status` never waits.
 The metrics (`cpu`, `gpu`, `memory`, `disk`, `temperature`, `power`, `fans`, `time`, ...) keep their
 keys, units and types. Schema version 1 adds `schema_version`, `sample`, `collectors` and, from the
 service, `sensor_meta` next to them; answers without `schema_version` come from an older platmon (legacy)
-and have no sample metadata. With `[network] enabled = yes` (off by default) there is also `network`: the
+and have no sample metadata. With `[network] enabled = yes` (the default) there is also `network`: the
 interface counters and rates of platmon's own network namespace, described in [network.md](network.md).
 
 ```json

@@ -6,18 +6,19 @@ product and bench code with `[network]` off (A) and on (B). Not the passive prot
 ([passive-cost-rebaseline.md](passive-cost-rebaseline.md), Network part 0.026 / 0.047 pp) are not used as
 a prediction or a pass.
 
-## Decision: opt-in (default off)
+## Decision
 
-After the two rounds below, the 0.1 pp budget for Network switched on is **not met** (`31b4bbc`: +0.160 pp
-Orin, +0.175 pp Raspberry Pi) and stays recorded as not met; it is not raised and no further
-micro-optimization is planned. Network ships as an opt-in feature with this measured cost stated:
-`[network] enabled` defaults to `no` (built-in default and the shipped `platmon.ini`), and
-`enabled = yes` gives the measured feature unchanged. This limits what the default installation costs;
-it does not lower the cost when enabled, and the whole-process 1 % target is not met either way.
+- The per-feature 0.1 pp target is **not met** in either round below (`31b4bbc`: +0.160 pp Orin,
+  +0.175 pp Raspberry Pi) and stays recorded as not met. No further micro-optimization is planned.
+- First decision (`671e2c1`): Network opt-in (default off) under that target.
+- Superseded the same day by a new budget policy, [budget.md](budget.md): the default configuration's
+  whole process ≤ 2.0 % of one core per board, with per-collection and per-request costs as review
+  criteria. Re-evaluated under it from the `31b4bbc` measurements, Network on is 1.582 % (Orin) and
+  1.402 % (Raspberry Pi), so it is **on by default** again, with `[network] enabled = no` to turn it off.
 
-The default changed after the measurements, in a later commit. The code paths that were measured
+The defaults changed after the measurements, in later commits. The code paths that were measured
 (`collect_recorded` with or without a `NetworkCounters`, selected explicitly by the bench's
-`--product-network`) did not change, so the off/on numbers were not measured again on that commit;
+`--product-network`) did not change, so the off/on numbers were not measured again on those commits;
 they are the measurements of `8cc82b0` and `31b4bbc`.
 
 ## Result (2026-10-09, product `8cc82b0`)
