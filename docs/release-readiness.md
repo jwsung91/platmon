@@ -237,8 +237,27 @@ For each device, at a fixed merged SHA (the procedure used for earlier rollouts)
 2. Keep rollback material: tag the running image `platmon:rollback-<old sha>`, and copy the compose files,
    INI, CLI, container inspect output, ROLLBACK.md and SHA256SUMS to `~/platmon-rollback-<old sha>-<time>/`.
 3. Build the candidate from `git archive <sha>` locally (`--provenance=false`); never pull or push images.
-4. Smoke-test the candidate under its own compose project on `127.0.0.1:19797`: healthy, `/api/stats` 200
-   with `network` and `disk_io`, source ids equal to the running service, then remove it.
+4. Smoke-test the candidate under its own compose project on `127.0.0.1:19797`. With the current
+   `network_mode: host`, a separate project does not isolate listening ports and `ports:` cannot remap
+   them. First confirm that 19797 is free. Copy the operational INI to a candidate-only `smoke.ini`,
+   preserving its collector settings, and change only its `[http]` listener:
+
+   ```ini
+   [http]
+   bind = 127.0.0.1
+   port = 19797
+   ```
+
+   Mount that file read-only at `/opt/platmon/platmon.ini` in the candidate's resolved Compose config,
+   replacing the normal INI mount at that target; do not edit the operational INI. Use a distinct
+   project name and candidate image tag. Before starting, inspect `docker compose ... config` to
+   confirm the candidate image, host networking, candidate INI source and absence of published ports.
+   The image health check reads the same INI. Check healthy, `/api/status` ready and `/api/stats` 200
+   with `network` and `disk_io`, and compare source ids with the running service. Remove only the
+   candidate project, confirm 19797 is released, and confirm the operating service's identity and
+   health are unchanged. An intentional bridge-mode test instead needs host networking removed and
+   its own port mapping; network namespace source ids then differ from the host. See
+   [Docker observation scope](docker-scope.md#networking).
 5. Switch: check out the SHA, tag the candidate as `platmon:local`, recreate only the platmon service;
    on the Raspberry Pi, fast-forward its checkout and restart the process the same way it was started.
 6. After: health, `/api/status` `ready`, CPU of the service compared with the integrated numbers above.
