@@ -91,7 +91,9 @@ interval = 30     ; seconds between observations, 5 to 3600
 30 s is a starting point: capacity changes slowly and the cost per observation is small (see the
 performance report); it was not derived as an optimum. Shown on the web page ("Storage") and in the
 `platmon` command and `/text` (`STORAGE` lines: filesystems with used / total and available, partitions
-counted per disk), with the observation's age.
+counted per disk), with the observation's age. A filesystem is shown by its first mount point and how many
+more there are ("/ +60 more": bind mounts can be dozens, e.g. under Docker Desktop on WSL); the full list is
+in the API.
 
 ## Not included
 

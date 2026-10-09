@@ -341,7 +341,7 @@ def test_cli_storage_lines_and_ages():
         "partitions": [{"name": "p1", "disk": "nvme0n1", "mount_points": ["/"]}, {"name": "p2", "disk": "nvme0n1", "mount_points": []}]}}}}
     assert storage_lines(aged(body, 6)) == [
         "STORAGE  observed 10 s ago",
-        "  / /srv (ro)  ext4 nvme0n1p1  used 1.0G/4.0G (25%)  available 3.0G",
+        "  / +1 more  ext4 nvme0n1p1  used 1.0G/4.0G (25%)  available 3.0G",
         "  /data  btrfs 0:40  capacity unknown",
         "  nvme0n1: 2 partitions, 1 mounted"]
     assert body["groups"]["storage"]["observation"]["data_age_ms"] == 4000  # the answer itself is kept

@@ -150,7 +150,8 @@ def test_counters_absent_or_odd_show_nothing(steps):
 def test_storage_from_observations(steps):
     sto = steps["ok"]["sto"]
     assert "observed 95 s ago (not current)" in sto  # the server's age, and stale says so
-    assert "1.0G/4.0G · 3.0G free" in sto and "/, /mnt/&#60;b&#62;x&#60;/b&#62; (ro)" in sto and "<b>" not in sto
+    assert "1.0G/4.0G · 3.0G free" in sto and "/mnt/&#60;b&#62;x&#60;/b&#62; (ro) +60 more" in sto and "<b>" not in sto
+    assert "/bind/" not in sto  # dozens of bind mounts: counted, not listed
     assert "capacity unknown" in sto and "0:40" in sto  # no numbers made up when statvfs gave none
     assert "nvme0n1p2" in sto and "not mounted" in sto
     assert steps["ok"]["obs_fetches"] == 1
