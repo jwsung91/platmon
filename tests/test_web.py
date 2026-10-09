@@ -211,3 +211,10 @@ def test_optional_polling_is_bounded():
         pytest.skip("node not installed")
     subprocess.run([NODE, str(ROOT / "tests/web_optional_harness.js"),
                     str(ROOT / "frontends/web/index.html")], check=True, timeout=30)
+
+
+def test_cached_history_age_keeps_advancing():
+    if NODE is None:
+        pytest.skip("node not installed")
+    subprocess.run([NODE, str(ROOT / "tests/web_history_age_harness.js"),
+                    str(ROOT / "frontends/web/index.html")], check=True, timeout=30)
