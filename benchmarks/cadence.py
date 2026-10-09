@@ -18,6 +18,8 @@ Passive off/on in one tree, see docs/performance/passive-cost-rebaseline.md:
 The product's own Network off/on (no passive prototype), see docs/performance/network-product.md:
   python3 benchmarks/cadence.py run --out DIR --alias orin --phase network-product --clients 1 --blocks 2 --budget-min 50 --max-windows 16
   python3 benchmarks/cadence.py run --out DIR --alias orin --phase network-product --clients 0 --blocks 1 --budget-min 50 --max-windows 16
+The product's Disk I/O off/on with Network on in both, see docs/performance/disk-io-product.md:
+  python3 benchmarks/cadence.py run --out DIR --alias orin --phase disk-product --clients 1 --blocks 2 --budget-min 50 --max-windows 12
 """
 import argparse
 import array
@@ -186,21 +188,29 @@ def scope_of(stats, passive):
     }
 
 
-def product_scope(stats, net):
-    """scope_of() for --product-network runs: the same sensor counts, with collectors.network (there only when
-    on, the intended difference) left out and what the network output describes added: the namespace id and
-    the interface names. net: the run's own network output (on) or one reading after the window (off)."""
+def names_sha(names):
+    return hashlib.sha256("\n".join(sorted(names)).encode()).hexdigest()[:16]
+
+
+def product_scope(stats, net, disk=None):
+    """scope_of() for --product-network (and --product-disk) runs: the same sensor counts, with
+    collectors.network / disk_io (there only when on, the intended difference) left out and what their output
+    describes added: the namespace id and interface names, the disk names. net, disk: the run's own output
+    (on) or one reading after the window (off); disk None without --product-disk."""
     scope = scope_of(stats, {})
     scope["collectors"].pop("network", None)
-    names = sorted(i["name"] for i in net["interfaces"])
-    scope["product_network"] = {"namespace": net["scope"]["id"], "interfaces": len(names),
-                                "names_sha": hashlib.sha256("\n".join(names).encode()).hexdigest()[:16]}
+    names = [i["name"] for i in net["interfaces"]]
+    scope["product_network"] = {"namespace": net["scope"]["id"], "interfaces": len(names), "names_sha": names_sha(names)}
+    if disk is not None:
+        scope["collectors"].pop("disk_io", None)
+        disks = [d["name"] for d in disk["disks"]]
+        scope["product_disk"] = {"disks": len(disks), "names_sha": names_sha(disks)}
     return scope
 
 
 def time_network(network, table):
-    """--product-network on: times each call of the product's NetworkCounters.sample (namespace, index list,
-    counter read, rates, diagnostics) where collect_recorded makes it, nothing else changed."""
+    """--product-network / --product-disk on: times each call of the product's NetworkCounters.sample or
+    DiskCounters.sample where collect_recorded makes it, nothing else changed."""
     sample = network.sample
 
     def timed(group):
@@ -243,6 +253,7 @@ def serve(a):
     from benchmarks.passive import Passive
     from collector import BOARD, PLATFORM, collect_recorded
     from collector.common import CpuCounters
+    from collector.disk_io import DiskCounters
     from collector.network import NetworkCounters
     from collector.sampler import Sampler, pick_clock
     from frontends import server
@@ -251,6 +262,7 @@ def serve(a):
     t_collect = Table(["t", "prod_ns", "prod_cpu_ns", "passive_ns", "passive_cpu_ns"], cap)
     t_attempt = Table(["t", "started", "elapsed_ns", "cpu_ns", "duration_ns", "ok", "sequence", "fallback"], cap)
     t_network = Table(["t", "elapsed_ns", "cpu_ns"], cap if a.product_network == "on" else 0)
+    t_disk = Table(["t", "elapsed_ns", "cpu_ns"], cap if a.product_disk == "on" else 0)
     req_cap = int((a.warmup + a.measure + 10) * max(a.expect_rps, 1)) + 64
     t_http = Table(["t", "elapsed_ns", "cpu_ns", "read_ns", "read_cpu_ns", "bytes", "code", "sequence"], req_cap)
     t_mem = Table(["t", "rss_bytes"], int((a.warmup + a.measure) / 10) + 8)
@@ -275,7 +287,10 @@ def serve(a):
     network = None  # without --product-network: collect_recorded exactly as the phases before it ran it
     if a.product_network == "on":
         network = time_network(NetworkCounters(clock[0], max_gap=max(3 * a.interval, 5.0)), t_network)
-    product = functools.partial(collect_recorded, cpu, {}, clock[0], network)
+    disk_io = None
+    if a.product_disk == "on":
+        disk_io = time_network(DiskCounters(clock[0], max_gap=max(3 * a.interval, 5.0)), t_disk)
+    product = functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io)
     probe = Passive() if a.variant == "B1" else (lambda: None)
     if a.instrumentation == "passive-parts" and a.variant == "B1":
         time_parts(probe, t_parts)
@@ -386,18 +401,20 @@ def serve(a):
     httpd.shutdown()
     installed.close()
     stats = sampler.read()[0] or {}
-    if a.product_network == "on":
-        scope = product_scope(stats, stats.get("network") or {"scope": {"id": None}, "interfaces": []})
-    elif a.product_network == "off":  # one reading after the window, never inside it, for the scope only
+    if a.product_network:  # an off part is read once after the window, never inside it, for the scope only
         from collector import sysfs
-        scope = product_scope(stats, NetworkCounters().sample(sysfs.Group("network"))[0])
+        net = (stats.get("network") or {"scope": {"id": None}, "interfaces": []} if a.product_network == "on"
+               else NetworkCounters().sample(sysfs.Group("network"))[0])
+        disk = None if not a.product_disk else (stats.get("disk_io") or {"disks": []} if a.product_disk == "on"
+                                                 else DiskCounters().sample(sysfs.Group("disk_io"))[0])
+        scope = product_scope(stats, net, disk)
     else:
         scope = scope_of(stats, Passive()() if a.variant == "B0" else stats.get("_bench_passive", {}))
     elapsed = (end["mono"] - start["mono"]) / 1e9
     boot = None if start["boot"] is None else (end["boot"] - start["boot"]) / 1e9
     out = {
         "kind": "serve", "run_id": a.run_id, "variant": a.variant, "instrumentation": a.instrumentation,
-        "product_network": a.product_network,
+        "product_network": a.product_network, "product_disk": a.product_disk,
         "breakdown": rec and rec.dump(), "wrapper_cost": cost, "profile": prof and prof.report(),
         "interval_s": a.interval, "warmup_s": a.warmup,
         "measure_s": a.measure, "platform": PLATFORM, "begin_mono": begin, "start": start, "end": end,
@@ -407,10 +424,10 @@ def serve(a):
         "cpu_pct_all_cores": cpu_pct_one_core(start["self"], end["self"], elapsed) / os.cpu_count(),
         "children_cpu_s": (end["children"]["ru_utime"] + end["children"]["ru_stime"])
                           - (start["children"]["ru_utime"] + start["children"]["ru_stime"]),
-        "buffer_bytes": sum(t.nbytes() for t in (t_collect, t_attempt, t_http, t_mem, t_parts, t_network)),
+        "buffer_bytes": sum(t.nbytes() for t in (t_collect, t_attempt, t_http, t_mem, t_parts, t_network, t_disk)),
         "scope": scope, "passive_io": {k: getattr(probe, k, None) for k in ("reads", "read_bytes", "lookups")},
         "tables": {"collect": t_collect.dump(), "attempt": t_attempt.dump(), "http": t_http.dump(),
-                   "mem": t_mem.dump(), "parts": t_parts.dump(), "network": t_network.dump()},
+                   "mem": t_mem.dump(), "parts": t_parts.dump(), "network": t_network.dump(), "disk": t_disk.dump()},
         "python": platform.python_version(), "source_hash": source_hash(), "bench_hash": bench_hash(),
     }
     with open(a.out, "w") as f:
@@ -575,6 +592,11 @@ def plan(phase, intervals, final=None, clients=(1, 0), blocks=2):
             for n in clients:
                 out += [dict(kind="serve", variant="B0", net=v, instr="reference", interval=1.0, clients=n, poll=1.0,
                              measure=120, block=f"c{n}-{b + 1}") for v in ("off", "on", "on", "off")]
+    elif phase == "disk-product":  # A/B = the product's Disk I/O off/on; Network on and the passive no-op in both
+        for b in range(blocks):
+            for n in clients:
+                out += [dict(kind="serve", variant="B0", net="on", disk=v, instr="reference", interval=1.0, clients=n,
+                             poll=1.0, measure=120, block=f"c{n}-{b + 1}") for v in ("off", "on", "on", "off")]
     elif phase == "passive-parts":  # diagnostic only: B1 with each passive part timed, bracketed by reference
         out += [dict(kind="serve", variant="B1", instr=m, interval=1.0, clients=0, poll=1.0, measure=120, block="parts-1")
                 for m in ("reference", "passive-parts", "passive-parts", "reference")]
@@ -830,7 +852,8 @@ def execute(me, run_id, c, a):
                                      "--warmup", str(a.warmup), "--measure", str(c["measure"]), "--port", str(a.port),
                                      "--instrumentation", c.get("instr", "reference"),
                                      "--out", path, "--run-id", run_id, "--expect-rps", str(c["clients"] / c["poll"]),
-                                     *(("--product-network", c["net"]) if c.get("net") else ())),
+                                     *(("--product-network", c["net"]) if c.get("net") else ()),
+                                     *(("--product-disk", c["disk"]) if c.get("disk") else ())),
                            stdout=subprocess.PIPE)
     ready = wait_line(srv, a.ready_timeout)
     if ready and ready.startswith("unsupported"):
@@ -885,6 +908,11 @@ def summarize_serve(rec):
         if s["tables"].get("network") else None,
         "network_cpu_ms": dist([r["cpu_ns"] / 1e6 for r in rows(s["tables"]["network"], t0, t1)])
         if s["tables"].get("network") else None,
+        "product_disk": s.get("product_disk"),
+        "disk_ms": dist([r["elapsed_ns"] / 1e6 for r in rows(s["tables"]["disk"], t0, t1)])
+        if s["tables"].get("disk") else None,
+        "disk_cpu_ms": dist([r["cpu_ns"] / 1e6 for r in rows(s["tables"]["disk"], t0, t1)])
+        if s["tables"].get("disk") else None,
         "passive_calls": len(col), "parts": parts_summary(s, t0, t1),
         "interval_s": s["interval_s"], "clients": rec["cond"]["clients"], "poll_s": rec["cond"]["poll"],
         "valid": rec["valid"], "invalid": rec.get("invalid"), "order": rec["order"],
@@ -992,21 +1020,22 @@ def compare(runs):
             "blocks": blocks(valid)}
 
 
-def network_compare(runs, recs):
-    """network-product: compare() with the product's Network off as b0 and on as b1 (the variant is B0, the
-    passive no-op, in both), plus what only these runs have: the network call itself (on runs; off runs must
-    have none) and per-arm means of the costs around it."""
+def network_compare(runs, recs, label="network"):
+    """network-product (label network) / disk-product (label disk): compare() with the product feature off
+    as b0 and on as b1 (the variant is B0, the passive no-op, in both), plus what only these runs have: the
+    feature's call itself (on runs; off runs must have none) and per-arm means of the costs around it."""
+    axis = f"product_{label}"
     arm = {"off": "B0", "on": "B1"}
-    out = {"arms": {"b0": "network off", "b1": "network on"},
-           **compare([dict(r, variant=arm[r["product_network"]]) for r in runs])}
+    out = {"arms": {"b0": f"{label} off", "b1": f"{label} on"},
+           **compare([dict(r, variant=arm[r[axis]]) for r in runs])}
     valid = [r for r in runs if r["valid"]]
-    on = [r for r in recs if r["valid"] and r["serve"]["product_network"] == "on"]
-    for name, field, scale in (("network_ms", "elapsed_ns", 1e6), ("network_cpu_ms", "cpu_ns", 1e6)):
-        per_run = [[x[field] / scale for x in rows(r["serve"]["tables"]["network"], r["serve"]["start"]["mono"],
+    on = [r for r in recs if r["valid"] and r["serve"].get(axis) == "on"]
+    for name, field, scale in ((f"{label}_ms", "elapsed_ns", 1e6), (f"{label}_cpu_ms", "cpu_ns", 1e6)):
+        per_run = [[x[field] / scale for x in rows(r["serve"]["tables"][label], r["serve"]["start"]["mono"],
                                                    r["serve"]["end"]["mono"])] for r in on]
         out[name] = {**dist([x for w in per_run for x in w]),
                      "per_run_max_p95": max((percentile(w, 95) for w in per_run if w), default=None)}
-    out["network_calls_when_off"] = sum((r["network_ms"] or {"n": 0})["n"] for r in valid if r["product_network"] == "off")
+    out[f"{label}_calls_when_off"] = sum((r[f"{label}_ms"] or {"n": 0})["n"] for r in valid if r[axis] == "off")
 
     def mean(values):
         v = [x for x in values if x is not None]
@@ -1028,8 +1057,8 @@ def network_compare(runs, recs):
         "client_failures": sum(r["client_failures"] for r in rs),
         "actual_interval_ms_p50": mean([r["actual_interval_ms"]["p50"] for r in rs]),
         "actual_interval_ms_max": max((r["actual_interval_ms"]["max"] or 0 for r in rs), default=None),
-    } for side, rs in (("off", [r for r in valid if r["product_network"] == "off"]),
-                       ("on", [r for r in valid if r["product_network"] == "on"]))}
+    } for side, rs in (("off", [r for r in valid if r[axis] == "off"]),
+                       ("on", [r for r in valid if r[axis] == "on"]))}
     return out
 
 
@@ -1091,9 +1120,11 @@ def report(a):
                        for r in recs if r["kind"] == "run" and not r.get("valid")],
            "runs": serves,
            "comparisons": [{"key": list(k), **compare(v), "pooled": pooled(raw[k])} for k, v in groups.items()
-                           if k[1] != "network-product"],
+                           if k[1] not in ("network-product", "disk-product")],
            "network_comparisons": [{"key": list(k), **network_compare(v, raw[k])} for k, v in groups.items()
                                    if k[1] == "network-product"],
+           "disk_comparisons": [{"key": list(k), **network_compare(v, raw[k], "disk")} for k, v in groups.items()
+                                if k[1] == "disk-product"],
            "probes": [summarize_probe(r) for r in recs if r["kind"] == "run" and "probe" in r]}
     if a.md:
         print(markdown(out))
@@ -1167,21 +1198,23 @@ def markdown(out):
             for name, v in c["blocks"].items():
                 lines.append(f"| {c['key'][0]} | {c['key'][1]} | {c['key'][3]} | {name} | {', '.join(f(x) for x in v['B0']) or '-'} "
                              f"| {', '.join(f(x) for x in v['B1']) or '-'} | {f(v['delta_pp'], 3)} | {'; '.join(v['problems']) or '-'} |")
-    if out.get("network_comparisons"):
-        lines += ["", "| platform | clients | off CPU % (runs) | on CPU % (runs) | on-off pp | spread pp | blocks on-off pp "
-                  "| network call p95 ms pooled elapsed/cpu (n) | max of per-run p95 ms | calls when off "
+    for label in ("network", "disk"):
+        if not out.get(f"{label}_comparisons"):
+            continue
+        lines += ["", f"| platform | clients | {label} off CPU % (runs) | on CPU % (runs) | on-off pp | spread pp | blocks on-off pp "
+                  f"| {label} call p95 ms pooled elapsed/cpu (n) | max of per-run p95 ms | calls when off "
                   "| attempt cpu mean ms off/on | handler cpu mean ms off/on | response KiB off/on | RSS end MiB off/on "
                   "| failed/overrun/fallback/http errors off;on | problems |", "|" + "---|" * 16]
-        for c in out["network_comparisons"]:
-            m, nm = c["arm_means"], c["network_ms"]
+        for c in out[f"{label}_comparisons"]:
+            m, nm = c["arm_means"], c[f"{label}_ms"]
             spread = f(c.get("spread_pp"), 3) + ("" if c.get("distinguishable") else " (no repeats)" if c.get("spread_pp") is None
                                                 else " (indistinguishable)")
             lines.append("| " + " | ".join([
                 c["key"][0], str(c["key"][3]), ", ".join(f(x, 3) for x in c["b0"]) or "-",
                 ", ".join(f(x, 3) for x in c["b1"]) or "-", f(c.get("delta_pp"), 3), spread,
                 ", ".join(f"{b}: {f(v['delta_pp'], 3)}" for b, v in c["blocks"].items()) or "-",
-                f"{f(nm['p95'], 3)}/{f(c['network_cpu_ms']['p95'], 3)} ({nm['n']})", f(nm["per_run_max_p95"], 3),
-                str(c["network_calls_when_off"]),
+                f"{f(nm['p95'], 3)}/{f(c[f'{label}_cpu_ms']['p95'], 3)} ({nm['n']})", f(nm["per_run_max_p95"], 3),
+                str(c[f"{label}_calls_when_off"]),
                 f"{f(m['off']['attempt_cpu_ms'], 3)}/{f(m['on']['attempt_cpu_ms'], 3)}",
                 f"{f(m['off']['handler_cpu_ms'], 3)}/{f(m['on']['handler_cpu_ms'], 3)}",
                 "/".join(f(m[k]["response_bytes"] and m[k]["response_bytes"] / 1024, 1) for k in ("off", "on")),
@@ -1213,6 +1246,8 @@ def main(argv=None):
                    help="reference: the coarse timers only; stages: benchmarks/breakdown.py; profile-*: cProfile")
     s.add_argument("--product-network", choices=("off", "on"),
                    help="the product's own network collection (with variant B0 only); not given: as before it existed")
+    s.add_argument("--product-disk", choices=("off", "on"),
+                   help="the product's disk I/O collection (with --product-network only)")
     s.add_argument("--interval", type=float, required=True)
     s.add_argument("--warmup", type=float, default=30)
     s.add_argument("--measure", type=float, default=120)
@@ -1236,7 +1271,8 @@ def main(argv=None):
     r.add_argument("--out", required=True)
     r.add_argument("--alias", required=True)
     r.add_argument("--phase", choices=("matrix", "clients", "final", "probes", "breakdown", "breakdown-lite", "ab",
-                                       "passive-rebaseline", "passive-parts", "network-product"), required=True)
+                                       "passive-rebaseline", "passive-parts", "network-product", "disk-product"),
+                   required=True)
     r.add_argument("--intervals", default="1,2,0.5,5")
     r.add_argument("--final", type=float)
     r.add_argument("--clients", default="1,0", help="passive-rebaseline: client counts, alternated per block")
@@ -1253,6 +1289,8 @@ def main(argv=None):
     rp.add_argument("results", nargs="+")
     rp.add_argument("--md", action="store_true", help="Markdown tables instead of JSON")
     a = p.parse_args(argv)
+    if a.cmd == "serve" and a.product_disk and not a.product_network:
+        p.error("--product-disk needs --product-network: the comparison runs on a stated network setting")
     if a.cmd == "serve" and a.product_network and a.variant != "B0":
         p.error("--product-network runs with variant B0 only: never the product's network and the passive prototype together")
     {"serve": serve, "client": client, "probe": probe, "run": run, "report": report}[a.cmd](a)
