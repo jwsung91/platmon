@@ -39,11 +39,13 @@ class Collected:
     """What a recording collect() returns instead of a plain dict (collector.collect_recorded): the stats
     and, for the Sampler to check, {JSON Pointer: sensor metadata with "span"} and the (start, end) of each
     of REQUIRED_READS by name (None if not timed), all on clock. Spans are elapsed ns; only the Sampler turns
-    them into offsets. Which values need a record comes from the stats (sensor_values), not from here."""
+    them into offsets. Which values need a record comes from the stats (sensor_values), not from here.
+    network: the (start, end) of the one read all of stats["network"] comes from, or None."""
     stats: dict
     sensors: dict
     required: dict
     clock: object
+    network: object = None
 
 
 def sensor_values(stats):
@@ -173,6 +175,8 @@ class Sampler:
             meta, oldest, problem = self._check(recorded, stats, started, completed)
         except Exception as e:  # records of an unexpected shape; the collected values are not affected
             meta, oldest, problem = None, None, f"unusable read records ({type(e).__name__})"
+            if isinstance(stats.get("network"), dict):  # never a time that was not checked
+                stats["network"]["read"] = None
         if problem != self._provenance_problem:  # logged when it changes, not every collection
             if problem:
                 print(f"platmon: data age counts from the collection start: {problem}", file=sys.stderr)
@@ -183,7 +187,8 @@ class Sampler:
         """Exactly the REQUIRED_READS, each with a valid span; every record at a sensor value of these stats
         (its pointer as sensor_values writes it, so only RFC 6901 pointers to values that are there); every
         such value that is a number with a valid read; all on this Sampler's clock, in whole ns, inside this
-        collection. The current reads (required ones and the values' own) are collected here, once."""
+        collection; network interfaces with the valid read of their counters (written to network.read, or
+        null). The current reads (required ones, the values' own, network's) are collected here, once."""
         problems = []
 
         def valid(span):
@@ -218,6 +223,18 @@ class Sampler:
                 timed.add(ptr)
         if any(_number(value) and ptr not in timed for ptr, value in expected.items()):
             problems.append("a value without its record")
+        net = stats.get("network")
+        if isinstance(net, dict):  # one read for every counter; its offsets replace whatever "read" holds
+            span = recorded.network
+            good = same_clock and valid(span)
+            net["read"] = {"started_offset_ms": ms(span[0] - started), "completed_offset_ms": ms(span[1] - started)} \
+                if good else None
+            if good:
+                reads.append(span)
+            elif net.get("interfaces"):  # values without their read; a failed reading has none to date
+                problems.append("network values without a valid read")
+        elif recorded.network is not None:
+            problems.append("a record for a value that is not there")
         problem = problems[0] if problems else None
         return meta, None if problem or not reads else min(s[0] for s in reads), problem
 
