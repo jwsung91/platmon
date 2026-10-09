@@ -69,7 +69,7 @@ def rows_of(items, kind, line):
     """One line per item (as the server sorted them): its name, then line(item) if it has rates, else why
     not. At most MAX_ROWS, then how many were left out."""
     width = min(16, max(len(i["name"]) for i in items))
-    out = [f"  {i['name']:<{width}}  " + (line(i) if i.get("rates") else RATE_REASONS.get(i.get("reason"), str(i.get("reason"))))
+    out = [f"  {i['name']:<{width}}  " + line(i)
            for i in items[:MAX_ROWS]]
     if len(items) > MAX_ROWS:
         out.append(f"  +{len(items) - MAX_ROWS} more {kind} (all in /api/stats)")
@@ -78,17 +78,26 @@ def rows_of(items, kind, line):
 
 def network_line(i):
     r = i["rates"]
+    if not r:
+        return RATE_REASONS.get(i.get("reason"), str(i.get("reason")))
     bad = [f"{k} {i['rx'][k]}/{i['tx'][k]}" for k in ("errors", "dropped") if i["rx"][k] or i["tx"][k]]
     return (f"rx {per_s(r['rx_bytes_per_s'])}  tx {per_s(r['tx_bytes_per_s'])}  "
-            f"{r['rx_packets_per_s']:.1f}/{r['tx_packets_per_s']:.1f} pkt/s"
+            f"{r['rx_packets_per_s']:.1f}/{r['tx_packets_per_s']:.1f} pkt/s" + window_text(i)
             + ("  " + "  ".join(bad) + " (rx/tx, total)" if bad else ""))
+
+
+def window_text(item):
+    window = item.get("window_ms")
+    return f"  window {window / 1000:.3f} s" if isinstance(window, (int, float)) else ""
 
 
 def disk_line(d):
     r = d["rates"]
-    return (f"read {per_s(r['read_bytes_per_s'])} ({r['reads_per_s']:.1f}/s)  "
-            f"write {per_s(r['write_bytes_per_s'])} ({r['writes_per_s']:.1f}/s)  "
-            f"I/O time {100 * r['io_time_ratio']:.1f}%" + (f"  in flight {d['in_flight']}" if d.get("in_flight") else ""))
+    value = (f"read {per_s(r['read_bytes_per_s'])} ({r['reads_per_s']:.1f}/s)  "
+             f"write {per_s(r['write_bytes_per_s'])} ({r['writes_per_s']:.1f}/s)  "
+             f"I/O time {100 * r['io_time_ratio']:.1f}%" + window_text(d) if r else
+             RATE_REASONS.get(d.get("reason"), str(d.get("reason"))))
+    return value + (f"  in flight {d['in_flight']}" if d.get("in_flight") is not None else "")
 
 
 def counters_lines(s):
@@ -147,7 +156,11 @@ def aged(body, seconds):
     for name, g in body["groups"].items():
         o = g.get("observation") if isinstance(g, dict) else None
         if isinstance(o, dict) and isinstance(o.get("data_age_ms"), (int, float)):
-            g = {**g, "observation": {**o, "data_age_ms": o["data_age_ms"] + 1000 * seconds}}
+            age = o["data_age_ms"] + 1000 * seconds
+            threshold = g.get("stale_after_ms")
+            stale = bool(o.get("stale")) or (isinstance(threshold, (int, float)) and age > threshold)
+            g = {**g, "state": "stale" if stale else g.get("state"),
+                 "observation": {**o, "data_age_ms": age, "stale": stale}}
         groups[name] = g
     return {**body, "groups": groups}
 

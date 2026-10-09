@@ -187,11 +187,11 @@ def test_render_network_and_disk_io():
                                 {"name": "sda", "in_flight": 0, "rates": None, "reason": "counter_regressed"}]})
     out = render(s).splitlines()
     i = out.index("NET   bytes/s, this process's network namespace")
-    assert out[i + 1:i + 4] == ["  eth0   rx 1.5 KiB/s  tx 0 B/s  2.0/0.4 pkt/s  errors 3/0 (rx/tx, total)",
+    assert out[i + 1:i + 4] == ["  eth0   rx 1.5 KiB/s  tx 0 B/s  2.0/0.4 pkt/s  window 1.000 s  errors 3/0 (rx/tx, total)",
                                 "  wlan0  warming up", "  x      new_code"]
     assert out[i + 4:] == ["IO    bytes/s per disk",
                            "  nvme0n1  read 3.0 MiB/s (4.0/s)  write 512 B/s (0.5/s)  I/O time 3.4%  in flight 2",
-                           "  sda      counter went backwards"]
+                           "  sda      counter went backwards  in flight 0"]
     assert out[i - 1] == ""  # one blank line before, never two
 
 
@@ -214,3 +214,20 @@ def test_render_pressure_without_cpu_full():
                          "io": {"some": {"avg10": 3.0}, "full": {"avg10": 0.5}}}}
     assert render(dict(FULL, pressure=psi)).splitlines()[-1] == "PSI   cpu some 1.2%  io some 3.0% full 0.5%  (avg10, time stalled)"
     assert render(dict(FULL, pressure={"resources": {}})) == render(FULL) == render(dict(FULL, pressure="odd"))
+
+
+def test_counter_window_and_zero_in_flight_are_observed_values():
+    data = dict(FULL, network={"interfaces": [dict(iface("eth0", NET_RATES), window_ms=1250)]},
+                disk_io={"disks": [{"name": "sda", "rates": None, "reason": "warmup", "in_flight": 0}]})
+    out = render(data)
+    assert "window 1.250 s" in out
+    assert "warming up  in flight 0" in out
+
+
+def test_cached_observation_crosses_stale_threshold_without_another_reply():
+    from frontends.cli import aged
+    body = {"groups": {"wifi": {"state": "ok", "stale_after_ms": 15000,
+                               "observation": {"data_age_ms": 14000, "stale": False}}}}
+    current = aged(body, 2)
+    assert current["groups"]["wifi"]["observation"]["stale"] is True
+    assert body["groups"]["wifi"]["observation"]["stale"] is False
