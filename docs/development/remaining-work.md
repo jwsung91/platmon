@@ -11,7 +11,8 @@ implementation; merging alone does **not** complete the expanded validation requ
 
 ## Resumed work checkpoint
 
-- Branch: `feat/history-observation-contract`, stacked on Disk PR #41 at
+- Branch: `integration/resumed-release-readiness`, combining history PR #42 (`0589fc4`),
+  UI PR #40 (`33ada21`) and Disk PR #41 at
   `1eae3a4bd5ddc6395d6c9c871e6af60b61041f27`; history follow-up PR pending.
   UI follow-up: #40, `33ada21`, signed; Python 3.9 CI 645/1, Python 3.13 CI 644/2 passed/skipped
   on push and PR event (runs 37891815033, 37891851001); branch `fix/frontend-observation-contract`.

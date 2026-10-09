@@ -129,3 +129,7 @@ pressure stall information (PSI). Measured cost: [performance/disk-io-product.md
 Official references checked during the resumed audit:
 [block statistics](https://docs.kernel.org/block/stat.html) (512-byte sectors and in-flight gauge),
 [I/O statistics](https://docs.kernel.org/admin-guide/iostats.html) (counter resets and Linux 5.0+ I/O time limits).
+
+
+The CLI, `/text` and web page show the actual rate window in seconds when supplied. `in_flight` is
+shown even when zero or while rates are warming up: it is a current gauge, not a cumulative counter.
