@@ -106,6 +106,14 @@ collection, another clock); in that last case, with interfaces present, the snap
 back to `cycle_start_upper_bound`. A failed reading without interfaces never moves the other values to
 the fallback.
 
+## Docker scope
+
+The shipped Compose configuration uses host networking on native Linux Docker Engine, so its
+process network namespace is the host's and interface counters/identities describe that host.
+A custom bridge configuration still describes only the container's interfaces. Host networking
+also makes Probe loopback refer to the host; it does not expose additional filesystem mounts.
+See [Docker observation scope](docker-scope.md).
+
 ## Configuration and direct calls
 
 Network collection is **on by default**: also without a config file, and with an INI that has no

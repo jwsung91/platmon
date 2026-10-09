@@ -66,8 +66,8 @@ Only mounts whose source is a `/dev/` device and whose type is a local disk file
 
 The mount namespace is platmon's own: in a container (as in `compose.yaml`) that is the container's
 mounts (its overlay root is left out; the host's root bind-mounted at `/host/root` is listed with that
-path), while `/proc/partitions` lists the host's partitions. This follows from the mounts; the storage
-group has not been run in a container yet. Mount points can contain names chosen by
+path), while `/proc/partitions` lists the host's partitions. Other host filesystems need their own
+explicit directory bind mounts; the root bind is deliberately non-recursive. Mount points can contain names chosen by
 users (`/media/<user>/...`); like the rest of the API, run platmon on trusted networks only.
 
 ## Diagnostics
@@ -116,8 +116,10 @@ worker. No new thread or raw device access is introduced. The [resumed integrati
 path; its call p95 still exceeds 2 ms. It is now enabled by default by user policy;
 this does not change the measured result or the 2 ms target.
 
-Directory bind mounts are supported under the same identity check; **file bind mounts are not**.
-The isolated Docker test exposed file mounts whose capacity read returns `io_error` and null values.
+Directory bind mounts are supported under the same identity check. If a file bind appears first,
+the reader skips `ENOTDIR` and tries the next mount of that same filesystem until a directory succeeds.
+Only one successful capacity read is made per filesystem. File-only groups still report unknown
+capacity; permission, I/O and device-identity failures stay explicit rather than being retried away.
 Overlay and pseudo filesystems remain excluded. Core snapshots stay fresh even when these optional
 capacity observations fail. This is a documented provider limit, not successful file-mount capacity
 validation or evidence that container mounts describe the whole host.

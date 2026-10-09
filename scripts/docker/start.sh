@@ -57,11 +57,22 @@ for _ in $(seq 30); do
     case $state in
         healthy)
             docker compose "${files[@]}" logs --no-log-prefix --tail 2
-            # the port published on the host (compose.yaml may map it elsewhere); plain `platmon` covers 9797
-            port=$(docker compose "${files[@]}" port platmon 9797 | head -1)
-            port=${port##*:}
+            # Host mode has no published-port mapping. Read the effective listener inside the container.
+            mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$container")
+            host=localhost
+            if [ "$mode" = host ]; then
+                listen=$(docker compose "${files[@]}" exec -T platmon python3 -c '
+from platmon import load_config
+h = load_config("/opt/platmon/platmon.ini")["http"]
+print("localhost" if h["bind"] in ("0.0.0.0", "127.0.0.1") else h["bind"], h.getint("port"))
+')
+                read -r host port <<< "$listen"
+            else
+                port=$(docker compose "${files[@]}" port platmon 9797 | head -1)
+                port=${port##*:}
+            fi
             view=platmon
-            [ "${port:-9797}" = 9797 ] || view="platmon localhost:$port"
+            [ "$host:${port:-9797}" = localhost:9797 ] || view="platmon $host:$port"
             echo "platmon is up on port ${port:-9797} (restarts with Docker at boot) - $change; look at it with: $view"
             exit 0 ;;
         unhealthy) break ;;

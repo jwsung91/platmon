@@ -1,5 +1,18 @@
 # Release readiness
 
+## Container visibility and Pi PSI update (2026-10-09)
+
+Storage now skips file bind mounts when a valid directory on the same filesystem is available.
+The owner approved Docker host networking to restore host interfaces and Wi-Fi; configured HTTP
+ports also drive the image health check and start-script output. CPU/GPU/sensors/memory/Disk I/O
+were already visible; additional filesystems still need explicit directory binds. The complete
+comparison and actual-image checks are in [the Docker scope audit](docker-scope.md).
+
+Pi PSI has been activated with `psi=1`, rebooted, and verified through the three kernel files and
+API (`ok`). Orin kernel changes remain deferred. No previous CPU/p95 miss is relabeled as passing.
+[PR #48](https://github.com/jwsung91/platmon/pull/48) records the final merge/CI/deployment state;
+older checkpoints below preserve their historical configurations and limitations.
+
 ## Default enablement policy update (2026-10-09)
 
 After #40–#46 merged at `dc2875428892e99055e4dfe9c9afab0c2f7f1c52`, the owner requested

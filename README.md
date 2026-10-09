@@ -85,7 +85,8 @@ The default port was 8080 before; an existing `/etc/platmon/platmon.ini` keeps i
 
 No image is published: build it yourself on the device (see "Container image licensing" below).
 `up` builds the image `platmon:local` from this checkout the first time; add `--build` after a `git pull`.
-The container monitors the host, so it needs a few read-only host mounts (all set in `compose.yaml`):
+On native Linux Docker Engine, the container uses host networking so Network and Wi-Fi see the
+host interfaces. It also needs read-only host mounts (all set in `compose.yaml`):
 
 ```sh
 scripts/docker/start.sh    # build and start; on Jetson adds compose.jetson.yaml (nvpmodel power mode); waits until healthy
@@ -106,8 +107,14 @@ deleted out from under it.
 - `/` (not recursive) → the host's root filesystem: disk usage, and the OS release (`/etc/os-release`)
   and L4T release so they show the host, not the image. The host's `/proc`, `/sys` and `/run` are not
   exposed through it.
-- `./platmon.ini` → config. Keep `[http] port = 9797` inside the container and change the
-  published port in `compose.yaml` instead (the health check uses 9797).
+- `./platmon.ini` → config. Set `[http] bind` and `port` here; the listener uses the host port
+  directly, without a Docker port mapping. The health check and start script follow these settings.
+- Host networking shares the host network namespace: Network includes host interfaces, Wi-Fi reads
+  the host wireless link, and Probe loopback means the host. It does not share the PID or mount
+  namespace or require privileged mode. A bridge-network override sees only its own interfaces.
+- Storage reads the host root via `/host/root`. Separate filesystems such as `/boot/efi` or an
+  external data disk need explicit read-only directory binds; the root bind stays non-recursive.
+  See [Docker observation scope](docs/docker-scope.md) for the audited coverage and remaining limits.
 - Runs as an unprivileged user, needs no NVIDIA container runtime, and is marked unhealthy while
   `/api/stats` has no current data.
 

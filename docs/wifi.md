@@ -38,7 +38,8 @@ The file's format and meaning come from the kernel's `net/wireless/wext-proc.c` 
 - `noise_dbm`: the noise level in dBm where a driver reports one; `null` otherwise (−256 in the file means
   "not available").
 - `scope`: the interfaces of platmon's own network namespace, as for `network`; a container on its own
-  bridge sees no wireless interface.
+  bridge sees no wireless interface. The shipped Linux Compose configuration uses host networking
+  so this namespace is the host's, without adding a separate Wi-Fi collector.
 
 Reading `/proc/net/wireless` asks each driver for current station data, and clears the "updated" marks
 for any other reader of the file. Nothing else is touched.

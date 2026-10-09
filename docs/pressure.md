@@ -54,12 +54,15 @@ Shown on the web page ("Pressure") and in the `platmon` command and `/text` (`PS
 | environment | kernel | PSI | result |
 | --- | --- | --- | --- |
 | Jetson Orin Nano, L4T R36 | 5.15-tegra | not built in (`CONFIG_PSI` not set) | `unavailable` / `not_exposed` |
-| Raspberry Pi 4, Debian 13 | 6.18 rpi-v8 | built in, disabled by default (`CONFIG_PSI_DEFAULT_DISABLED=y`, no `psi=1`) | `unavailable` / `not_exposed` |
+| Raspberry Pi 4, Debian 13 | 6.18.50+rpt-rpi-v8 | built in; owner-approved `psi=1` applied and rebooted | CPU/memory/I/O collected, `ok` |
 | WSL 2 | 6.6 | not built in | `unavailable` / `not_exposed` |
 | CI host (GitHub Actions, Ubuntu) | as provided | whatever the runner has | `tests/test_pressure.py::test_real_host_pressure` reads it when present (see the CI log) |
 
-The normal path (PSI present) is covered by fixtures and, where a CI host has PSI, by one real read. It has
-**not been run or measured on the boards**: none of them has PSI enabled.
+The normal path is covered by fixtures, supported CI hosts, and a real Raspberry Pi read after the
+owner-approved boot-option change on 2026-10-09. All three `/proc/pressure` files and the API were
+verified after the boot ID changed. The original boot command line was backed up before adding
+`psi=1`; the Orin kernel is unchanged and has no PSI support. This is functional validation, not
+a normal-path ARM performance benchmark.
 
 ## Cost
 

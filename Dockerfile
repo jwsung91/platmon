@@ -15,8 +15,8 @@ COPY frontends ./frontends
 USER 65534:65534
 EXPOSE 9797
 # /api/stats answers 503 while there is no current data, which marks the container unhealthy.
-# Keep [http] port at 9797 inside the container; change the published port instead.
+# Follow the configured bind/port, including isolated checks on a non-default host port.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD ["python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9797/api/stats', timeout=4)"]
+  CMD ["python3", "-c", "import urllib.request; from platmon import load_config; h = load_config('/opt/platmon/platmon.ini')['http']; host = '127.0.0.1' if h['bind'] == '0.0.0.0' else h['bind']; urllib.request.urlopen('http://' + host + ':' + h['port'] + '/api/stats', timeout=4)"]
 ENTRYPOINT ["python3", "/opt/platmon/platmon.py"]
 CMD ["/opt/platmon/platmon.ini"]

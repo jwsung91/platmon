@@ -115,16 +115,22 @@ class Storage:
                 "source": source, "mount_points": [], "total_bytes": None, "used_bytes": None, "available_bytes": None})
             fs["mount_points"].append({"path": path, "read_only": ro})
         for fs in filesystems.values():
-            path = fs["mount_points"][0]["path"]
-            try:
-                st = self._statvfs(path, (fs["major"], fs["minor"]))
-            except OSError as e:  # unmounted since, or unreadable: listed without numbers, never as 0
-                why = ("mount_changed" if e.errno == errno.ESTALE else
-                       "disappeared" if isinstance(e, FileNotFoundError) else reason_of(e))
-                group.note(fs["device"] or f"{fs['major']}:{fs['minor']}", why, f"statvfs {path}: {e.strerror}")
-                continue
-            fs.update(total_bytes=group.got(st.f_blocks * st.f_frsize), used_bytes=(st.f_blocks - st.f_bfree) * st.f_frsize,
-                      available_bytes=st.f_bavail * st.f_frsize)
+            for index, mount in enumerate(fs["mount_points"]):
+                path = mount["path"]
+                try:
+                    st = self._statvfs(path, (fs["major"], fs["minor"]))
+                except OSError as e:
+                    # Docker may list a file bind before a usable directory on the same filesystem.
+                    # Skip only ENOTDIR; other failures, especially identity changes, stay visible.
+                    if e.errno == errno.ENOTDIR and index + 1 < len(fs["mount_points"]):
+                        continue
+                    why = ("mount_changed" if e.errno == errno.ESTALE else
+                           "disappeared" if isinstance(e, FileNotFoundError) else reason_of(e))
+                    group.note(fs["device"] or f"{fs['major']}:{fs['minor']}", why, f"statvfs {path}: {e.strerror}")
+                    break  # no valid capacity: listed without numbers, never as 0
+                fs.update(total_bytes=group.got(st.f_blocks * st.f_frsize), used_bytes=(st.f_blocks - st.f_bfree) * st.f_frsize,
+                          available_bytes=st.f_bavail * st.f_frsize)
+                break
 
         partitions = []
         for (major, minor), (name, size) in sorted(names.items(), key=lambda kv: kv[1][0]):
