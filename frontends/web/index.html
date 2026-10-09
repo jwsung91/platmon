@@ -51,7 +51,8 @@
   .kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 8px; margin: 8px 0; font-variant-numeric: tabular-nums; }
   .kv span:last-child { text-align: right; overflow-wrap: anywhere; }
   #err, #coll { color: var(--warn); }
-  #sys, #meta, #coll, #err { overflow-wrap: anywhere; }
+  .system-card { max-width: 800px; }
+  #coll, #err { overflow-wrap: anywhere; }
   @media (max-width: 540px) { body { padding: 16px; } section, .metric { padding: 14px; } .tabs button { padding: 10px 12px; } }
 </style>
 </head>
@@ -62,8 +63,6 @@
     <img src="assets/brand/platmon-logo-light.svg" alt="platmon" width="220" height="63">
   </picture>
   <div class="heading"><h1 id="model">Platform status</h1><span id="status" role="status">Connecting</span></div>
-  <div class="muted" id="meta"></div>
-  <div class="muted" id="sys"></div>
   <div class="muted" id="age"></div>
   <div id="coll"></div>
   <div id="err"></div>
@@ -75,6 +74,7 @@
     <button id="tab-network" role="tab" aria-controls="panel-network" aria-selected="false" tabindex="-1">Network</button>
     <button id="tab-storage" role="tab" aria-controls="panel-storage" aria-selected="false" tabindex="-1">Storage</button>
     <button id="tab-thermal" role="tab" aria-controls="panel-thermal" aria-selected="false" tabindex="-1">Temperature & power</button>
+    <button id="tab-system" role="tab" aria-controls="panel-system" aria-selected="false" tabindex="-1">System</button>
   </div>
   <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
     <div id="overview" class="grid summary"><p class="empty">Waiting for data…</p></div>
@@ -108,6 +108,19 @@
       <section data-card hidden><h2>Power & fans</h2><div id="pwr"></div></section>
     </div>
   </div>
+  <div id="panel-system" role="tabpanel" aria-labelledby="tab-system" tabindex="0" hidden>
+    <section class="system-card">
+      <h2>System information</h2>
+      <div class="kv" id="system-platform-row" hidden><span>Platform</span><span id="system-platform"></span></div>
+      <div class="kv" id="system-uptime-row" hidden><span>Uptime</span><span id="system-uptime"></span></div>
+      <div class="kv" id="system-os-row" hidden><span>OS</span><span id="system-os"></span></div>
+      <div class="kv" id="system-kernel-row" hidden><span>Kernel</span><span id="system-kernel"></span></div>
+      <div class="kv" id="system-arch-row" hidden><span>Architecture</span><span id="system-arch"></span></div>
+      <div class="kv" id="system-hostname-row" hidden><span>Hostname</span><span id="system-hostname"></span></div>
+      <div class="kv" id="system-l4t-row" hidden><span>L4T</span><span id="system-l4t"></span></div>
+      <div id="system-extra"></div>
+    </section>
+  </div>
   <section id="history-panel" aria-labelledby="history-title" hidden>
     <div class="history-heading"><h2 id="history-title">Recent history</h2>
       <label for="history-series">Series</label><select id="history-series"><option value="">All in this view</option></select>
@@ -121,13 +134,10 @@ const $ = id => document.getElementById(id);
 const gib = b => (b / 2 ** 30).toFixed(1) + 'G';
 const row = (label, pct, text) =>
   `<div class="row"><span>${label}</span><div class="track"><div class="fill${pct > 85 ? ' hot' : ''}" style="width:${Math.min(pct, 100)}%"></div></div><span>${text}</span></div>`;
-// system entries are listed as they come, so board-specific ones (e.g. Jetson's l4t) need no change here
-const SYSTEM_LABELS = {os: '', kernel: 'kernel ', arch: '', hostname: 'host ', l4t: 'L4T '};
-const systemLine = sys => Object.entries(sys || {}).filter(([, v]) => v)
-  .map(([k, v]) => (k in SYSTEM_LABELS ? SYSTEM_LABELS[k] : k + ' ') + v).join(' · ');
+const SYSTEM_FIELDS = ['os', 'kernel', 'arch', 'hostname', 'l4t'];
 const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
 const esc = v => String(v).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
-const TABS = ['overview', 'resources', 'network', 'storage', 'thermal'];
+const TABS = ['overview', 'resources', 'network', 'storage', 'thermal', 'system'];
 let activeTab = 'overview', latestStats = null;
 const wantsObs = () => activeTab === 'network' || activeTab === 'storage';
 const visible = () => document.visibilityState === 'visible';
@@ -260,6 +270,7 @@ function storageRows() {
 let hist = null, histAt = 0, histAsked = -Infinity, histSupported = true, histRequest = null;
 const HIST_PREFIXES = {resources: ['cpu/', 'memory/'], network: ['network/', 'observation/wifi/', 'observation/probe/'],
   storage: ['disk_io/', 'observation/storage/'], thermal: ['temperature/']};
+const wantsHistory = () => !!HIST_PREFIXES[activeTab];
 const historyMatches = id => (HIST_PREFIXES[activeTab] || []).some(prefix => id.startsWith(prefix));
 const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^observation\/storage\/([^/]+)\/[^/]+\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
@@ -302,7 +313,7 @@ function histRows() {
 const historyAge = age => `latest point ${Math.round((age + performance.now() - histAt) / 1000)} s ago`;
 function renderHistory() {
   if (!visible()) return;
-  $('history-panel').hidden = activeTab === 'overview' || !hist;
+  $('history-panel').hidden = !wantsHistory() || !hist;
   if ($('history-panel').hidden) return;
   const select = $('history-series'), previous = select.value;
   const ids = Object.keys(hist.series || {}).filter(id => historyMatches(id) && HIST_LABEL.some(([re]) => re.test(id)));
@@ -316,7 +327,7 @@ function renderHistory() {
 }
 async function pollHist() {
   const now = performance.now();
-  if (histRequest || !histSupported || !visible() || activeTab === 'overview' || now - histAsked < 10000) return;
+  if (histRequest || !histSupported || !visible() || !wantsHistory() || now - histAsked < 10000) return;
   histAsked = now;
   const ctl = histRequest = new AbortController(), mine = epoch;
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
@@ -392,6 +403,21 @@ function renderThermal(s) {
     s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('') +
     (s.power_mode ? kv('Power mode', esc(s.power_mode)) : '');
 }
+function renderSystem(s) {
+  const sys = s.system || {}, up = Math.floor(s.uptime);
+  const fields = {platform: s.platform,
+    uptime: `${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`};
+  for (const key of SYSTEM_FIELDS) fields[key] = sys[key];
+  for (const [key, value] of Object.entries(fields)) {
+    const text = value == null ? '' : String(value);
+    if ($('system-' + key).textContent !== text) $('system-' + key).textContent = text;
+    $('system-' + key + '-row').hidden = !text;
+  }
+  // Preserve additional board-specific fields without changing the API or rebuilding stable rows.
+  const extra = Object.entries(sys).filter(([key, value]) => !SYSTEM_FIELDS.includes(key) && value)
+    .map(([key, value]) => kv(esc(key), esc(value))).join('');
+  if ($('system-extra').innerHTML !== extra) $('system-extra').innerHTML = extra;
+}
 function renderActive() {
   if (!latestStats || !visible()) return;
   const s = latestStats;
@@ -402,6 +428,7 @@ function renderActive() {
     $('root-disk').innerHTML = row('DISK', 100 * s.disk.used / s.disk.total, `${gib(s.disk.used)}/${gib(s.disk.total)}`);
     $('dio').innerHTML = diskRows(s);
   } else if (activeTab === 'thermal') renderThermal(s);
+  else if (activeTab === 'system') renderSystem(s);
   hideEmptyPanels();
 }
 function renderObservations() {
@@ -412,10 +439,7 @@ function renderObservations() {
 }
 function render(s) {
   // Keep the last good snapshot for instant view switches even if the next request fails.
-  const up = Math.floor(s.uptime);
   $('model').textContent = s.model;
-  $('meta').textContent = `${s.platform} · ${s.power_mode ? 'mode ' + s.power_mode + ' · ' : ''}up ${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
-  $('sys').textContent = systemLine(s.system);
   $('coll').textContent = collectionNote(s);
   latestStats = s;
   renderActive();
