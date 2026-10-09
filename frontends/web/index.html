@@ -11,24 +11,48 @@
     :root { --bg: #121417; --card: #1c1f24; --fg: #e6e8eb; --muted: #9aa1ab; --track: #2c3037; --bar: #4fb286; --warn: #f0883e; }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
-  header { margin-bottom: 16px; }
+  body { margin: 0 auto; max-width: 1320px; padding: 24px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+  [hidden] { display: none !important; }
+  header { margin-bottom: 24px; }
   .brand { display: block; margin-bottom: 12px; }
-  .brand img { display: block; width: 220px; max-width: 100%; height: auto; }
-  h1 { font-size: 18px; margin: 0 0 4px; }
+  .brand img { display: block; width: 176px; max-width: 100%; height: auto; }
+  h1 { font-size: 24px; margin: 0 0 4px; overflow-wrap: anywhere; }
+  .heading { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  #status { border: 1px solid var(--track); border-radius: 20px; padding: 3px 12px; font-weight: 600; }
+  #status[data-state="warning"] { color: var(--warn); }
   .muted { color: var(--muted); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-  section { background: var(--card); border-radius: 8px; padding: 12px 14px; }
-  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+  section, .metric { background: var(--card); border: 1px solid var(--track); border-radius: 12px; padding: 18px; min-width: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
+  .tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--track); margin-bottom: 20px; }
+  button, select { font: inherit; color: inherit; }
+  .tabs button { white-space: nowrap; border: 0; border-bottom: 3px solid transparent; padding: 12px 16px; background: transparent; cursor: pointer; }
+  .tabs [aria-selected="true"] { border-bottom-color: var(--bar); color: var(--bar); font-weight: 700; }
+  :focus-visible { outline: 2px solid var(--bar); outline-offset: 3px; }
+  .summary { grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); }
+  .metric strong { display: block; font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 8px 0; }
+  .metric small { display: block; color: var(--muted); overflow-wrap: anywhere; }
+  .metric h2 { margin: 0; overflow-wrap: anywhere; }
+  .empty { padding: 16px 0; color: var(--muted); }
+  #history-panel { margin-top: 20px; }
+  .history-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .history-heading h2 { margin: 0; }
+  select { max-width: 100%; padding: 6px; background: var(--card); border: 1px solid var(--track); border-radius: 6px; }
+  #hist { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+  .history-caption { grid-column: 1 / -1; }
+  .history-series { min-width: 0; }
   .row { display: grid; grid-template-columns: 48px 1fr auto; gap: 8px; align-items: center; margin: 4px 0; font-variant-numeric: tabular-nums; }
   .track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
-  .fill { height: 100%; background: var(--bar); transition: width .3s; }
+  .fill { height: 100%; background: var(--bar); }
   .fill.hot { background: var(--warn); }
-  .spark { display: block; width: 100%; height: 28px; }
+  .spark { display: block; width: 100%; height: 56px; margin-top: 8px; }
   .spark path { fill: none; stroke: var(--bar); stroke-width: 1.5; }
   .kv span:first-child { overflow-wrap: anywhere; min-width: 0; margin-right: 8px; }
-  .kv { display: flex; justify-content: space-between; margin: 3px 0; font-variant-numeric: tabular-nums; }
+  .kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 8px; margin: 8px 0; font-variant-numeric: tabular-nums; }
+  .kv span:last-child { text-align: right; overflow-wrap: anywhere; }
   #err, #coll { color: var(--warn); }
+  #sys, #meta, #coll, #err { overflow-wrap: anywhere; }
+  @media (max-width: 540px) { body { padding: 16px; } section, .metric { padding: 14px; } .tabs button { padding: 10px 12px; } }
 </style>
 </head>
 <body>
@@ -37,26 +61,61 @@
     <source media="(prefers-color-scheme: dark)" srcset="assets/brand/platmon-logo-dark.svg">
     <img src="assets/brand/platmon-logo-light.svg" alt="platmon" width="220" height="63">
   </picture>
-  <h1 id="model">Platform status</h1>
+  <div class="heading"><h1 id="model">Platform status</h1><span id="status" role="status">Connecting</span></div>
   <div class="muted" id="meta"></div>
   <div class="muted" id="sys"></div>
   <div class="muted" id="age"></div>
   <div id="coll"></div>
   <div id="err"></div>
 </header>
-<div class="grid">
-  <section><h2>CPU</h2><div id="cpu"></div></section>
-  <section><h2>GPU · Memory · Disk</h2><div id="res"></div></section>
-  <section><h2>Temperature</h2><div id="temp"></div></section>
-  <section><h2>Power · Fan</h2><div id="pwr"></div></section>
-  <section><h2>Network</h2><div id="net"></div></section>
-  <section><h2>Disk I/O</h2><div id="dio"></div></section>
-  <section><h2>Storage</h2><div id="sto"></div></section>
-  <section><h2>Wi-Fi</h2><div id="wifi"></div></section>
-  <section><h2>TCP connect</h2><div id="probe"></div></section>
-  <section><h2>History</h2><div id="hist"></div></section>
-  <section><h2>Pressure</h2><div id="psi"></div></section>
-</div>
+<main>
+  <div class="tabs" role="tablist" aria-label="Monitoring views">
+    <button id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true">Overview</button>
+    <button id="tab-resources" role="tab" aria-controls="panel-resources" aria-selected="false" tabindex="-1">Resources</button>
+    <button id="tab-network" role="tab" aria-controls="panel-network" aria-selected="false" tabindex="-1">Network</button>
+    <button id="tab-storage" role="tab" aria-controls="panel-storage" aria-selected="false" tabindex="-1">Storage</button>
+    <button id="tab-thermal" role="tab" aria-controls="panel-thermal" aria-selected="false" tabindex="-1">Temperature & power</button>
+  </div>
+  <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
+    <div id="overview" class="grid summary"><p class="empty">Waiting for data…</p></div>
+  </div>
+  <div id="panel-resources" role="tabpanel" aria-labelledby="tab-resources" tabindex="0" hidden>
+    <div class="grid">
+      <section data-card hidden><h2>CPU cores</h2><div id="cpu"></div></section>
+      <section data-card hidden><h2>GPU & memory</h2><div id="res"></div></section>
+      <section data-card hidden><h2>Resource pressure</h2><div id="psi"></div></section>
+    </div>
+  </div>
+  <div id="panel-network" role="tabpanel" aria-labelledby="tab-network" tabindex="0" hidden>
+    <p id="network-empty" class="empty">No network data available.</p>
+    <div class="grid">
+      <section data-card hidden><h2>Interfaces</h2><div id="net"></div></section>
+      <section data-card hidden><h2>Wi-Fi</h2><div id="wifi"></div></section>
+      <section data-card hidden><h2>TCP connect</h2><div id="probe"></div></section>
+    </div>
+  </div>
+  <div id="panel-storage" role="tabpanel" aria-labelledby="tab-storage" tabindex="0" hidden>
+    <div class="grid">
+      <section data-card hidden><h2>Root filesystem</h2><div id="root-disk"></div></section>
+      <section data-card hidden><h2>Disk I/O</h2><div id="dio"></div></section>
+      <section data-card hidden><h2>Filesystems & partitions</h2><div id="sto"></div></section>
+    </div>
+  </div>
+  <div id="panel-thermal" role="tabpanel" aria-labelledby="tab-thermal" tabindex="0" hidden>
+    <p id="thermal-empty" class="empty">No temperature, power or fan data available.</p>
+    <div class="grid">
+      <section data-card hidden><h2>Temperature</h2><div id="temp"></div></section>
+      <section data-card hidden><h2>Power & fans</h2><div id="pwr"></div></section>
+    </div>
+  </div>
+  <section id="history-panel" aria-labelledby="history-title" hidden>
+    <div class="history-heading"><h2 id="history-title">Recent history</h2>
+      <label for="history-series">Series</label><select id="history-series"><option value="">All in this view</option></select>
+    </div>
+    <p class="muted">Each graph uses its own scale. Gaps mean unavailable samples.</p>
+    <div id="hist"></div>
+  </section>
+</main>
 <script>
 const $ = id => document.getElementById(id);
 const gib = b => (b / 2 ** 30).toFixed(1) + 'G';
@@ -68,6 +127,23 @@ const systemLine = sys => Object.entries(sys || {}).filter(([, v]) => v)
   .map(([k, v]) => (k in SYSTEM_LABELS ? SYSTEM_LABELS[k] : k + ' ') + v).join(' · ');
 const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
 const esc = v => String(v).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const TABS = ['overview', 'resources', 'network', 'storage', 'thermal'];
+let activeTab = 'overview', latestStats = null;
+const wantsObs = () => activeTab === 'network' || activeTab === 'storage';
+const visible = () => document.visibilityState === 'visible';
+function activateTab(tab) {
+  if (!TABS.includes(tab)) return;
+  activeTab = tab;
+  for (const name of TABS) {
+    $('tab-' + name).setAttribute('aria-selected', String(name === tab));
+    $('tab-' + name).tabIndex = name === tab ? 0 : -1;
+    $('panel-' + name).hidden = name !== tab;
+  }
+  // Switching views reuses data and polling deadlines, never creates another timer.
+  if (!visible()) return;
+  renderActive(); renderObservations(); renderHistory();
+  pollObs(); pollHist();
+}
 // why CPU rows are missing: the service compares /proc/stat readings, so the first one has none (same as cli.py)
 const CPU_REASONS = {warmup: 'warming up', counter_regressed: 'counter went backwards', no_ticks: 'no ticks counted',
   invalid_interval: 'invalid interval', gap: 'restarting after a gap'};
@@ -114,12 +190,12 @@ function diskRows(s) {
 }
 
 // Low-frequency groups (/api/observations) change on their own cadence: asked for at most every 10 s, only
-// while the page is visible, on the same 1 s timer as the age line; an older server (404) is not asked again.
+// while a view needs them, on the same 1 s timer as the age line; a 404 is not asked again.
 // Their age is the server's data_age_ms plus browser time since that answer, like the sample age.
 let obs = null, obsAt = 0, obsAsked = -Infinity, obsSupported = true, obsRequest = null;
 async function pollObs() {
   const now = performance.now();
-  if (obsRequest || !obsSupported || document.visibilityState !== 'visible' || now - obsAsked < 10000) return;
+  if (obsRequest || !obsSupported || !visible() || !wantsObs() || now - obsAsked < 10000) return;
   obsAsked = now;
   const ctl = obsRequest = new AbortController(), mine = epoch;
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
@@ -133,22 +209,25 @@ async function pollObs() {
   } catch (e) { if (mine === epoch) obs = null; } finally {
     clearTimeout(timer); obsRequest = null;
   }  // the main view goes on without it
-  $('sto').innerHTML = storageRows();
-  $('wifi').innerHTML = wifiRows();
-  $('probe').innerHTML = probeRows();
-  hideEmptyPanels();
+  renderObservations();
 }
 function observationStale(g) {
   const o = g.observation;
   return o.stale || (Number.isFinite(g.stale_after_ms) && o.data_age_ms + performance.now() - obsAt > g.stale_after_ms);
 }
+function observationAge(group) {
+  const g = obs && obs.groups && obs.groups[group];
+  if (!g || !g.observation) return '';
+  const age = Math.round((g.observation.data_age_ms + performance.now() - obsAt) / 1000);
+  return `observed ${age} s ago${observationStale(g) ? ' (not current)' : ''}`;
+}
+const observationCaption = group => `<div class="muted" data-observation-age="${group}">${observationAge(group)}</div>`;
 // TCP connect time to the configured targets (not ICMP ping): the latest attempt, and recent failures
 function probeRows() {
   const g = obs && obs.groups && obs.groups.probe, o = g && g.observation, d = g && g.data;
   const items = d && Array.isArray(d.targets) ? d.targets : [];
   if (!o || !items.length) return '';
-  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
-  return `<div class="muted">observed ${age} s ago${observationStale(g) ? ' (not current)' : ''}</div>` + items.map(t =>
+  return observationCaption('probe') + items.map(t =>
     kv(esc(t.address.includes(':') ? `[${t.address}]:${t.port}` : `${t.address}:${t.port}`),
       (t.connect_ms != null ? t.connect_ms.toFixed(1) + ' ms' : esc(t.reason)) + ` · failed ${t.failures}/${t.attempts}`)).join('');
 }
@@ -157,8 +236,7 @@ function wifiRows() {
   const g = obs && obs.groups && obs.groups.wifi, o = g && g.observation, d = g && g.data;
   const items = d && Array.isArray(d.interfaces) ? d.interfaces : [];
   if (!o || !items.length) return '';
-  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
-  return `<div class="muted">observed ${age} s ago${observationStale(g) ? ' (not current)' : ''}</div>` + items.map(i => kv(esc(i.name),
+  return observationCaption('wifi') + items.map(i => kv(esc(i.name),
     i.connected !== true ? (i.connected === false ? 'not connected' : esc(i.connection_state || 'unknown')) : i.signal_dbm != null ? i.signal_dbm + ' dBm'
       : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a') +
     (i.connected && i.link_quality != null ? `<div class="muted">link quality ${i.link_quality}</div>` : '')).join('');
@@ -166,9 +244,9 @@ function wifiRows() {
 function storageRows() {
   const g = obs && obs.groups && obs.groups.storage, o = g && g.observation, d = g && g.data;
   if (!o || !d) return '';
-  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
   const fss = Array.isArray(d.filesystems) ? d.filesystems : [], parts = Array.isArray(d.partitions) ? d.partitions : [];
-  return `<div class="muted">observed ${age} s ago${observationStale(g) ? ' (not current)' : ''}</div>` +
+  if (!fss.length && !parts.length) return '';
+  return observationCaption('storage') +
     fss.map(f => kv(esc(f.mount_points[0].path + (f.mount_points[0].read_only ? ' (ro)' : '') +
         (f.mount_points.length > 1 ? ` +${f.mount_points.length - 1} more` : '')),
       f.total_bytes != null ? `${gib(f.used_bytes)}/${gib(f.total_bytes)} · ${gib(f.available_bytes)} free` : 'capacity unknown') +
@@ -177,9 +255,12 @@ function storageRows() {
       (p.mount_points.length > 1 ? ` +${p.mount_points.length - 1} more` : '')) : 'not mounted'}`)).join('');
 }
 
-// Recent history (/api/history, off unless the service enables it): asked for at most every 10 s while
-// visible, never again after a 404. A null is a gap in the line (warmup, missing sample), never 0.
+// One bounded history cache shared across detail views, fetched at most every 10 s.
+// Overview does not fetch history. A null is a gap in the line, never 0.
 let hist = null, histAt = 0, histAsked = -Infinity, histSupported = true, histRequest = null;
+const HIST_PREFIXES = {resources: ['cpu/', 'memory/'], network: ['network/', 'observation/wifi/', 'observation/probe/'],
+  storage: ['disk_io/', 'observation/storage/'], thermal: ['temperature/']};
+const historyMatches = id => (HIST_PREFIXES[activeTab] || []).some(prefix => id.startsWith(prefix));
 const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^observation\/storage\/([^/]+)\/[^/]+\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
   [/^observation\/wifi\/[^/]+\/\d+\/([^/]+)\/signal_dbm$/, m => `${m[1]} signal`],
@@ -206,20 +287,36 @@ function histRows() {
   const rows = [];
   for (const [id, points] of Object.entries(series)) {
     const rule = HIST_LABEL.find(([re]) => re.test(id));
-    if (!rule || !Array.isArray(points) || !points.length || rows.length >= 12) continue;
+    if (!rule || !historyMatches(id) || ($('history-series').value && $('history-series').value !== id)
+      || !Array.isArray(points) || !points.length || rows.length >= 12) continue;
     const latest = points[points.length - 1], last = latest[2];
-    rows.push(kv(esc(rule[1](id.match(rule[0]))), last == null ? 'no value' : id.startsWith('temperature') ? last.toFixed(1) + ' °C'
+    rows.push('<div class="history-series">' + kv(esc(rule[1](id.match(rule[0]))), last == null ? 'no value' : id.startsWith('temperature') ? last.toFixed(1) + ' °C'
       : id.startsWith('cpu/') ? last.toFixed(1) + '%' : id.includes('/wifi/') ? last.toFixed(1) + ' dBm'
       : id.includes('/probe/') ? last.toFixed(1) + ' ms' : id.startsWith('memory') || id.includes('/storage/') ? gib(last) : perS(last)) +
-      `<div class="muted">latest point ${Math.round((latest[1] + performance.now() - histAt) / 1000)} s ago</div>` + spark(points));
+      `<div class="muted" data-history-age="${Number(latest[1])}">${historyAge(latest[1])}</div>` + spark(points) + '</div>');
   }
-  return rows.length ? `<div class="muted">last ${Math.round(hist.retention_s / 60)} min</div>` + rows.join('') +
-    (Object.keys(series).filter(id => HIST_LABEL.some(([re]) => re.test(id))).length > rows.length
-      ? `<div class="muted">more series in /api/history (showing first ${rows.length})</div>` : '') : '';
+  return rows.length ? `<div class="muted history-caption">last ${Math.round(hist.retention_s / 60)} min</div>` + rows.join('') +
+    (!$('history-series').value && Object.keys(series).filter(id => historyMatches(id) && HIST_LABEL.some(([re]) => re.test(id))).length > rows.length
+      ? `<div class="muted history-caption">showing first ${rows.length} · choose a series above to see more</div>` : '') : '';
+}
+const historyAge = age => `latest point ${Math.round((age + performance.now() - histAt) / 1000)} s ago`;
+function renderHistory() {
+  if (!visible()) return;
+  $('history-panel').hidden = activeTab === 'overview' || !hist;
+  if ($('history-panel').hidden) return;
+  const select = $('history-series'), previous = select.value;
+  const ids = Object.keys(hist.series || {}).filter(id => historyMatches(id) && HIST_LABEL.some(([re]) => re.test(id)));
+  select.innerHTML = '<option value="">All in this view</option>' + ids.map(id => {
+    const rule = HIST_LABEL.find(([re]) => re.test(id));
+    return `<option value="${esc(id)}">${esc(rule[1](id.match(rule[0])))}</option>`;
+  }).join('');
+  select.value = ids.includes(previous) ? previous : '';
+  $('hist').innerHTML = histRows();
+  $('history-panel').hidden = !$('hist').innerHTML;
 }
 async function pollHist() {
   const now = performance.now();
-  if (histRequest || !histSupported || document.visibilityState !== 'visible' || now - histAsked < 10000) return;
+  if (histRequest || !histSupported || !visible() || activeTab === 'overview' || now - histAsked < 10000) return;
   histAsked = now;
   const ctl = histRequest = new AbortController(), mine = epoch;
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
@@ -233,8 +330,7 @@ async function pollHist() {
   } catch (e) { if (mine === epoch) hist = null; } finally {
     clearTimeout(timer); histRequest = null;
   }
-  $('hist').innerHTML = histRows();
-  hideEmptyPanels();
+  renderHistory();
 }
 
 // pressure stall information: the kernel's 10 s averages of the share of time tasks were stalled (not usage)
@@ -253,31 +349,84 @@ function collectionNote(s) {
 }
 
 function hideEmptyPanels() {
-  document.querySelectorAll('section').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
+  document.querySelectorAll('[data-card]').forEach(sec => sec.hidden = !sec.lastElementChild.innerHTML);
+  $('network-empty').hidden = ['net', 'wifi', 'probe'].some(id => $(id).innerHTML);
+  $('thermal-empty').hidden = ['temp', 'pwr'].some(id => $(id).innerHTML);
 }
 
+function overviewRows(s) {
+  const metric = (label, value, detail) => `<article class="metric"><h2>${esc(label)}</h2><strong>${esc(value)}</strong><small>${esc(detail)}</small></article>`;
+  const cpus = s.cpu.filter(c => Number.isFinite(c.usage));
+  const m = s.memory, d = s.disk;
+  let html = metric('CPU', cpus.length ? (cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length).toFixed(1) + '%' : 'Unavailable',
+    `Mean of ${cpus.length} measured cores` + (cpuNote(s) ? ' · ' + cpuNote(s) : ''));
+  html += metric('RAM', (100 * m.used / m.total).toFixed(1) + '%', `${gib(m.used)} / ${gib(m.total)}`);
+  html += metric('Root filesystem', (100 * d.used / d.total).toFixed(1) + '%', `${gib(d.used)} / ${gib(d.total)}`);
+  if (s.gpu) html += metric('GPU', s.gpu.usage.toFixed(1) + '%', s.gpu.freq ? (s.gpu.freq / 1e6).toFixed(0) + ' MHz' : 'Frequency unavailable');
+  const temps = Object.entries(s.temperature).filter(([, value]) => Number.isFinite(value));
+  if (temps.length) {
+    const [name, value] = temps.reduce((max, entry) => entry[1] > max[1] ? entry : max);
+    html += metric('Highest temperature', value.toFixed(1) + ' °C', name);
+  }
+  // Name the representative interface explicitly; summing physical and virtual interfaces double-counts traffic.
+  const iface = listOf(s.network, 'interfaces').find(i => i.name !== 'lo');
+  if (iface) html += metric('Network', iface.rates ? '↓ ' + perS(iface.rates.rx_bytes_per_s) : 'Unavailable',
+    iface.name + ' · ' + (iface.rates ? '↑ ' + perS(iface.rates.tx_bytes_per_s) + ' · first non-loopback interface'
+      : RATE_REASONS[iface.reason] || iface.reason));
+  return html;
+}
+function renderResources(s) {
+  const note = cpuNote(s);
+  $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('') +
+    (note ? `<div class="muted">${esc(note)}</div>` : '');
+  const m = s.memory, g = s.gpu;
+  $('res').innerHTML =
+    (g ? row('GPU', g.usage, g.usage.toFixed(1) + '%' + (g.freq ? ` ${(g.freq / 1e6).toFixed(0)}MHz` : '')) : '') +
+    row('RAM', 100 * m.used / m.total, `${gib(m.used)}/${gib(m.total)}`) +
+    (m.swap_total ? row('SWAP', 100 * m.swap_used / m.swap_total, `${gib(m.swap_used)}/${gib(m.swap_total)}`) : '');
+  $('psi').innerHTML = psiRows(s);
+}
+function renderThermal(s) {
+  $('temp').innerHTML = Object.entries(s.temperature).map(([k, v]) => kv(esc(k), v.toFixed(1) + ' °C')).join('');
+  $('pwr').innerHTML = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
+    s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('') +
+    (s.power_mode ? kv('Power mode', esc(s.power_mode)) : '');
+}
+function renderActive() {
+  if (!latestStats || !visible()) return;
+  const s = latestStats;
+  if (activeTab === 'overview') $('overview').innerHTML = overviewRows(s);
+  else if (activeTab === 'resources') renderResources(s);
+  else if (activeTab === 'network') $('net').innerHTML = netRows(s);
+  else if (activeTab === 'storage') {
+    $('root-disk').innerHTML = row('DISK', 100 * s.disk.used / s.disk.total, `${gib(s.disk.used)}/${gib(s.disk.total)}`);
+    $('dio').innerHTML = diskRows(s);
+  } else if (activeTab === 'thermal') renderThermal(s);
+  hideEmptyPanels();
+}
+function renderObservations() {
+  if (!visible()) return;
+  if (activeTab === 'storage') $('sto').innerHTML = storageRows();
+  if (activeTab === 'network') { $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); }
+  hideEmptyPanels();
+}
 function render(s) {
+  // Keep the last good snapshot for instant view switches even if the next request fails.
   const up = Math.floor(s.uptime);
   $('model').textContent = s.model;
   $('meta').textContent = `${s.platform} · ${s.power_mode ? 'mode ' + s.power_mode + ' · ' : ''}up ${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
   $('sys').textContent = systemLine(s.system);
   $('coll').textContent = collectionNote(s);
-  const note = cpuNote(s);
-  $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('') +
-    (note ? `<div class="muted">${esc(note)}</div>` : '');
-  const m = s.memory, d = s.disk, g = s.gpu;
-  $('res').innerHTML =
-    (g ? row('GPU', g.usage, g.usage.toFixed(1) + '%' + (g.freq ? ` ${(g.freq / 1e6).toFixed(0)}MHz` : '')) : '') +
-    row('RAM', 100 * m.used / m.total, `${gib(m.used)}/${gib(m.total)}`) +
-    (m.swap_total ? row('SWAP', 100 * m.swap_used / m.swap_total, `${gib(m.swap_used)}/${gib(m.swap_total)}`) : '') +
-    row('DISK', 100 * d.used / d.total, `${gib(d.used)}/${gib(d.total)}`);
-  $('temp').innerHTML = Object.entries(s.temperature).map(([k, v]) => kv(esc(k), v.toFixed(1) + ' °C')).join('');
-  $('pwr').innerHTML = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
-    s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
-  $('net').innerHTML = netRows(s);
-  $('dio').innerHTML = diskRows(s);
-  $('psi').innerHTML = psiRows(s);
-  hideEmptyPanels();
+  latestStats = s;
+  renderActive();
+}
+function updateDetailAges() {
+  document.querySelectorAll('#panel-' + activeTab + ' [data-observation-age]').forEach(el => {
+    el.textContent = observationAge(el.dataset.observationAge);
+  });
+  if (!$('history-panel').hidden) document.querySelectorAll('[data-history-age]').forEach(el => {
+    el.textContent = historyAge(Number(el.dataset.historyAge));
+  });
 }
 
 const TIMEOUT_MS = 5000;  // a request that hangs must not stop the updates
@@ -300,6 +449,10 @@ function sampleOf(s, t0) {
 }
 
 function showAge() {
+  const status = failing ? 'Connection issue' : checking ? 'Checking' : !shown ? 'Connecting'
+    : $('coll').textContent ? 'Partial data' : 'Connected';
+  if ($('status').textContent !== status) $('status').textContent = status;
+  $('status').setAttribute('data-state', failing || $('coll').textContent ? 'warning' : 'ok');
   if (!shown) { $('age').textContent = ''; return; }
   const since = performance.now() - shown.t0;
   const secs = ms => Math.round(ms / 1000) + ' s';
@@ -313,6 +466,7 @@ function showAge() {
 // One request at a time; whatever happens, the next one is scheduled. On failure the last good values
 // stay on screen with their age, and the message says what failed.
 async function tick() {
+  if (inflight || !visible()) return;
   clearTimeout(refresh);
   const ctl = inflight = new AbortController(), mine = epoch;
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
@@ -341,27 +495,44 @@ async function tick() {
   } finally {
     clearTimeout(timer);
     inflight = null;
-    refresh = setTimeout(tick, mine === epoch ? 1000 : 0);
-    showAge();
+    refresh = visible() ? setTimeout(tick, mine === epoch ? 1000 : 0) : null;
+    if (visible()) showAge();
   }
 }
 setInterval(() => {
+  if (!visible()) return;
   showAge(); pollObs(); pollHist();
-  if (document.visibilityState !== 'visible') return;
-  if (obs) { $('sto').innerHTML = storageRows(); $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); }
-  if (hist) $('hist').innerHTML = histRows();
+  updateDetailAges();
 }, 1000);  // ages keep moving while a request hangs
-pollObs();
-pollHist();
+for (const [index, tab] of TABS.entries()) {
+  $('tab-' + tab).addEventListener('click', () => activateTab(tab));
+  $('tab-' + tab).addEventListener('blur', event => {
+    if (TABS.some(name => $('tab-' + name) === event.relatedTarget)) return;
+    // Re-entering the tab list returns to the selected view, even after arrow-only exploration.
+    for (const name of TABS) $('tab-' + name).tabIndex = name === activeTab ? 0 : -1;
+  });
+  $('tab-' + tab).addEventListener('keydown', event => {
+    const next = event.key === 'ArrowRight' ? (index + 1) % TABS.length : event.key === 'ArrowLeft' ? (index + TABS.length - 1) % TABS.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : null;
+    if (next === null) return;
+    event.preventDefault();
+    // Manual activation: moving focus never sends a request; Enter/Space click the native button.
+    for (const name of TABS) $('tab-' + name).tabIndex = name === TABS[next] ? 0 : -1;
+    $('tab-' + TABS[next]).focus();
+  });
+}
+$('history-series').addEventListener('change', () => { $('hist').innerHTML = histRows(); });
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return;
   epoch++;
+  clearTimeout(refresh); refresh = null;
   if (obsRequest) obsRequest.abort();
   if (histRequest) histRequest.abort();
+  if (!visible()) { if (inflight) inflight.abort(); return; }
   obs = hist = null;
   obsAsked = histAsked = -Infinity;
   for (const id of ['sto', 'wifi', 'probe', 'hist']) $(id).innerHTML = '';
   hideEmptyPanels();
+  $('history-panel').hidden = true;
   checking = true;
   showAge();
   if (inflight) inflight.abort();  // its answer would not count; its finally starts the new request

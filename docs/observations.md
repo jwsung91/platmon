@@ -46,7 +46,7 @@ contains these groups, so an old or blocked observation can never make the core 
   and never changed afterwards.
 
 Clients ask for `/api/observations` on the groups' cadence, not every second: the web page and the
-`platmon` command ask at most every 10 s (the page only while it is visible) and add the time since that
+`platmon` command ask at most every 10 s (the page only while visible with Network or Storage selected) and add the time since that
 answer to the ages shown. A server without the endpoint (404) is not asked again.
 
 Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `probe` ([probe.md](probe.md)).
@@ -54,7 +54,9 @@ Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `prob
 The viewers also compare the growing age to `stale_after_ms` between answers, so a cached observation
 becomes not current without waiting for a new server response. The web page limits each optional
 endpoint to one outstanding request with a 5 s deadline. Tab return invalidates older requests and
-clears their panels until fresh answers arrive; hidden tabs skip optional rendering and polling.
+clears their panels until fresh answers arrive; a hidden page suspends all polling and rendering.
+Switching between in-page views shares the cache and polling deadline. Only age text updates between
+responses; observation rows are rebuilt on a response or view selection.
 
 ## Version 2 compatibility boundary
 
