@@ -29,7 +29,7 @@ default). **Off by default** (`[storage] enabled = yes` turns it on). It is sepa
 
 ## What is read
 
-One read each of `/proc/partitions` and `/proc/self/mountinfo`, one `os.statvfs` per filesystem, and for
+One read each of `/proc/partitions` and `/proc/self/mountinfo`, one `os.fstatvfs` per filesystem, and for
 each partition one check of `/sys/class/block/<name>` (is it a partition, of which disk). Never a block
 device itself: an unmounted partition's filesystem is not identified, nothing is mounted, and no
 partition table is read or changed.
@@ -99,3 +99,18 @@ in the API.
 
 Unmounted filesystems' contents or types, partition tables, LVM / md topology, inode counts, quotas,
 per-directory usage, network filesystems, history.
+
+## Mount replacement during observation
+
+Capacity is read through one read-only directory descriptor. The descriptor's `st_dev` is checked
+against mountinfo's major/minor before `fstatvfs`; a mismatch is `mount_changed` and all capacity
+numbers stay null. The descriptor is closed on success and failure. A mount renamed or unmounted
+after opening cannot redirect that descriptor to another filesystem. The final path component must
+be a directory, not a symlink. Opening requires directory read permission: a mount visible in mountinfo
+but not readable by the service is reported unavailable with `permission_denied` instead of guessing.
+
+This pins the filesystem being measured, not a mount-table transaction. A same-device remount or
+replacement reusing the same device number cannot always be distinguished; mount options and mount
+list remain the earlier mountinfo observation. Blocking remains isolated to the existing single storage
+worker. No new thread or raw device access is introduced. Previous cost measurements predate the
+descriptor verification; remeasure this optional path in integration before claiming its cost.
