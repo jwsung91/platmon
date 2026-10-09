@@ -491,3 +491,95 @@ def test_parts_run_reports_apart(tmp_path, capsys):
     assert all(abs(p["calls"] - run["passive_calls"]) <= 1 for p in run["parts"].values())
     cadence.main(["report", "--md", str(results)])
     assert "| pressure.io |" in capsys.readouterr().out
+
+
+# ---------- the product's Network off/on (phase network-product) ----------
+
+def short_serve(tmp_path, net, *extra):
+    out = tmp_path / f"{net}.json"
+    cadence.main(["serve", "--variant", "B0", "--product-network", net, "--interval", "0.1", "--warmup", "0.2",
+                  "--measure", "0.5", "--port", "0", "--out", str(out), *extra])
+    return json.loads(out.read_text())
+
+
+def run_rec(serve, block="c0-1"):
+    return {"kind": "run", "run_id": serve["product_network"], "alias": "t", "valid": True, "order": 0, "serve": serve,
+            "cond": {"phase": "network-product", "clients": 0, "poll": 1.0, "block": block},
+            "before": {"temps_mC": {}, "cpufreq_khz": {}}, "after": {"temps_mC": {}, "cpufreq_khz": {}}}
+
+
+def test_product_network_on_and_off_change_the_real_calls(tmp_path, capsys):
+    on, off = short_serve(tmp_path, "on"), short_serve(tmp_path, "off")
+    attempts = len(on["tables"]["attempt"]["rows"])
+    assert len(on["tables"]["network"]["rows"]) == attempts > 0  # one product network call per collection
+    assert off["tables"]["network"]["rows"] == []
+    assert on["scope"] == off["scope"] and on["scope"]["product_network"]["interfaces"] > 0
+    assert "network" not in on["scope"]["collectors"]  # the intended difference is not a scope change
+    assert all(r[-1] == 0 for r in on["tables"]["attempt"]["rows"])  # no data-age fallback
+    results = tmp_path / "results.jsonl"
+    results.write_text("".join(json.dumps(run_rec(s)) + "\n" for s in (off, on, on, off)))
+    capsys.readouterr()
+    cadence.main(["report", str(results)])
+    out = json.loads(capsys.readouterr().out)
+    assert out["comparisons"] == [] and len(out["network_comparisons"]) == 1
+    c = out["network_comparisons"][0]
+    assert c["arms"] == {"b0": "network off", "b1": "network on"} and c["problems"] == []
+    assert c["network_calls_when_off"] == 0 and c["network_ms"]["n"] > 0 and c["blocks"]["c0-1"]["delta_pp"] is not None
+    cadence.main(["report", "--md", str(results)])
+    assert "| t | 0 |" in capsys.readouterr().out
+
+
+def test_product_network_never_runs_with_the_passive_prototype(tmp_path):
+    with pytest.raises(SystemExit):
+        cadence.main(["serve", "--variant", "B1", "--product-network", "on", "--interval", "1", "--out", str(tmp_path / "x")])
+
+
+def test_polling_does_not_add_collections(tmp_path):
+    """A server polled as fast as it answers: still one product network call per collection."""
+    import socket
+    import urllib.request
+    with socket.socket() as free:
+        free.bind(("127.0.0.1", 0))
+        port = free.getsockname()[1]
+    out = tmp_path / "s.json"
+    p = subprocess.Popen([sys.executable, cadence.__file__, "serve", "--variant", "B0", "--product-network", "on",
+                          "--interval", "0.2", "--warmup", "0.2", "--measure", "1.0", "--port", str(port),
+                          "--expect-rps", "500", "--out", str(out)], stdout=subprocess.PIPE)
+    try:
+        assert cadence.wait_line(p, 20).startswith("ready")
+        n = 0
+        deadline = time.monotonic() + 0.8
+        while time.monotonic() < deadline:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/stats", timeout=5) as r:
+                assert json.loads(r.read())["network"]["interfaces"]
+            n += 1
+        assert p.wait(timeout=30) == 0
+    finally:
+        cadence.stop_process(p)
+    serve = json.loads(out.read_text())
+    assert n > 20 and len(serve["tables"]["http"]["rows"]) >= n
+    assert len(serve["tables"]["network"]["rows"]) == len(serve["tables"]["attempt"]["rows"]) <= 8
+
+
+def test_source_hash_covers_the_network_code(monkeypatch):
+    seen = []
+    monkeypatch.setattr(cadence, "sha256_files", lambda paths: seen.extend(paths) or "x")
+    cadence.source_hash()
+    assert any(p.endswith("collector/network.py") for p in seen) and any(p.endswith("platmon.py") for p in seen)
+
+
+def test_network_product_plan_and_comparability():
+    plan = cadence.plan("network-product", [], clients=(1,), blocks=2)
+    assert [(c["net"], c["block"], c["variant"]) for c in plan] == [
+        (v, b, "B0") for b in ("c1-1", "c1-2") for v in ("off", "on", "on", "off")]
+    assert all(c["interval"] == 1.0 and c["poll"] == 1.0 and c["measure"] == 120 for c in plan)
+    scope = {"collectors": {"core": "ok"}, "product_network": {"namespace": "netns1:a", "interfaces": 3, "names_sha": "x"}}
+    run = dict(base, variant="B0", scope=scope, block="c1-1")
+    ok = [dict(run, product_network="off", cpu_pct_one_core=1.0), dict(run, product_network="on", cpu_pct_one_core=1.1)]
+    assert cadence.compare([dict(r, variant={"off": "B0", "on": "B1"}[r["product_network"]]) for r in ok])["problems"] == []
+    for change in ({"python": "3.9.0"}, {"source_hash": "other"}, {"bench_hash": "other"},
+                   {"scope": dict(scope, product_network=dict(scope["product_network"], interfaces=4))},
+                   {"scope": dict(scope, product_network=dict(scope["product_network"], namespace="netns1:b"))},
+                   {"scope": dict(scope, collectors={"core": "ok", "temperature": "ok"})}):
+        bad = [ok[0], dict(ok[1], **change)]
+        assert cadence.mismatches(bad), change
