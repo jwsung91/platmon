@@ -34,7 +34,7 @@ commits are listed in its description.
   unknown keys are still refused.
 - The `platmon` command stays one standard-library file; it never imports the collector.
 
-## Cost (integrated, `c2752c1`)
+## Cost (integrated, `c2752c1`; later commits change only the display of long mount lists and docs)
 
 The real service (`python3 platmon.py INI`, native) polled like the web page (`/api/stats` every 1 s,
 `/api/observations` and `/api/history` every 10 s) by `benchmarks/service_cpu.py` from its own process;
@@ -71,12 +71,15 @@ pull_request) for every PR and this branch; Orin Nano and Raspberry Pi 4 nativel
 (functional checks of every feature; per-feature cost; the integrated runs above); the web page in a real
 browser (Chromium headless shell, 1280 px and 390 px) for #33's panels. Each device run left the boards'
 own services (`e1bc82a`) untouched, compared by state records before and after (see the performance
-reports for which runs have both).
+reports for which runs have both). The integrated page with storage, the probe (to loopback) and history on
+was also checked in that browser on WSL at 1280 px and 390 px; that check found a filesystem with 45 bind
+mounts making the Storage panel and the `STORAGE` line unreadable, fixed in #34 (`efc6e59`: the first mount
+point and "+N more").
 
 Not verified: a container deployment of any new feature (the scope differences are documented, not run);
 systemd installation of this branch; WSL for the low-frequency groups; PSI's normal path and the probe's
-real targets on the boards; the new web panels for storage, Wi-Fi, probe, pressure and history in a real
-browser (harness only); history filled to its retention on a board.
+real targets on the boards; the Wi-Fi and pressure panels in a real browser (WSL has neither; harness
+only); history filled to its retention on a board.
 
 ## Upgrade and rollout (for after approval; not done)
 
