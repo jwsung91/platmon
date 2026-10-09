@@ -14,14 +14,21 @@ BRAND_ASSETS = {
     "/assets/brand/platmon-logo-dark.svg": "platmon-logo-dark.svg",
     "/assets/brand/favicon.svg": "favicon.svg",
 }
-LIVE = ("/api/stats", "/api/status", "/text")
+LIVE = ("/api/stats", "/api/status", "/api/observations", "/text")
 
 
-def make_handler(sampler, web=True):
+def make_handler(sampler, web=True, observations=None):
+    """observations: the service's collector.slow.Observations (low-frequency groups), or None."""
+    def observed():
+        return observations.view() if observations else {"schema_version": 1, "instance_id": sampler.instance_id,
+                                                          "clock": dict(sampler.clock), "groups": {}}
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             if self.path == "/api/status":  # never waits for the first snapshot; 200 even when not ready
                 body, ctype = json.dumps(sampler.read()[1]).encode(), "application/json"
+            elif self.path == "/api/observations":  # low-frequency groups with their own ages; always 200
+                body, ctype = json.dumps(observed()).encode(), "application/json"
             elif self.path in ("/api/stats", "/text"):
                 # code and body from the same capture; /api/stats serializes the snapshot without copying it
                 if self.path == "/api/stats":
@@ -40,7 +47,7 @@ def make_handler(sampler, web=True):
                 if self.path == "/api/stats":
                     body, ctype = stats, "application/json"  # already the JSON bytes
                 else:  # same screen as the platmon command: watch -n1 curl -s host:9797/text
-                    body, ctype = (render(stats) + "\n").encode(), "text/plain; charset=utf-8"
+                    body, ctype = (render(stats, observed()) + "\n").encode(), "text/plain; charset=utf-8"
             elif web and self.path in ("/", "/index.html"):
                 with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
                     body, ctype = f.read(), "text/html; charset=utf-8"
@@ -67,9 +74,10 @@ def make_handler(sampler, web=True):
     return Handler
 
 
-def start(sampler, cfg):
+def start(sampler, cfg, observations=None):
     """cfg: the [http] config section (bind, port, web)."""
-    httpd = ThreadingHTTPServer((cfg.get("bind"), cfg.getint("port")), make_handler(sampler, cfg.getboolean("web")))
+    httpd = ThreadingHTTPServer((cfg.get("bind"), cfg.getint("port")),
+                                make_handler(sampler, cfg.getboolean("web"), observations))
     print(f"platmon http on {cfg.get('bind')}:{cfg.getint('port')}", flush=True)
     t = threading.Thread(target=httpd.serve_forever, name="http", daemon=True)
     t.start()

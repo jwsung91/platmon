@@ -628,3 +628,13 @@ def test_disk_product_plan_and_source_hash(monkeypatch):
     monkeypatch.setattr(cadence, "sha256_files", lambda paths: seen.extend(paths) or "x")
     cadence.source_hash()
     assert any(p.endswith("collector/disk_io.py") for p in seen)
+
+
+def test_slow_cost_times_each_real_observation(tmp_path):
+    from benchmarks import slow_cost
+    out = tmp_path / "s.json"
+    slow_cost.main(["--period", "0.01", "--count", "3", "--out", str(out)])
+    r = json.loads(out.read_text())
+    assert r["count"] == 3 and len(r["samples"]) == 3 and r["observe_cpu_ms"]["n"] == 3
+    assert all(s["state"] in ("ok", "partial", "unavailable") for s in r["samples"])
+    assert r["source_hash"] and r["bench_hash"]
