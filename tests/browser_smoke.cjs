@@ -14,6 +14,8 @@ const snap = {platform: 'Linux', model: 'Fixture board', uptime: 3 * 86400 + 7 *
     rates: {rx_bytes_per_s: 1024, tx_bytes_per_s: 0, rx_packets_per_s: 1, tx_packets_per_s: 0}}]},
   disk_io: {disks: [{name: 'sda', in_flight: 0, rates: null, reason: 'warmup'}]},
   pressure: {resources: {cpu: {some: {avg10: 1.5}, full: null}}}};
+snap.network.interfaces.unshift({name: 'br-example', rx: {}, tx: {}, rates: {
+  rx_bytes_per_s: 0, tx_bytes_per_s: 0, rx_packets_per_s: 0, tx_packets_per_s: 0}});
 const obs = {groups: {wifi: {state: 'ok', stale_after_ms: 15000,
   observation: {id: 1, data_age_ms: 14000, stale: false}, data: {interfaces: [
     {name: bad, connected: true, signal_dbm: -64, link_quality: 45}]}},
@@ -52,13 +54,19 @@ const history = {retention_s: 600, series: {
       await page.setViewportSize({width, height: 900}); await page.goto('http://platmon.test/');
       await page.waitForFunction(() => document.querySelector('#overview').textContent.includes('Root filesystem'));
       assert(await page.locator('#panel-overview').isVisible());
+      assert((await page.locator('#overview').innerText()).includes('br-example'));
+      assert((await page.locator('#overview').innerText()).includes(bad));
+      assert.equal(await page.locator('#overview img').count(), 0);
       assert.equal(await page.locator('#tab-hint').isVisible(), width <= 540);
       assert(!(await page.locator('header').innerText()).includes('Ubuntu 22.04.5 LTS'));
       assert(!(await page.locator('header').innerText()).includes('MAXN_SUPER'));
       assert.equal(await page.locator('#history-panel').isVisible(), false);
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'overview fits long interface names');
       await page.screenshot({path: path.join(output, `overview-${width}.png`), fullPage: true});
-      await page.locator('#tab-network').click();
+      await page.locator('#overview-network-details a').focus();
+      await page.evaluate(() => tick());
+      assert(await page.locator('#overview-network-details a').evaluate(a => a === document.activeElement), 'refresh preserves detail-link focus');
+      await page.keyboard.press('Enter');
       await page.waitForFunction(() => document.querySelector('#wifi').textContent.includes('-64 dBm'));
       await page.waitForTimeout(2200);
       assert((await page.locator('#wifi').innerText()).includes('(not current)'));
