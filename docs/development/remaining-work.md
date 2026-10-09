@@ -18,15 +18,13 @@ Last update: 2026-10-09 13:30 KST. main: `85259427f20b` (#31, Network on by defa
 | 7 | Recent history (opt-in) | draft | `feat/recent-history`, #38 (#37) | `abe034b` | CI; memory bound measured locally |
 | 8 | Integration, release readiness | in progress | `integration/release-candidate` (not for merging) | see branch | integrated service runs on Orin/Pi |
 
-## Waiting for approval
+## Rollouts
 
-- Production rollout of `8525942` (#31) to the Orin container and the Raspberry Pi process. On the Orin
-  the candidate image `platmon:candidate-8525942` is built and smoke-tested (healthy, source ids equal to
-  the running service, network ok in the container namespace), the running image is tagged
-  `platmon:rollback-e1bc82a` and `~/platmon-rollback-e1bc82a-20261009-114530/` holds ROLLBACK.md, INI,
-  compose files, CLI copy and inspect output (DEPLOY.md and SHA256SUMS are written at the switch). Not
-  switched: the switch was refused by the session's permission check, and the later work order requires
-  separate approval. Both devices still run `e1bc82a`.
+- Orin: switched to `8525942` (#31) on 2026-10-09 14:09 KST at the owner's request. Healthy, `/api/status`
+  ready, network collector ok in the container's namespace (`eth0`, `lo`), the same 20 source records; the
+  service used 1.32 % of one core over 60 s without clients. Rollback to `e1bc82a`:
+  `~/platmon-rollback-e1bc82a-20261009-114530/ROLLBACK.md` (image `platmon:rollback-e1bc82a`; SHA256SUMS verify).
+- Raspberry Pi: still `e1bc82a`; its rollout was not requested.
 
 ## Device records
 
