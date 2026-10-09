@@ -412,3 +412,43 @@ def test_capacity_descriptor_closes_on_statvfs_failure(monkeypatch):
     with pytest.raises(PermissionError):
         storage.filesystem_capacity("/mount", (8, 1))
     assert closed == [42]
+
+
+@pytest.mark.parametrize("file_mounts", [["/usr/sbin/docker-init"], ["/etc/hostname", "/etc/hosts"]])
+def test_storage_skips_file_binds_before_a_directory(file_mounts):
+    import errno
+    h = Host()
+    paths = file_mounts + ["/host/root", "/another-dir"]
+    h.files["/proc/self/mountinfo"] = "\n".join(mi("259:1", p, "ext4", "/dev/nvme0n1p1") for p in paths)
+    h.stat_error = {p: NotADirectoryError(errno.ENOTDIR, "not a directory") for p in file_mounts}
+    out, status = observe(h)
+    assert out["filesystems"][0]["total_bytes"] == 1000 * 4096
+    assert h.statted == file_mounts + ["/host/root"]
+    assert status["state"] == "ok" and status["issues"] == []
+    assert [m["path"] for m in out["filesystems"][0]["mount_points"]] == paths
+
+
+def test_only_file_binds_keep_unknown_capacity():
+    import errno
+    h = Host()
+    h.files["/proc/self/mountinfo"] = mi("259:1", "/file", "ext4", "/dev/nvme0n1p1")
+    h.stat_error["/file"] = NotADirectoryError(errno.ENOTDIR, "not a directory")
+    out, status = observe(h)
+    assert out["filesystems"][0]["total_bytes"] is None
+    assert status["state"] == "partial" and status["issues"] == [{"target": "nvme0n1p1", "reason": "io_error"}]
+
+
+def test_file_bind_fallback_keeps_descriptor_identity_check(tmp_path):
+    from collector.storage import filesystem_capacity
+    file = tmp_path / "file"
+    file.write_text("x")
+    device = os.stat(tmp_path).st_dev
+    major, minor = os.major(device), os.minor(device)
+    h = Host()
+    h.files["/proc/self/mountinfo"] = "\n".join(
+        mi(f"{major}:{minor}", str(p), "ext4", "/dev/test") for p in (file, tmp_path))
+    h.statvfs = filesystem_capacity
+    out, status = observe(h)
+    expected = os.statvfs(tmp_path)
+    assert out["filesystems"][0]["total_bytes"] == expected.f_blocks * expected.f_frsize
+    assert status["state"] == "ok"
