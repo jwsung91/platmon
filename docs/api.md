@@ -8,7 +8,7 @@ networks only. Every answer of `/api/stats`, `/api/status`, `/api/observations` 
 | --- | --- |
 | `/api/stats` | the current snapshot as JSON; 503 when there is none |
 | `/api/status` | the collector's runtime status as JSON; always 200, also without the web page |
-| `/api/observations` | low-frequency groups (storage capacity, Wi-Fi signal) with their own ages; always 200 ([observations.md](observations.md)) |
+| `/api/observations` | low-frequency groups (storage capacity, Wi-Fi signal, TCP connect probe) with their own ages; always 200 ([observations.md](observations.md)) |
 | `/text` | the `platmon` terminal screen as plain text; 503 when there is no current snapshot |
 | `/` | the web page (only with `web = yes`) |
 

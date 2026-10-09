@@ -167,3 +167,10 @@ def test_wifi_from_observations(steps):
     assert "wlan1</span><span>not connected" in wifi  # no last signal, no 0
     assert "signal 70 (unit not reported)" in wifi and "&#60;i&#62;x&#60;/i&#62;" in wifi and "<i>" not in wifi
     assert steps["read_based_age"]["wifi"] == ""  # cleared after the server stopped answering it (404)
+
+
+def test_probe_from_observations(steps):
+    probe = steps["ok"]["probe"]
+    assert "192.0.2.1:443</span><span>12.3 ms · failed 1/10" in probe
+    assert "[2001:db8::1]:22</span><span>timeout · failed 3/3" in probe and "0.0 ms" not in probe
+    assert steps["read_based_age"]["probe"] == ""

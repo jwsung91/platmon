@@ -168,6 +168,24 @@ def wifi_lines(obs):
     return out
 
 
+def probe_lines(obs):
+    """TCP connect times from /api/observations (not ICMP ping): the latest attempt per target, and the
+    failures among its recent attempts."""
+    groups = obs.get("groups") if isinstance(obs, dict) else None
+    g = groups.get("probe") if isinstance(groups, dict) else None
+    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
+    items = data.get("targets") if isinstance(data, dict) else None
+    if not isinstance(items, list) or not items or not isinstance(o, dict):
+        return []
+    age = f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
+    out = [f"TCP   connect time, {age}"]
+    for t in items:
+        where = f"[{t['address']}]:{t['port']}" if ":" in t["address"] else f"{t['address']}:{t['port']}"
+        now = f"{t['connect_ms']:.1f} ms" if t["connect_ms"] is not None else t["reason"]
+        out.append(f"  {where}  {now}  failed {t['failures']}/{t['attempts']} recent")
+    return out
+
+
 def collection_note(s):
     """Optional groups that could not read everything ("Collection: temperature partial, gpu error");
     empty when all read fine or are just absent (no GPU, no fans), and for servers without collectors."""
@@ -213,7 +231,7 @@ def render(s, obs=None):
     for f in s["fans"]:
         vals = [f"{f['rpm']} rpm" if f["rpm"] is not None else "", f"{f['percent']}%" if f["percent"] is not None else ""]
         lines.append(f"FAN   {f['name']}  " + ("  ".join(v for v in vals if v) or "n/a"))  # n/a: unreadable
-    extra = counters_lines(s) + storage_lines(obs) + wifi_lines(obs)
+    extra = counters_lines(s) + storage_lines(obs) + wifi_lines(obs) + probe_lines(obs)
     if extra and lines[-1]:
         lines.append("")
     return "\n".join(lines + extra)
