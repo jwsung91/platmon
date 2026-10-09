@@ -27,18 +27,18 @@ def observe(source):
         return source
     g = sysfs.Group("wifi")
     return Wifi(read=read, netns=lambda: SimpleNamespace(st_dev=1, st_ino=2),
-                indexes=lambda: [(3, "wlan0")])(g), g.status()
+                indexes=lambda: [(3, "wlan0")], link=lambda name, index: True)(g), g.status()
 
 
 def test_connected_rows_from_the_boards():
     rows, bad = parse(HEAD + ORIN + PI)
     assert bad == [] and rows == [
-        {"name": "wlP1p1s0", "connected": True, "signal_dbm": -50, "signal_raw": None, "link_quality": 60, "noise_dbm": None},
-        {"name": "wlan0", "connected": True, "signal_dbm": -64, "signal_raw": None, "link_quality": 46, "noise_dbm": None}]
+        {"name": "wlP1p1s0", "connected": None, "connection_state": "unknown", "signal_dbm": -50, "signal_raw": None, "link_quality": 60, "noise_dbm": None},
+        {"name": "wlan0", "connected": None, "connection_state": "unknown", "signal_dbm": -64, "signal_raw": None, "link_quality": 46, "noise_dbm": None}]
 
 
-def test_not_connected_shows_no_signal():
-    assert parse(HEAD + DOWN)[0] == [{"name": "wlan1", "connected": False, "signal_dbm": None, "signal_raw": None,
+def test_unupdated_signal_does_not_determine_connection():
+    assert parse(HEAD + DOWN)[0] == [{"name": "wlan1", "connected": None, "connection_state": "unknown", "signal_dbm": None, "signal_raw": None,
                                       "link_quality": None, "noise_dbm": None}]  # never a last value, never 0
 
 
@@ -78,6 +78,9 @@ def test_cli_lines():
     def obs(interfaces, stale=False):
         return {"groups": {"wifi": {"observation": {"data_age_ms": 3000, "stale": stale}, "data": {"interfaces": interfaces}}}}
     rows = parse(HEAD + PI + DOWN + RAW)[0]
+    for item in rows:
+        item["connected"] = item["name"] != "wlan1"
+        item["connection_state"] = "connected" if item["connected"] else "disconnected"
     assert wifi_lines(obs(rows)) == ["WIFI  observed 3 s ago", "  wlan0  -64 dBm  link quality 46",
                                      "  wlan1  not connected", "  eth9  signal 70 (unit not reported)  link quality 70"]
     assert wifi_lines(obs(rows, stale=True))[0] == "WIFI  observed 3 s ago (not current)"
@@ -107,3 +110,55 @@ def test_unavailable_identity_is_not_invented():
     out = Wifi(read=lambda path: HEAD + PI, netns=denied, indexes=lambda: [])(g)
     assert out["scope"]["id"] is None and out["interfaces"][0]["ifindex"] is None
     assert g.status()["state"] == "partial"
+
+
+def test_signal_not_updated_does_not_claim_disconnection():
+    out, _ = observe(HEAD + PI.replace('-64.', '-64 '))
+    assert out["interfaces"][0]["connected"] is True
+    assert out["interfaces"][0]["signal_dbm"] is None
+
+
+@pytest.mark.parametrize("result,state,connected", [
+    (True, "connected", True), (False, "disconnected", False), (None, "unknown", None),
+    (PermissionError(13, "private path"), "permission_denied", None),
+    (FileNotFoundError(2, "private path"), "unsupported", None),
+    (OSError(5, "private path"), "unavailable", None)])
+def test_connection_states_are_not_inferred_from_signal(result, state, connected):
+    def link(name, index):
+        if isinstance(result, Exception):
+            raise result
+        return result
+    g = sysfs.Group("wifi")
+    out = Wifi(read=lambda path: HEAD + PI, netns=lambda: SimpleNamespace(st_dev=1, st_ino=2),
+               indexes=lambda: [(3, "wlan0")], link=link)(g)
+    item = out["interfaces"][0]
+    assert item["connection_state"] == state and item["connected"] is connected
+    assert item["signal_dbm"] == (-64 if connected is True else None)
+    assert "private path" not in str(out) + str(g.status())
+
+
+def test_carrier_and_index_from_fake_sysfs(tmp_path):
+    from collector.wifi import link_connected
+    d = tmp_path / "wlan0"
+    d.mkdir()
+    (d / "ifindex").write_text("3\n")
+    (d / "carrier").write_text("1\n")
+    assert link_connected("wlan0", 3, root=str(tmp_path)) is True
+    (d / "carrier").write_text("0\n")
+    assert link_connected("wlan0", 3, root=str(tmp_path)) is False
+    assert link_connected("wlan0", 4, root=str(tmp_path)) is None
+    (d / "carrier").write_text("2\n")
+    with pytest.raises(ValueError):
+        link_connected("wlan0", 3, root=str(tmp_path))
+
+
+def test_interface_replaced_during_carrier_read_is_unknown():
+    from collector.wifi import link_connected
+    values = iter(["3", "1", "4"])
+    assert link_connected("wlan0", 3, read=lambda path: next(values)) is None
+
+
+def test_raw_zero_and_invalid_signal_range():
+    rows, bad = parse(HEAD + RAW.replace('70.   70.', '70.    0.'))
+    assert not bad and rows[0]["signal_raw"] == 0 and rows[0]["signal_dbm"] is None
+    assert parse(HEAD + PI.replace('-64.', '-300.'))[1] == [("wlan0", "invalid_data")]

@@ -279,7 +279,7 @@ def test_observations_endpoint():
             httpd.shutdown()
         doc = json.loads(body)
         assert (code, headers["Content-Type"], headers["Cache-Control"]) == (200, "application/json", "no-store")
-        assert list(doc["groups"]) == groups and doc["instance_id"] == s.instance_id and doc["schema_version"] == 1
+        assert list(doc["groups"]) == groups and doc["instance_id"] == s.instance_id and doc["schema_version"] == 2
 
 
 def test_real_host_observation():

@@ -163,8 +163,9 @@ def wifi_lines(obs):
     age = f"observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
     out = [f"WIFI  {age}"]
     for i in items:
-        if not i["connected"]:
-            out.append(f"  {i['name']}  not connected")
+        if i.get("connected") is not True:
+            state = "not connected" if i.get("connected") is False else i.get("connection_state", "unknown")
+            out.append(f"  {i['name']}  {state}")
             continue
         signal = (f"{i['signal_dbm']} dBm" if i["signal_dbm"] is not None
                   else f"signal {i['signal_raw']} (unit not reported)" if i["signal_raw"] is not None else "signal n/a")

@@ -144,7 +144,7 @@ function wifiRows() {
   if (!o || !items.length) return '';
   const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
   return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` + items.map(i => kv(esc(i.name),
-    !i.connected ? 'not connected' : i.signal_dbm != null ? i.signal_dbm + ' dBm'
+    i.connected !== true ? (i.connected === false ? 'not connected' : esc(i.connection_state || 'unknown')) : i.signal_dbm != null ? i.signal_dbm + ' dBm'
       : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a') +
     (i.connected && i.link_quality != null ? `<div class="muted">link quality ${i.link_quality}</div>` : '')).join('');
 }

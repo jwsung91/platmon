@@ -7,7 +7,7 @@ contains these groups, so an old or blocked observation can never make the core 
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "instance_id": "8dfad9fa-9bf0-4d61-91e0-ef22aebd2b91",
   "clock": {"source": "boottime", "suspend_aware": true},
   "groups": {
@@ -50,3 +50,13 @@ Clients ask for `/api/observations` on the groups' cadence, not every second: th
 answer to the ages shown. A server without the endpoint (404) is not asked again.
 
 Groups: `storage` ([storage.md](storage.md)), `wifi` ([wifi.md](wifi.md)), `probe` ([probe.md](probe.md)).
+
+## Version 2 compatibility boundary
+
+The connection-state correction changes only the low-frequency envelope to `schema_version: 2`.
+Wi-Fi `connected` becomes true/false/**null**: null means the connection could not be determined.
+The additive `connection_state` is `connected`, `disconnected`, `unknown`, `unsupported`,
+`permission_denied` or `unavailable`. A wireless signal-update mark alone never establishes a connection.
+Clients must test `connected is true` / `=== true`, not treat every other value as disconnected.
+CLI/web in this change accept both envelope versions; on version 1 they retain its legacy boolean display.
+Core `/api/stats` and history remain version 1. Storage/probe fields and observation timing are unchanged.

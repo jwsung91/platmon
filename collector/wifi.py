@@ -33,24 +33,27 @@ def parse(text):
             continue
         name, link, link_new, level, level_new, noise = m.group(1), int(m.group(3)), m.group(4), int(m.group(5)), \
             m.group(6), int(m.group(7))
-        # cfg80211 updates link and level together whenever it has station data, i.e. while associated;
-        # without it the interface is listed with nothing updated
-        connected = bool(level_new)
+        if not (0 <= link <= 255 and -256 <= level <= 255 and -256 <= noise <= 255):
+            bad.append((name, "invalid_data"))
+            continue
+        # The dot describes signal freshness, not association or kernel carrier state.
+        updated = bool(level_new)
         dbm = level < 0  # the kernel subtracts 256 for dBm values, so they come out negative
-        out.append({"name": name, "connected": connected,
-                    "signal_dbm": level if connected and dbm else None,
-                    "signal_raw": level if connected and not dbm else None,  # a driver without dBm: unit unknown
-                    "link_quality": link if connected and link_new else None,
-                    "noise_dbm": noise if connected and noise < 0 and noise != -256 else None})
+        out.append({"name": name, "connected": None, "connection_state": "unknown",
+                    "signal_dbm": level if updated and dbm else None,
+                    "signal_raw": level if updated and not dbm else None,  # a driver without dBm: unit unknown
+                    "link_quality": link if updated and link_new else None,
+                    "noise_dbm": noise if updated and noise < 0 and noise != -256 else None})
     return out, bad
 
 
 class Wifi:
     """observe(group) for collector/slow.py."""
 
-    def __init__(self, read=None, netns=lambda: os.stat(NETNS), indexes=socket.if_nameindex):
+    def __init__(self, read=None, netns=lambda: os.stat(NETNS), indexes=socket.if_nameindex, link=None):
         self._read = read or _read
         self._netns, self._indexes = netns, indexes
+        self._link = link or link_connected
 
     def __call__(self, group):
         out = {"scope": {"kind": "process_network_namespace"}, "provider": PROVIDER, "interfaces": []}
@@ -76,6 +79,27 @@ class Wifi:
         out["scope"]["id"] = ns
         for item in interfaces:
             item["ifindex"] = index.get(item["name"])
+            if item["ifindex"] is None:
+                for key in ("signal_dbm", "signal_raw", "link_quality", "noise_dbm"):
+                    item[key] = None
+                continue
+            try:
+                connected = self._link(item["name"], item["ifindex"])
+                item["connected"] = connected
+                item["connection_state"] = "unknown" if connected is None else "connected" if connected else "disconnected"
+            except FileNotFoundError:
+                item["connection_state"] = "unsupported"
+                group.note(item["name"], "not_exposed")
+            except OSError as e:
+                why = reason_of(e)
+                item["connection_state"] = "permission_denied" if why == "permission_denied" else "unavailable"
+                group.note(item["name"], why)
+            except ValueError:
+                item["connection_state"] = "unknown"
+                group.note(item["name"], "invalid_data")
+            if item["connected"] is not True:
+                for key in ("signal_dbm", "signal_raw", "link_quality", "noise_dbm"):
+                    item[key] = None
         for target, why in bad:
             group.note(target, why, PATH)
         out["interfaces"] = [group.got(i) for i in sorted(interfaces, key=lambda i: i["name"])]
@@ -87,3 +111,16 @@ class Wifi:
 def _read(path):
     with open(path, encoding="ascii") as f:
         return f.read()
+
+
+def link_connected(name, ifindex, root="/sys/class/net", read=_read):
+    """Kernel link carrier, not the wireless signal-update bit. Paths/reads are injectable.
+    A mismatched index is not trusted (device replacement or incompatible sysfs scope)."""
+    before = int(read(f"{root}/{name}/ifindex").strip())
+    carrier = read(f"{root}/{name}/carrier").strip()
+    after = int(read(f"{root}/{name}/ifindex").strip())
+    if before != ifindex or after != ifindex:
+        return None
+    if carrier not in ("0", "1"):
+        raise ValueError("invalid carrier")
+    return carrier == "1"
