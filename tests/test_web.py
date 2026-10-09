@@ -182,7 +182,7 @@ def test_history_graphs(steps):
     assert "last 10 min" in hist and "RAM used</span><span>2.0G" in hist and "<svg" in hist
     assert "eth0 rx</span><span>no value" in hist  # the latest point is a gap: said so, not 0
     assert "&#60;b&#62; tx" in hist and "<b>" not in hist
-    assert "cpu/0" not in hist and "unknown" not in hist  # only the series the page knows how to label
+    assert "CPU0" in hist and "cpu/0" not in hist and "unknown" not in hist  # only the series the page knows how to label
     eth0 = hist.split("eth0 rx")[1].split("</svg>")[0]
     assert eth0.count("M") == 1 and "L" not in eth0  # one point between two gaps: no line drawn across them
     assert steps["read_based_age"]["hist"] == "" and steps["read_based_age"]["hist_fetches"] == 2  # 404: stopped
@@ -193,3 +193,13 @@ def test_pressure_rows(steps):
     assert "avg10 · share of time stalled" in psi and "some 1.3%" in psi and "some 3.0% · full 0.5%" in psi
     assert "cpu</span><span>some 1.3%</span>" in psi  # no full for the CPU: undefined at the system level
     assert steps["counters_absent"]["psi"] == ""
+
+
+def test_history_uses_elapsed_spacing_and_low_frequency_units(steps):
+    hist = steps["ok"]["hist"]
+    assert "TCP 127.0.0.1:80</span><span>3.0 ms" in hist
+    assert "wlan0 signal</span><span>-64.0 dBm" in hist
+    assert "FS 8:1 used</span><span>1.0G" in hist
+    assert "latest point 2 s ago" in hist
+    probe = hist.split("TCP 127.0.0.1:80")[1].split("</svg>")[0]
+    assert "M0.0,26.0L20.0,14.0L200.0,2.0" in probe  # irregular 1 s then 9 s interval

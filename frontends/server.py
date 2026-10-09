@@ -21,7 +21,9 @@ MAX_POINTS, MAX_PREFIX = 600, 128
 
 def history_query(history, query):
     """(prefix, seconds, points) from /api/history?prefix=&seconds=&points=, bounded; ValueError if bad."""
-    q = urllib.parse.parse_qs(query, max_num_fields=3)
+    q = urllib.parse.parse_qs(query, max_num_fields=3, keep_blank_values=True)
+    if set(q) - {"prefix", "seconds", "points"} or any(len(v) != 1 for v in q.values()):
+        raise ValueError(query)
     prefix = q.get("prefix", [""])[0]
     seconds = float(q.get("seconds", [history.retention])[0])
     points = int(q.get("points", [300])[0])
@@ -49,7 +51,8 @@ def make_handler(sampler, web=True, observations=None, history=None):
                     return
                 series, dropped = history.view(sampler._elapsed(), prefix, seconds, points)
                 body = {"schema_version": 1, "instance_id": sampler.instance_id, "retention_s": history.retention,
-                        "interval_ms": round(sampler.interval * 1000, 3), "dropped_series": dropped, "series": series}
+                        "interval_ms": round(sampler.interval * 1000, 3), "dropped_series": dropped, "series": series,
+                        "series_intervals_ms": {sid: ms for sid, ms in history.intervals().items() if sid in series}}
                 self.path = path  # for the no-store header
                 self.reply(200, json.dumps(body).encode(), "application/json")
                 return

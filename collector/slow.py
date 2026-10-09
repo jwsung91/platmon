@@ -4,6 +4,7 @@ A blocked read stalls only its own group (its age grows, collecting_for_ms says 
 thread is started for it. Contract: docs/observations.md.
 """
 import threading
+import sys
 import time
 
 from . import sysfs
@@ -29,6 +30,8 @@ class Slow:
         self._logged = {}
         self._stop = threading.Event()
         self._thread = None
+        self.on_publish = None
+        self._publish_failed = False
 
     def start(self):
         with self._lock:
@@ -60,6 +63,14 @@ class Slow:
             self._last = {"id": self._count, "started": started, "completed": completed, "started_at": started_at,
                           "completed_at": self._wall(), "collector": collector, "data": data}
             self._since = None
+            published = self._last
+        if self.on_publish is not None:
+            try:
+                self.on_publish(self.name, self.interval, published)
+            except Exception:
+                if not self._publish_failed:
+                    print("platmon: observation history append failed", file=sys.stderr)
+                    self._publish_failed = True
         return started
 
     def view(self):

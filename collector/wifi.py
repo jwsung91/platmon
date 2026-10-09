@@ -7,8 +7,10 @@ updated since the last read and level / noise are dBm (negative) when the driver
 value of unspecified unit; a noise of -256 is "not available".
 """
 import re
+import os
+import socket
 
-from .network import valid_name
+from .network import NETNS, namespace_id, valid_name
 from .sysfs import reason_of
 
 PROVIDER = "proc_net_wireless"
@@ -46,8 +48,9 @@ def parse(text):
 class Wifi:
     """observe(group) for collector/slow.py."""
 
-    def __init__(self, read=None):
+    def __init__(self, read=None, netns=lambda: os.stat(NETNS), indexes=socket.if_nameindex):
         self._read = read or _read
+        self._netns, self._indexes = netns, indexes
 
     def __call__(self, group):
         out = {"scope": {"kind": "process_network_namespace"}, "provider": PROVIDER, "interfaces": []}
@@ -62,6 +65,17 @@ class Wifi:
         except (UnicodeDecodeError, ValueError):
             group.note("wireless", "invalid_data", PATH)
             return out
+        index = {}
+        ns = None
+        if interfaces:
+            try:
+                ns = namespace_id(self._netns())
+                index = {name: number for number, name in self._indexes()}
+            except OSError as e:
+                group.note("identity", reason_of(e))
+        out["scope"]["id"] = ns
+        for item in interfaces:
+            item["ifindex"] = index.get(item["name"])
         for target, why in bad:
             group.note(target, why, PATH)
         out["interfaces"] = [group.got(i) for i in sorted(interfaces, key=lambda i: i["name"])]

@@ -20,9 +20,12 @@ restart starts empty), and serves them at `/api/history` for trend graphs. **Off
 
 ## What is kept
 
-One point per **published** core snapshot, appended by the collector thread when it publishes: a failed
-or dropped collection adds nothing, and HTTP requests never add points. A point is
-`[sample.sequence, age_ms, value]`: the sequence of the snapshot it comes from and how long ago that
+One append per **published** core snapshot or independent slow observation, installed before either
+publisher starts. Failed or dropped core collections add no measured point; an elapsed publication gap
+inserts a null break at the next successful publication. HTTP requests never add points. Duplicate or
+out-of-order publication IDs are ignored within each of the four domains (core/storage/wifi/probe). A point is
+`[publication_id, age_ms, value]`: the core sequence, or the independent observation ID for an
+`observation/` series, and how long ago that
 collection started (elapsed clock, as of the answer; wall-clock steps do not change it).
 
 | series id | value | identity |
@@ -37,27 +40,54 @@ A replaced device, another namespace or index, or a new source id starts a **new
 continuing an old one. Rates are the server's own, never recomputed from the counters.
 
 Gaps: a value without a rate (`warmup`, `gap`, `counter_regressed`, a CPU without usage) is `null`, never 0
-and never interpolated. A series missing from a snapshot gets no point for it: the jump in `sequence` is the
-gap. Low-frequency groups (`/api/observations`) are not in the history.
+and never interpolated. A previously seen series missing from its own publisher gets an explicit null. Missing markers do not
+extend a disappeared identity's lifetime. A publisher gap greater than `max(3 × interval, 5 s)` inserts
+a null immediately before the next point, with that publication's ID (a gap marker, not another measured
+sample). Downsampling keeps a null when any input in the bucket is missing, and preserves the newest
+point exactly. This can omit some valid detail, but never hides an outage by joining a line through it.
+
+Low-frequency series use **their own** observation IDs and start times:
+
+| series | value / identity |
+| --- | --- |
+| `observation/storage/<major>:<minor>/<token>/used_bytes` and `available_bytes` | bytes; token hashes device number/name, filesystem type and source (not a universal filesystem UUID) |
+| `observation/wifi/<namespace>/<ifindex>/<name>/signal_dbm` | dBm when reported and connected; unknown namespace/index omitted, disconnect is null |
+| `observation/probe/<address>:<port>/connect_ms` | TCP connect ms; timeout/failure is null; IPv6 address bracketed |
+
+A completed observation already older than three group intervals contributes null, never a current
+value. Partial groups retain their valid numbers; missing/error values are gaps. `series_intervals_ms`
+is an additive endpoint field mapping series IDs to their publisher cadence. Existing core IDs and
+point units stay unchanged; older consumers can ignore new prefixes and this metadata.
 
 ## Bounds
 
-- At most `retention / interval + 2` points per series and 64 series; series beyond that are not kept and
-  counted in `dropped_series`. A series not seen for longer than `retention` is removed, so devices that come
+- At most `min(3602, retention / min(core interval, 1 s) + 2)` points per series and 64 series; series beyond that are not kept and
+  counted in `dropped_series`. IDs are limited to 512 characters; only finite numeric values are retained.
+  At very fast cadences, the point cap can shorten the effective retained window; retention is an upper limit. A series not seen for longer than `retention` is removed, so devices that come
   and go do not pile up.
 - `/api/history?prefix=…&seconds=…&points=…` (all optional): series whose id starts with `prefix` (at most
   128 characters), from the last `seconds` (up to `retention`), at most `points` per series (1 to 600, default
-  300; evenly picked, the newest kept). Anything else is 400. 404 when history is off.
-- Reading copies the points out under a short lock and serializes outside it; appending never waits for a
+  300; gap-preserving buckets, the newest kept). Anything else is 400. 404 when history is off.
+- Reading copies point references under the history lock, then filters, downsamples and serializes outside it; appending never waits for a
   reader's serialization.
 
 ## Web page
 
-With history on, the page shows a "History" panel: a small line per memory, temperature, network and disk
-series (at most 12), the latest value next to it, "no value" when the latest point is a gap; a gap breaks the
-line. It asks `/api/history?points=120` at most every 10 s while visible and stops after a 404. The
+With history on, the page shows a "History" panel: a small line per CPU, memory, temperature, network, disk and low-frequency
+series (at most 12, with an omission notice), the latest value next to it, "no value" when the latest point is a gap; a gap breaks the
+line. Horizontal position uses actual elapsed age, not equally spaced indexes. Each row says the latest
+point age; these are historical values, not a fresh live reading. It asks `/api/history?points=120` at most every 10 s while visible and stops after a 404. The
 `platmon` command and `/text` do not show history.
 
 ## Not included
 
-Persistence across restarts, CPU and low-frequency groups in the graphs, zooming, export, alerts.
+Persistence across restarts, zooming, export, alerts.
+
+Memory validation target: at most 32 MiB retained Python allocations, 64 MiB including one bounded
+read/JSON encoding at 64 series × 3602 points. One synthetic `tracemalloc` run checks the maximum point
+configuration; a separate 600 s board run is required for real-time retention/worker/RSS validation.
+The older 3.7 MiB report is historical and is not a measurement of this implementation.
+
+Synthetic maximum-capacity result on Python 3.12 (64 series × 3602 points, then a 600-point read):
+22,505,990 bytes retained and 28,765,190 bytes peak including JSON, within the 32/64 MiB targets.
+This is Python allocation accounting with virtual observation time, not daemon RSS or ARM cost.

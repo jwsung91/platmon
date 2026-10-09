@@ -77,7 +77,10 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
     'memory/used_bytes': [[1, 3000, 2 ** 30], [2, 2000, 2 ** 31], [3, 1000, 2 ** 31]],
     'network/netns1:x/2/eth0/rx_bytes_per_s': [[1, 3000, null], [2, 2000, 1024], [3, 1000, null]],
     'network/netns1:x/3/<b>/tx_bytes_per_s': [[3, 1000, 5]],
-    'cpu/0/usage': [[1, 3000, 5]], 'unknown/series': [[1, 1, 1]]}}));
+    'cpu/0/usage': [[1, 3000, 5]],
+    'observation/probe/127.0.0.1:80/connect_ms': [[1, 10000, 1], [2, 9000, 2], [3, 0, 3]],
+    'observation/wifi/ns:a/2/wlan0/signal_dbm': [[1, 2000, -64]],
+    'observation/storage/8:1/token/used_bytes': [[1, 3000, 2 ** 30]], 'unknown/series': [[1, 1, 1]]}}));
   answers.push(ok(SNAP));
   eval(code);  // the page script ends with tick()
   await settle(); report('ok');

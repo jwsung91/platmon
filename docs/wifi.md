@@ -63,3 +63,9 @@ command and `/text` (`WIFI` lines) with the observation's age; "not connected" w
 ## Not included
 
 SSID, BSSID, frequency, bit rate, scans, roaming, nl80211 queries, other tools (`iw`), history.
+
+For identity-aware history, successful observations also include `scope.id` (the same network namespace
+hash convention as Network) and each interface's `ifindex`, obtained once per observation via standard
+library network-interface enumeration. Missing identity is null and diagnosed, never inferred from the
+name. These additive fields do not change signal units or the provider. The earlier per-call cost
+measurements predate the identity lookup and are not a measurement of this updated path.

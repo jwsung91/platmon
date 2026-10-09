@@ -165,18 +165,23 @@ function storageRows() {
 // Recent history (/api/history, off unless the service enables it): asked for at most every 10 s while
 // visible, never again after a 404. A null is a gap in the line (warmup, missing sample), never 0.
 let hist = null, histAsked = -Infinity, histSupported = true;
-const HIST_LABEL = [[/^memory\/used_bytes$/, () => 'RAM used'],
+const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
+  [/^observation\/storage\/([^/]+)\/[^/]+\/(used_bytes|available_bytes)$/, m => `FS ${m[1]} ${m[2] === 'used_bytes' ? 'used' : 'free'}`],
+  [/^observation\/wifi\/[^/]+\/\d+\/([^/]+)\/signal_dbm$/, m => `${m[1]} signal`],
+  [/^observation\/probe\/([^/]+)\/connect_ms$/, m => `TCP ${m[1]}`],
+  [/^memory\/used_bytes$/, () => 'RAM used'],
   [/^temperature\/(?:name:)?(.+)$/, m => 'temp ' + m[1].slice(0, 12)],
   [/^network\/[^/]+\/\d+\/([^/]+)\/(rx|tx)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
   [/^disk_io\/[^/]+\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`]];
 function spark(points) {
   const vs = points.map(p => p[2]).filter(v => v != null), lo = Math.min(...vs), hi = Math.max(...vs);
   if (!vs.length) return '';
-  const n = points.length, y = v => hi > lo ? 26 - 24 * (v - lo) / (hi - lo) : 14;
+  const oldest = points[0][1], newest = points[points.length - 1][1];
+  const y = v => hi > lo ? 26 - 24 * (v - lo) / (hi - lo) : 14;
   let d = '', pen = false;
   points.forEach((p, i) => {
     if (p[2] == null) { pen = false; return; }
-    d += `${pen ? 'L' : 'M'}${(n > 1 ? 200 * i / (n - 1) : 0).toFixed(1)},${y(p[2]).toFixed(1)}`;
+    d += `${pen ? 'L' : 'M'}${(oldest > newest ? 200 * (oldest - p[1]) / (oldest - newest) : 0).toFixed(1)},${y(p[2]).toFixed(1)}`;
     pen = true;
   });
   return `<svg class="spark" viewBox="0 0 200 28" preserveAspectRatio="none"><path d="${d}"/></svg>`;
@@ -187,11 +192,15 @@ function histRows() {
   for (const [id, points] of Object.entries(series)) {
     const rule = HIST_LABEL.find(([re]) => re.test(id));
     if (!rule || !Array.isArray(points) || !points.length || rows.length >= 12) continue;
-    const last = points[points.length - 1][2];
+    const latest = points[points.length - 1], last = latest[2];
     rows.push(kv(esc(rule[1](id.match(rule[0]))), last == null ? 'no value' : id.startsWith('temperature') ? last.toFixed(1) + ' °C'
-      : id.startsWith('memory') ? gib(last) : perS(last)) + spark(points));
+      : id.startsWith('cpu/') ? last.toFixed(1) + '%' : id.includes('/wifi/') ? last.toFixed(1) + ' dBm'
+      : id.includes('/probe/') ? last.toFixed(1) + ' ms' : id.startsWith('memory') || id.includes('/storage/') ? gib(last) : perS(last)) +
+      `<div class="muted">latest point ${Math.round(latest[1] / 1000)} s ago</div>` + spark(points));
   }
-  return rows.length ? `<div class="muted">last ${Math.round(hist.retention_s / 60)} min</div>` + rows.join('') : '';
+  return rows.length ? `<div class="muted">last ${Math.round(hist.retention_s / 60)} min</div>` + rows.join('') +
+    (Object.keys(series).filter(id => HIST_LABEL.some(([re]) => re.test(id))).length > rows.length
+      ? `<div class="muted">more series in /api/history (showing first ${rows.length})</div>` : '') : '';
 }
 async function pollHist() {
   const now = performance.now();

@@ -11,8 +11,10 @@ implementation; merging alone does **not** complete the expanded validation requ
 
 ## Resumed work checkpoint
 
-- Branch: `fix/disk-classification-identity`, based on the baseline above; Disk follow-up PR pending.
-  UI follow-up: #40, `33ada21`, signed; branch `fix/frontend-observation-contract`.
+- Branch: `feat/history-observation-contract`, stacked on Disk PR #41 at
+  `1eae3a4bd5ddc6395d6c9c871e6af60b61041f27`; history follow-up PR pending.
+  UI follow-up: #40, `33ada21`, signed; Python 3.9 CI 645/1, Python 3.13 CI 644/2 passed/skipped
+  on push and PR event (runs 37891815033, 37891851001); branch `fix/frontend-observation-contract`.
   Clean worktree at entry. No user changes were present.
 - Stage 1: **in progress**. Three classification-cache regressions reproduced and fixed; focused
   Disk/Network/provenance tests: **179 passed**. New ARM measurement required (plan in disk report); raw SHA-256 prefixes for the integrated
@@ -24,7 +26,11 @@ implementation; merging alone does **not** complete the expanded validation requ
 - Stages 3–6: implementations retained; validation still required against the complete work order.
   PSI normal-path ARM support and approved external probe targets remain unavailable; defaults stay off.
 - Stage 7: **in progress, not complete**. Existing history explicitly excludes low-frequency groups;
-  observation-ID-based append and graph missing-interval handling still need implementation/validation.
+  observation-ID-based append, explicit missing/elapsed-gap markers, gap-preserving downsampling,
+  CPU/slow graphs and elapsed spacing implemented here. Wi-Fi gets namespace/index identity; no signal
+  unit change. Local full tests: 654 passed / 3 skipped including the additional graph test;
+  CI, real browser and real-time board retention verification pending. Maximum configuration synthetic
+  tracemalloc: 22,505,990 bytes retained, 28,765,190 bytes peak with one read/JSON; targets 32/64 MiB.
 - Stage 8: **waiting for validation**. Container/systemd isolation, board history retention, the second
   integrated ABBA block, and final exact-HEAD CI/measurement reconciliation remain outstanding.
 - Devices rechecked over SSH: both production checkouts are `8525942`; Orin's original container and
@@ -34,7 +40,8 @@ implementation; merging alone does **not** complete the expanded validation requ
   Node-backed web tests and real hosted-runner PSI tests executed. These are baseline, not follow-up CI.
 - Local baseline: `pytest -v`, Python 3.12, **640 passed / 3 skipped** with loopback allowed. The initial
   sandbox run failed on denied sockets; no assertions were weakened to accommodate the sandbox.
-- Next: commit and measure the Disk correctness fix; retain #40 for review, then complete history and integration verification.
+- Disk measurement is running in each board's `~/platmon-diskbench-1eae3a4/`, 8 windows (do not restart).
+  Next: finalize the history PR and validate the integrated tree with #40.
   Nothing in this resumed task authorizes merging, production deployment or release publication.
 
 ## Historical implementation

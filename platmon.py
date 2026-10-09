@@ -129,19 +129,23 @@ def main(argv=None):
     # {} keeps what was logged about unreadable optional sensors, so a lasting failure is logged once.
     # The same clock times the CPU readings, every sensor read and the Sampler's collections.
     sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io, pressure), interval,
-                      clock=clock).start()
+                      clock=clock)
     # low-frequency groups, each on its own thread and cadence, served by /api/observations
     slow = [Slow(name, observe(), cfg[name].getfloat("interval"), clock[0])
             for name, observe in (("storage", Storage), ("wifi", Wifi),
                                   ("probe", lambda: Probe(parse_targets(cfg["probe"].get("targets")),
                                                           cfg["probe"].getfloat("timeout"))))
             if cfg[name].getboolean("enabled")]
-    observations = Observations(slow, sampler.instance_id, clock[1]).start()
+    observations = Observations(slow, sampler.instance_id, clock[1])
     # recent numbers of the published snapshots, in memory only (docs/history.md)
     history = None
     if cfg["history"].getboolean("enabled"):
         history = History(cfg["history"].getfloat("retention"), interval)
         sampler.on_publish = history.append
+        for group in slow:
+            group.on_publish = history.append_observation
+    sampler.start()
+    observations.start()
     threads = [t for name, start in FRONTENDS.items()
                if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name], observations, history))]
     if not threads:
