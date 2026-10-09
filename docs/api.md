@@ -1,12 +1,14 @@
 # HTTP API
 
 platmon answers on port 9797 (`[http]` in `platmon.ini`). There is no authentication: run it on trusted
-networks only. Every answer of `/api/stats`, `/api/status` and `/text` carries `Cache-Control: no-store`.
+networks only. Every answer of `/api/stats`, `/api/status`, `/api/observations` and `/text` carries
+`Cache-Control: no-store`.
 
 | Path | Answer |
 | --- | --- |
 | `/api/stats` | the current snapshot as JSON; 503 when there is none |
 | `/api/status` | the collector's runtime status as JSON; always 200, also without the web page |
+| `/api/observations` | low-frequency groups (storage capacity) with their own ages; always 200 ([observations.md](observations.md)) |
 | `/text` | the `platmon` terminal screen as plain text; 503 when there is no current snapshot |
 | `/` | the web page (only with `web = yes`) |
 

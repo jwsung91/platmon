@@ -37,18 +37,32 @@ const held = body => () => new Promise(resolve => { release = () => resolve(repl
 
 const answers = [];  // what the next requests get, in order
 let fetches = 0;
-global.fetch = (url, opts) => { fetches++; return answers.shift()((opts || {}).signal); };
+const obsAnswers = [];  // what /api/observations requests get, in order; a 404 (older server) when none is queued
+let obsFetches = 0;
+global.fetch = (url, opts) => {
+  if (url === 'api/observations') { obsFetches++; return (obsAnswers.shift() || (() => Promise.resolve(reply(404, {}))))(); }
+  fetches++; return answers.shift()((opts || {}).signal);
+};
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
-  net: el('net').innerHTML, dio: el('dio').innerHTML,
+  net: el('net').innerHTML, dio: el('dio').innerHTML, sto: el('sto').innerHTML, obs_fetches: obsFetches,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
 (async () => {
-  // an older server without sample metadata, through every kind of failure
+  // an older server without sample metadata, through every kind of failure; its observations answer once, then 404
+  obsAnswers.push(ok({schema_version: 1, groups: {storage: {state: 'stale', interval_ms: 30000,
+    observation: {id: 3, data_age_ms: 95000, stale: true}, data: {
+      filesystems: [{device: 'nvme0n1p1', major: 259, minor: 1, fstype: 'ext4', source: '/dev/nvme0n1p1', total_bytes: 4 * 2 ** 30,
+                     used_bytes: 2 ** 30, available_bytes: 3 * 2 ** 30, mount_points: [{path: '/', read_only: false},
+                     {path: '/mnt/<b>x</b>', read_only: true}]},
+                    {device: null, major: 0, minor: 40, fstype: 'btrfs', source: '/dev/sdb', total_bytes: null,
+                     used_bytes: null, available_bytes: null, mount_points: [{path: '/data', read_only: false}]}],
+      partitions: [{name: 'nvme0n1p1', disk: 'nvme0n1', size_bytes: 4 * 2 ** 30, mount_points: ['/']},
+                   {name: 'nvme0n1p2', disk: 'nvme0n1', size_bytes: 2 ** 27, mount_points: []}]}}}}));
   answers.push(ok(SNAP));
   eval(code);  // the page script ends with tick()
   await settle(); report('ok');

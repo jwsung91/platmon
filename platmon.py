@@ -17,6 +17,8 @@ from collector.common import CpuCounters
 from collector.disk_io import DiskCounters
 from collector.network import NetworkCounters
 from collector.sampler import Sampler, pick_clock
+from collector.slow import Observations, Slow
+from collector.storage import Storage
 from frontends import server
 
 FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outputs that run inside the core
@@ -25,10 +27,11 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "core": {"interval": 1.0},
     "network": {"enabled": True},  # measured cost: docs/performance/budget.md
     "disk_io": {"enabled": True},
+    "storage": {"enabled": False, "interval": 30.0},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
-RANGES = {("core", "interval"): (0.1, 3600), ("http", "port"): (1, 65535)}
+RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("http", "port"): (1, 65535)}
 
 
 def check(cfg):
@@ -107,8 +110,12 @@ def main(argv=None):
     # The same clock times the CPU readings, every sensor read and the Sampler's collections.
     sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network, disk_io), interval,
                       clock=clock).start()
+    # low-frequency groups, each on its own thread and cadence, served by /api/observations
+    slow = [Slow("storage", Storage(), cfg["storage"].getfloat("interval"), clock[0])] \
+        if cfg["storage"].getboolean("enabled") else []
+    observations = Observations(slow, sampler.instance_id, clock[1]).start()
     threads = [t for name, start in FRONTENDS.items()
-               if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name]))]
+               if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name], observations))]
     if not threads:
         p.error("no frontend is running; enable one in the config or with --frontends")
     try:

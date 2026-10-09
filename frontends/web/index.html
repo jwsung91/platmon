@@ -48,6 +48,7 @@
   <section><h2>Power · Fan</h2><div id="pwr"></div></section>
   <section><h2>Network</h2><div id="net"></div></section>
   <section><h2>Disk I/O</h2><div id="dio"></div></section>
+  <section><h2>Storage</h2><div id="sto"></div></section>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -100,6 +101,33 @@ function diskRows(s) {
       (r ? `<div class="muted">reads ${r.reads_per_s.toFixed(1)}/s · writes ${r.writes_per_s.toFixed(1)}/s · I/O time ${(100 * r.io_time_ratio).toFixed(1)}%` +
         (d.in_flight ? ` · in flight ${d.in_flight}` : '') + '</div>' : '');
   }).join('');
+}
+
+// Low-frequency groups (/api/observations) change on their own cadence: asked for at most every 10 s, only
+// while the page is visible, on the same 1 s timer as the age line; an older server (404) is not asked again.
+// Their age is the server's data_age_ms plus browser time since that answer, like the sample age.
+let obs = null, obsAt = 0, obsAsked = -Infinity, obsSupported = true;
+async function pollObs() {
+  const now = performance.now();
+  if (!obsSupported || document.visibilityState !== 'visible' || now - obsAsked < 10000) return;
+  obsAsked = now;
+  try {
+    const r = await fetch('api/observations', {cache: 'no-store'});
+    if (r.status === 404) { obsSupported = false; obs = null; }
+    else if (r.ok) { obs = await r.json(); obsAt = performance.now(); }
+  } catch (e) { obs = null; }  // the main view goes on without it
+  $('sto').innerHTML = storageRows();
+}
+function storageRows() {
+  const g = obs && obs.groups && obs.groups.storage, o = g && g.observation, d = g && g.data;
+  if (!o || !d) return '';
+  const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
+  const fss = Array.isArray(d.filesystems) ? d.filesystems : [], parts = Array.isArray(d.partitions) ? d.partitions : [];
+  return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` +
+    fss.map(f => kv(esc(f.mount_points.map(m => m.path + (m.read_only ? ' (ro)' : '')).join(', ')),
+      f.total_bytes != null ? `${gib(f.used_bytes)}/${gib(f.total_bytes)} · ${gib(f.available_bytes)} free` : 'capacity unknown') +
+      `<div class="muted">${esc(f.fstype)} · ${esc(f.device || f.major + ':' + f.minor)}</div>`).join('') +
+    parts.map(p => kv(esc(p.name), `${gib(p.size_bytes)} · ${p.mount_points.length ? esc(p.mount_points.join(', ')) : 'not mounted'}`)).join('');
 }
 
 // optional groups that could not read everything, as in cli.py; nothing for absent sensors or older servers
@@ -198,7 +226,8 @@ async function tick() {
     showAge();
   }
 }
-setInterval(showAge, 1000);  // the age keeps moving while a request hangs
+setInterval(() => { showAge(); pollObs(); if (obs) $('sto').innerHTML = storageRows(); }, 1000);  // ages keep moving while a request hangs
+pollObs();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   epoch++;

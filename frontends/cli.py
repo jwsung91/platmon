@@ -104,6 +104,48 @@ def counters_lines(s):
     return out
 
 
+def storage_lines(obs):
+    """Filesystems and partitions from /api/observations, with the observation's own age; nothing when the
+    group is off, has not been observed yet, or the server has no such endpoint."""
+    groups = obs.get("groups") if isinstance(obs, dict) else None
+    g = groups.get("storage") if isinstance(groups, dict) else None
+    data, o = (g.get("data"), g.get("observation")) if isinstance(g, dict) else (None, None)
+    if not isinstance(data, dict) or not isinstance(o, dict):
+        return []
+    head = f"STORAGE  observed {o['data_age_ms'] / 1000:.0f} s ago" + (" (not current)" if o.get("stale") else "")
+    out = [head]
+    for f in data.get("filesystems") or []:
+        where = " ".join(m["path"] + (" (ro)" if m["read_only"] else "") for m in f["mount_points"])
+        dev = f["device"] or f"{f['major']}:{f['minor']}"
+        if f["total_bytes"] is not None:  # a measured 0 is shown as 0
+            pct = f" ({100 * f['used_bytes'] / f['total_bytes']:.0f}%)" if f["total_bytes"] else ""
+            out.append(f"  {where}  {f['fstype']} {dev}  used {gib(f['used_bytes'])}/{gib(f['total_bytes'])}{pct}"
+                       f"  available {gib(f['available_bytes'])}")
+        else:
+            out.append(f"  {where}  {f['fstype']} {dev}  capacity unknown")
+    disks = {}
+    for p in data.get("partitions") or []:
+        disks.setdefault(p["disk"], []).append(p)
+    for disk, parts in disks.items():
+        mounted = sum(1 for p in parts if p["mount_points"])
+        out.append(f"  {disk}: {len(parts)} partitions, {mounted} mounted")
+    return out
+
+
+def aged(body, seconds):
+    """An /api/observations answer as of seconds after it arrived: each observation's ages grow by that
+    much (a copy; the answer itself is kept as received)."""
+    if not isinstance(body, dict) or not isinstance(body.get("groups"), dict):
+        return body
+    groups = {}
+    for name, g in body["groups"].items():
+        o = g.get("observation") if isinstance(g, dict) else None
+        if isinstance(o, dict) and isinstance(o.get("data_age_ms"), (int, float)):
+            g = {**g, "observation": {**o, "data_age_ms": o["data_age_ms"] + 1000 * seconds}}
+        groups[name] = g
+    return {**body, "groups": groups}
+
+
 def collection_note(s):
     """Optional groups that could not read everything ("Collection: temperature partial, gpu error");
     empty when all read fine or are just absent (no GPU, no fans), and for servers without collectors."""
@@ -113,7 +155,9 @@ def collection_note(s):
     return "Collection: " + ", ".join(bad) if bad else ""
 
 
-def render(s):
+def render(s, obs=None):
+    """The screen for a /api/stats answer s, and the storage lines when obs (an /api/observations answer)
+    is given."""
     up = int(s["uptime"])
     system = system_line(s.get("system"))
     lines = [
@@ -147,7 +191,7 @@ def render(s):
     for f in s["fans"]:
         vals = [f"{f['rpm']} rpm" if f["rpm"] is not None else "", f"{f['percent']}%" if f["percent"] is not None else ""]
         lines.append(f"FAN   {f['name']}  " + ("  ".join(v for v in vals if v) or "n/a"))  # n/a: unreadable
-    extra = counters_lines(s)
+    extra = counters_lines(s) + storage_lines(obs)
     if extra and lines[-1]:
         lines.append("")
     return "\n".join(lines + extra)
@@ -178,9 +222,27 @@ def main(argv=None):
     addr = a.host if ":" in a.host else f"{a.host}:{PORT}"
     url = f"http://{addr}/api/stats"
 
+    obs = {"at": None, "body": None, "supported": True}
+
+    def observations():
+        """/api/observations at most every 10 s (it changes on its own, slower, cadence); none for servers
+        without it, or when it cannot be read: the main view goes on."""
+        now = time.monotonic()
+        if obs["supported"] and (obs["at"] is None or now - obs["at"] >= 10):
+            obs["at"] = now
+            try:
+                with urllib.request.urlopen(f"http://{addr}/api/observations", timeout=5) as r:
+                    obs["body"] = json.load(r)
+            except urllib.error.HTTPError as e:
+                obs["supported"] = e.code != 404  # an older server: do not ask again
+                obs["body"] = None
+            except (OSError, ValueError):
+                obs["body"] = None
+        return aged(obs["body"], now - obs["at"]) if obs["body"] else None
+
     def fetch():
         with urllib.request.urlopen(url, timeout=5) as r:
-            return render(json.load(r))
+            return render(json.load(r), observations())
 
     try:
         out = fetch()

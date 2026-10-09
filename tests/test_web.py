@@ -145,3 +145,17 @@ def test_network_and_disk_rows(steps):
 def test_counters_absent_or_odd_show_nothing(steps):
     for step in ("counters_absent", "counters_odd"):
         assert steps[step]["net"] == "" and steps[step]["dio"] == "" and steps[step]["err"] == "", step
+
+
+def test_storage_from_observations(steps):
+    sto = steps["ok"]["sto"]
+    assert "observed 95 s ago (not current)" in sto  # the server's age, and stale says so
+    assert "1.0G/4.0G · 3.0G free" in sto and "/, /mnt/&#60;b&#62;x&#60;/b&#62; (ro)" in sto and "<b>" not in sto
+    assert "capacity unknown" in sto and "0:40" in sto  # no numbers made up when statvfs gave none
+    assert "nvme0n1p2" in sto and "not mounted" in sto
+    assert steps["ok"]["obs_fetches"] == 1
+
+
+def test_observations_404_stops_asking(steps):
+    """The next poll gets a 404 (an older server): the panel is cleared and never asked for again."""
+    assert steps["read_based_age"]["sto"] == "" and steps["read_based_age"]["obs_fetches"] == 2
