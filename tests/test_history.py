@@ -105,6 +105,30 @@ def test_only_published_snapshots_append_and_reads_never_do():
     assert [p[2] for p in pts] == [1001, None, 1004]  # the elapsed outage inserts a gap, not a sample
 
 
+def test_one_failed_core_attempt_breaks_the_line_on_recovery():
+    c = Clock()
+    calls = [0]
+
+    def collect():
+        calls[0] += 1
+        if calls[0] == 2:
+            raise OSError("one required read failed")
+        return stats(calls[0])
+
+    s = fake(collect, c)
+    h = History(retention=600, interval=1.0)
+    s.on_publish = h.append
+    for _ in range(3):
+        c.advance(1)
+        s._attempt()
+    pts = h.view(c.ns)[0]["memory/used_bytes"]
+    assert [p[0] for p in pts if p[2] is not None] == [1, 2]
+    assert [p[2] for p in pts] == [1001, None, 1003]
+    c.advance(1)
+    s._attempt()
+    assert [p[2] for p in h.view(c.ns)[0]["memory/used_bytes"]] == [1001, None, 1003, 1004]
+
+
 def test_a_failing_append_never_stops_the_core(capsys):
     c = Clock()
     s = fake(lambda: {"v": 1}, c)
