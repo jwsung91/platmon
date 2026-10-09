@@ -9,31 +9,52 @@ Last update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7f
 (`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
 implementation; merging alone does **not** complete the expanded validation requirements.
 
-## Current checkpoint — authorized final validation
+## Final candidate checkpoint — aggregate merge
 
-The owner authorized necessary merges on 2026-10-09. #40, #43 and #41 are merged;
-main is `efb3af6c12873195f9b3cfe23ad68cbd5ff802b3`, with successful main CI.
-The seven-stage request has 4/7 stages complete (status, frontend, Disk and local integration).
-History/ARM deployment-form validation is in progress; final documentation/merge disposition follows.
-Production remains `8525942`; release publication and deployment are not authorized.
+The owner authorized necessary merges on 2026-10-09. #40, #43, #41, #42 and #44 are merged;
+component main is `e3ff8bbd565fd8d080e104fe7cfac02f6a97a2e8`. No production rollout was performed.
+Six of the seven requested stages are complete; stage 7 has its reports/PRs prepared and closes
+with [#46's merge and merged-main CI](https://github.com/jwsung91/platmon/pull/46). This is the
+pre-merge checkpoint; the PR records the final aggregate merge SHA and CI outcome.
 
-The final audit reproduced and corrected two History defects: a single failed core attempt did not
-break the graph (`00781fd`), and expired slow observations remained internally until the shared
-point cap filled (`a52880b`). The latter is a two-line expiry correction with three failing-before
-regressions. The preceding `30d377a` and `65bcc39` measurements are preserved as baseline evidence,
-not a post-expiry memory gate pass. The current runtime is `aac7ed796faf2be0e387312c04a78925198fe11d`.
+| Requested stage | Completed evidence / disposition |
+| --- | --- |
+| 1 Current state | latest remote/board work audited; existing raw reused only where applicable |
+| 2 Frontend #40 | request lifecycle/age/escaping regressions, Node, actual 1280/390 Chromium, 661 s final-page soak |
+| 3 Disk #41 | independent current-classifier ARM ABBA twice; CPU/p95 pass; main merge verified |
+| 4 History #42 | independent IDs, gaps, strict expiry, native Wi-Fi identity, bounded 1830 s ARM retention and UI integration |
+| 5 Local integration | 676 passed / 3 skipped; Python 3.9 CI 678/1, Python 3.13 CI 677/2; compatibility/concurrency/API/resource bounds |
+| 6 Final ARM/deployment forms | both default CPU matrices pass; native cleanup and actual isolated Orin compose complete; systemd static-only and unsupported paths disclosed |
+| 7 Documentation/PR delivery | final report and component PR bodies updated; final aggregate disposition is linked above |
 
-Local integration: 676 passed / 3 skipped. Exact candidate CI 37913085542 / 37913078085 passes
-Python 3.9 (678/1) and 3.13 (677/2), including Node and hosted normal PSI. Component heads #42
-`a52880b` and #44 `93bd086` also pass both versions. The unchanged final-page Chromium fixtures
-and 661 s soak remain applicable. The [expiry validation plan](../performance/history-expiry-validation.md)
-fixes the reassessed scope before another board measurement; earlier runners must finish first.
-No targets or defaults are relaxed. #42 and #46 remain Draft until the required gates are decided.
+Final measured runtime: `aac7ed796faf2be0e387312c04a78925198fe11d`. The
+[complete results and hashes](../performance/history-expiry-validation.md) distinguish it from
+preserved pre-correction `30d377a` and `65bcc39` measurements. Two reproduced History defects were
+fixed: a single failed core attempt hiding a graph gap, and expired slow observations remaining
+internally until the point cap filled. Focused 53/53 and failing-before regressions cover both.
 
-Actual systemd DynamicUser execution needs unavailable administrator authentication; Pi unit
-static verification passes. ARM PSI is unsupported and no external TCP target is approved.
-Private raw/state/CI evidence is preserved in `.validation/final-rc-evidence/`,
-`.validation/recovery-rc-evidence/` and `.validation/expiry-rc-evidence/` with matching board directories.
+Default CPU: Orin 1.600–1.678%, Pi 1.529–1.583%, every window <=2%. Optional Orin short window
+2.174% and long all-on 2.079%/2.019% exceed 2%; Storage/Wi-Fi call p95 also exceeds 2 ms. These are
+not passes, no window was discarded and no threshold was raised. Network/Disk stay on; all other
+groups stay off. Final-period RSS settles with the documented small page variations; this finite
+observation is not an indefinite plateau claim. Every native candidate exits and releases its port.
+
+Orin compose is healthy under UID 65534, read-only rootfs/host binds, cap-drop and no-new-privileges.
+Network is container-only; host-visible sensors and Disk are available, Storage file-bind capacity
+is null/partial, Wi-Fi unavailable, and one startup loopback Probe failure is retained. Its test
+container/network/port are reclaimed, its local image is kept, and all 12 prior images/35 rollback
+files remain. Pi has no matching rollback directory in the recorded search scope.
+
+Production remains `85259427f20ba09c9541c52970243fc07645d21d` on both boards, with before/after
+identity/configuration/governor/power records unchanged. Actual DynamicUser execution is unavailable
+without administrator authentication (unit static verification passed); normal ARM PSI and remote
+TCP paths remain unvalidated. No production, kernel, power, tag, Release or registry operation.
+These limits remain explicit; they do not authorize privilege workarounds or a default-on change.
+
+PR #45's complete ancestry and validation work are preserved in #46; it must not be merged again
+as a separate aggregate. Raw/state/CI/scripts/screenshots remain in `.validation/expiry-rc-evidence/`
+and earlier evidence directories, with durable `~/platmon-expiry-rc-aac7ed7/` copies on both boards.
+No further performance round is scheduled. Deployment requires its own fixed-SHA backup/approval.
 
 ## Historical checkpoint — resumed integration
 

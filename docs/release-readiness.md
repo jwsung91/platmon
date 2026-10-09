@@ -1,30 +1,48 @@
-# Release readiness (integration of #32–#38)
+# Release readiness
 
-## Current final candidate status (2026-10-09)
+## Final candidate disposition (2026-10-09)
 
-The owner authorized necessary merges. #40, #43 and #41 are merged; main CI passed.
-#42 targets main, #44 follows #42, and #46 preserves all components and #45's validation work.
-The current candidate runtime is `aac7ed796faf2be0e387312c04a78925198fe11d`; remaining component
-merges await the declared ARM gates. **The candidate remains Draft, not a release or deployment.**
+**Eligible for the authorized aggregate merge within the measured default configuration and
+recorded support scope.** #40, #43, #41, #42 and #44 are merged at component main
+`e3ff8bbd565fd8d080e104fe7cfac02f6a97a2e8`. The additional benchmark diagnostics, browser validation and these
+reports land through [#46](https://github.com/jwsung91/platmon/pull/46), which records the final
+merge SHA and merged-main CI. This document is the pre-merge evidence checkpoint, not deployment.
+Six validation stages are complete; the seventh closes with that aggregate merge and its main CI.
 
-Two reproduced History defects are corrected: one failed core attempt now inserts a graph break,
-and each publisher releases expired points instead of retaining slow observations until the shared
-core-cadence count cap fills. Focused tests pass 53/53; integrated tests pass 676/3 locally and
-678/1 (Python 3.9), 677/2 (Python 3.13) in candidate CI 37913085542. The unchanged frontend retains
-its 1280/390 px Chromium fixtures and 661 s soak (constant DOM, no JS errors).
+The exact measured runtime is `aac7ed796faf2be0e387312c04a78925198fe11d`; later reconciliation and
+documentation preserve its runtime/benchmark/tests. Two reproduced History defects are fixed:
+recovery from one failed core attempt now breaks the graph, and publishers release expired points.
+The [final report](performance/history-expiry-validation.md) includes reproduction, exact hashes,
+all CPU windows, RSS/PSS trajectories, actual Orin compose scope and operational preservation.
+Earlier reports below are explicitly historical and do not substitute for the final measurements.
 
-[Pre-correction results](performance/final-candidate-results.md) and the
-[recovery-gap round](performance/recovery-gap-validation.md) remain historical measurements.
-The reproduced expiry defect prevents using them as proof of post-fill memory stability.
-The [expiry correction plan](performance/history-expiry-validation.md) records the new bounded
-measurement scope before execution. Actual RSS, default CPU and isolated Orin compose results
-will decide the remaining merges; no sampled timing is described as full per-attempt accounting.
+| Release evidence | Outcome |
+| --- | --- |
+| Default whole-process CPU, two ABBA blocks per board | Orin 1.600–1.678%; Pi 1.529–1.583%; every window <=2% |
+| Optional whole-process CPU | Orin short window 2.174%; retention Orin 2.079%, Pi 2.019%: **not met**, retained in the report |
+| History 600 s retention in a 1830 s run | bounds/IDs/expiry pass; final-period RSS endpoints 26808→26808 KiB Orin, 26508→26520 KiB Pi; finite stability with small variations, no indefinite claim |
+| Automated integration | local 676/3; Python 3.9 CI 678/1, Python 3.13 CI 677/2; Node and normal hosted PSI included |
+| Actual Chromium final page | 1280/390 px fixtures and 661 s soak; zero JS errors, constant 305-node DOM |
+| Native / actual Orin container | API/identity/health/non-root/read-only and cleanup pass within the observed scope |
+| Production / rollback | both boards stay `8525942`; identities/settings unchanged; Orin 12 prior images and 35 rollback files preserved |
 
-Network/Disk remain on; Storage/PSI/Wi-Fi/TCP/history remain off. Storage/Wi-Fi call p95 still
-exceeds 2 ms. Actual systemd DynamicUser execution is unverified because administrator
-authentication is unavailable; Pi unit static verification succeeds. ARM PSI is unsupported and
-no external probe target is approved. Production stays at `8525942`; deployment, tags, releases
-and registry pushes remain unapproved. The historical rollback procedure below is not executed.
+Network/Disk remain on. Storage/PSI/Wi-Fi/TCP/history remain off. Storage and Wi-Fi call p95 exceed
+2 ms; no cost threshold is raised. Container Network is a separate namespace; Storage file-bind
+capacity remains null/partial, Wi-Fi is unavailable and one startup loopback Probe failure is recorded.
+Host-visible GPU/sensors/Disk and legacy root capacity work in the tested Orin compose configuration.
+The API compatibility boundary is explicit: observations schema **2**, nullable Wi-Fi connectivity;
+new CLI/web accept v1/v2, while stats/history remain schema 1.
+
+Remaining support limits: actual systemd DynamicUser execution needs administrator authentication;
+Pi unit static verification passes. Normal PSI is unsupported on these ARM kernels. External TCP
+has no approved target. Sampled duration coverage is not full per-attempt accounting. Pi has no
+matching rollback archive in the recorded search scope; its live checkout/configuration is unchanged.
+These limits do not imply tests passed in an unavailable environment.
+
+No deployment, tag, GitHub Release, registry push, power/governor/kernel change or rollback deletion.
+A later rollout must use a fixed verified merged SHA, retain the current image/configuration/source
+and follow the existing backup/rollback procedure below with separate authorization. The monitoring
+CPU result is conditional on the tested cadence/scope, not a guarantee under arbitrary request load.
 
 ## Historical resumed candidate status (2026-10-09)
 
