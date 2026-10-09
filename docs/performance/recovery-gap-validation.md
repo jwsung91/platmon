@@ -40,4 +40,8 @@ remain disclosed. The earlier CPU/memory results are not mislabeled as measureme
 
 ## Results
 
-Pending the declared run; #42 and the aggregate stay Draft.
+The CPU matrix completed; retention is still running. A separate fake-clock reproduction
+then showed expired low-frequency points remaining in memory past retention. This round is
+therefore preserved as pre-expiry-correction evidence, not a memory gate pass. See the
+[scoped expiry correction and reassessed plan](history-expiry-validation.md). #42 and the
+aggregate stay Draft until the corrected runtime has been validated.
