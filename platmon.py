@@ -14,6 +14,7 @@ import sys
 
 from collector import BOARD, PLATFORM, collect_recorded
 from collector.common import CpuCounters
+from collector.network import NetworkCounters
 from collector.sampler import Sampler, pick_clock
 from frontends import server
 
@@ -21,6 +22,7 @@ FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outpu
 
 DEFAULTS = {  # the type of each default is the type its config value must parse as
     "core": {"interval": 1.0},
+    "network": {"enabled": True},  # measured cost: docs/performance/budget.md
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
@@ -95,9 +97,11 @@ def main(argv=None):
     # CPU usage over the time since the previous reading; a longer break is not averaged over. This limit
     # matches the Sampler's default stale_after, but it is a CPU window rule, not snapshot freshness.
     cpu = CpuCounters(clock[0], max_gap=max(3 * interval, 5.0))
+    # interface counters of this process's network namespace, with rates over the same kind of window
+    network = NetworkCounters(clock[0], max_gap=max(3 * interval, 5.0)) if cfg["network"].getboolean("enabled") else None
     # {} keeps what was logged about unreadable optional sensors, so a lasting failure is logged once.
     # The same clock times the CPU readings, every sensor read and the Sampler's collections.
-    sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0]), interval, clock=clock).start()
+    sampler = Sampler(functools.partial(collect_recorded, cpu, {}, clock[0], network), interval, clock=clock).start()
     threads = [t for name, start in FRONTENDS.items()
                if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name]))]
     if not threads:

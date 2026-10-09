@@ -19,8 +19,8 @@ def test_defaults():
 
 
 def test_shipped_ini_matches_defaults():
-    assert {s: dict(load_config(SHIPPED_INI)[s]) for s in ("core", "http")} == \
-           {s: dict(load_config()[s]) for s in ("core", "http")}
+    assert {s: dict(load_config(SHIPPED_INI)[s]) for s in ("core", "network", "http")} == \
+           {s: dict(load_config()[s]) for s in ("core", "network", "http")}
 
 
 def test_file_overrides_defaults(tmp_path):

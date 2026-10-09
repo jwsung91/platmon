@@ -33,12 +33,13 @@ file (`frontends/cli.py`).
 
 In a browser: `http://<host>:9797`. Without Python, from any machine with curl (Windows and macOS too):
 `watch -n1 curl -s <host>:9797/text` shows the same screen as `platmon`. Raw data: `http://<host>:9797/api/stats`, collector state:
-`http://<host>:9797/api/status` (fields and freshness rules: [docs/api.md](docs/api.md)). The API has no
+`http://<host>:9797/api/status` (fields and freshness rules: [docs/api.md](docs/api.md); per-interface
+network counters, `[network] enabled = no` to turn them off: [docs/network.md](docs/network.md)). The API has no
 authentication. Run it on trusted networks only.
 
 To run the server in the foreground instead (e.g. while developing):
 `python3 platmon.py [platmon.ini]`. `platmon.ini` lists every option with its default (collection
-interval, HTTP bind/port, web page on/off).
+interval, network counters on/off, HTTP bind/port, web page on/off).
 
 ### Layout
 
