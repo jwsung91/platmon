@@ -43,6 +43,7 @@ const report = step => console.log(JSON.stringify({
   step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
+  net: el('net').innerHTML, dio: el('dio').innerHTML,
 }));
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -111,4 +112,20 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
   const readBased = meta('c', 7, 2400);
   readBased.sample = {...readBased.sample, age_ms: 200, duration_ms: 300, cycle_age_ms: 3500, data_age_basis: 'oldest_current_read_start'};
   await next(ok(readBased), 'read_based_age');
+
+  // network and disk counters: the server's rates, a reason instead of 0, names never parsed as HTML
+  const c0 = {errors: 0, dropped: 0};
+  const iface = (name, rates, reason = null, rx = c0, tx = c0) => ({name, ifindex: 2, rx: {bytes: 1, packets: 1, ...rx},
+    tx: {bytes: 1, packets: 1, ...tx}, rates, window_ms: rates ? 1000 : null, reason});
+  const disk = (name, rates, reason = null, in_flight = 0) => ({name, major: 8, minor: 0, read: {}, write: {}, in_flight,
+    io_time_ms: 1, rates, window_ms: rates ? 1000 : null, reason});
+  await next(ok({...meta('c', 8, 100),
+    network: {scope: {kind: 'process_network_namespace', id: 'netns1:x'}, provider: 'proc_net_dev', read: null, interfaces: [
+      iface('eth0', {rx_bytes_per_s: 1536, tx_bytes_per_s: 0, rx_packets_per_s: 2, tx_packets_per_s: 0}, null, {errors: 3, dropped: 0}),
+      iface('<img src=x onerror=alert(1)>', null, 'warmup'), iface('wlan0', null, 'some_new_reason')]},
+    disk_io: {scope: {kind: 'host_block_devices'}, provider: 'proc_diskstats', read: null, disks: [
+      disk('nvme0n1', {read_bytes_per_s: 3 * 2 ** 20, write_bytes_per_s: 512, reads_per_s: 4, writes_per_s: 0.5, io_time_ratio: 0.034}, null, 2),
+      disk('sda', null, 'counter_regressed')]}}), 'counters');
+  await next(ok(meta('c', 9, 100)), 'counters_absent');  // turned off, or an older server
+  await next(ok({...meta('c', 10, 100), network: {interfaces: 'odd'}, disk_io: null}), 'counters_odd');
 })();

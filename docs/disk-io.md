@@ -117,7 +117,6 @@ Then platmon makes no `DiskCounters`, reads neither `/proc/diskstats` nor `/sys/
 
 ## Not included
 
-No numbers on the web page, in the `platmon` command or `/text` (a `partial`/`error` group is named in
-the existing "Collection:" line). Not collected: partitions, logical volumes, zram, discard and flush
+Shown on the web page, in the `platmon` command and `/text` (see [api.md](api.md#web-page)). Not collected: partitions, logical volumes, zram, discard and flush
 counters, the weighted time field, per-process I/O, SMART data, filesystem usage beyond `disk`,
 pressure stall information (PSI). Measured cost: [performance/disk-io-product.md](performance/disk-io-product.md).

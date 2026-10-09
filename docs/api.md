@@ -322,3 +322,20 @@ up"), on the page and in the `platmon` command alike; they are not drawn as 0 %.
 Optional groups that are `partial` or `error` are named in one line under the header ("Collection:
 temperature partial, gpu error"), on the page and in the `platmon` command; `unavailable` groups (no GPU,
 no fans) are not. The details are in `collectors` of `/api/stats`.
+
+Network interfaces and disks (`network`, `disk_io`) are shown with the rates the server computed, never
+recomputed from the counters, on the page ("Network", "Disk I/O") and in the `platmon` command and `/text`
+(`NET`, `IO` lines):
+
+- Network: per interface `rx` / `tx` in bytes per second (binary units: B/s, KiB/s, MiB/s, GiB/s;
+  never bits), packets per second in the command, and the cumulative `errors` / `dropped` counters only
+  where they are not 0. A note says the interfaces are those of platmon's own network namespace.
+- Disk I/O: per disk read / write bytes per second, completed reads and writes per second, "I/O time"
+  (`io_time_ratio` as a percentage: the share of the window with I/O in flight, not how busy or saturated
+  the disk is) and requests in flight when there are any.
+- A row without rates shows why ("warming up", "restarting after a gap", "counter went backwards", ...;
+  an unknown reason code as it is), never 0. Names are shown as text, never as HTML.
+- The `platmon` command lists at most 12 interfaces and 12 disks and then says how many more there are
+  ("+4 more interfaces (all in /api/stats)"); the page lists all.
+- Nothing is shown for a server without these fields (older, or the feature off) or with an empty list;
+  a failed reading appears in the "Collection:" line like any optional group.

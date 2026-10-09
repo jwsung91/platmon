@@ -50,6 +50,60 @@ def cpu_note(s):
     return "CPU sampling: " + "; ".join(f"{' '.join(ids)} {why}" for why, ids in groups.items())
 
 
+RATE_REASONS = {"warmup": "warming up", "gap": "restarting after a gap", "counter_regressed": "counter went backwards",
+                "invalid_interval": "invalid interval", "identity_unavailable": "identity unknown",
+                "namespace_changed": "namespace changed"}  # why rates are null; others: the code itself
+MAX_ROWS = 12  # interfaces or disks listed; the rest are counted, all are in /api/stats
+
+
+def per_s(v):
+    """Bytes per second, binary units: 512 B/s, 1.5 KiB/s, 20.0 MiB/s."""
+    for unit in ("B/s", "KiB/s", "MiB/s"):
+        if abs(v) < 1024:
+            return f"{v:.0f} {unit}" if unit == "B/s" else f"{v:.1f} {unit}"
+        v /= 1024
+    return f"{v:.1f} GiB/s"
+
+
+def rows_of(items, kind, line):
+    """One line per item (as the server sorted them): its name, then line(item) if it has rates, else why
+    not. At most MAX_ROWS, then how many were left out."""
+    width = min(16, max(len(i["name"]) for i in items))
+    out = [f"  {i['name']:<{width}}  " + (line(i) if i.get("rates") else RATE_REASONS.get(i.get("reason"), str(i.get("reason"))))
+           for i in items[:MAX_ROWS]]
+    if len(items) > MAX_ROWS:
+        out.append(f"  +{len(items) - MAX_ROWS} more {kind} (all in /api/stats)")
+    return out
+
+
+def network_line(i):
+    r = i["rates"]
+    bad = [f"{k} {i['rx'][k]}/{i['tx'][k]}" for k in ("errors", "dropped") if i["rx"][k] or i["tx"][k]]
+    return (f"rx {per_s(r['rx_bytes_per_s'])}  tx {per_s(r['tx_bytes_per_s'])}  "
+            f"{r['rx_packets_per_s']:.1f}/{r['tx_packets_per_s']:.1f} pkt/s"
+            + ("  " + "  ".join(bad) + " (rx/tx, total)" if bad else ""))
+
+
+def disk_line(d):
+    r = d["rates"]
+    return (f"read {per_s(r['read_bytes_per_s'])} ({r['reads_per_s']:.1f}/s)  "
+            f"write {per_s(r['write_bytes_per_s'])} ({r['writes_per_s']:.1f}/s)  "
+            f"I/O time {100 * r['io_time_ratio']:.1f}%" + (f"  in flight {d['in_flight']}" if d.get("in_flight") else ""))
+
+
+def counters_lines(s):
+    """Network interfaces (this process's namespace) and physical disks, with the rates the server computed;
+    nothing for servers without them or with them off. I/O time is the share of the window with I/O in
+    flight, not how saturated a disk is."""
+    out = []
+    net, dio = s.get("network"), s.get("disk_io")
+    if isinstance(net, dict) and isinstance(net.get("interfaces"), list) and net["interfaces"]:
+        out += ["NET   bytes/s, this process's network namespace"] + rows_of(net["interfaces"], "interfaces", network_line)
+    if isinstance(dio, dict) and isinstance(dio.get("disks"), list) and dio["disks"]:
+        out += ["IO    bytes/s per disk"] + rows_of(dio["disks"], "disks", disk_line)
+    return out
+
+
 def collection_note(s):
     """Optional groups that could not read everything ("Collection: temperature partial, gpu error");
     empty when all read fine or are just absent (no GPU, no fans), and for servers without collectors."""
@@ -93,7 +147,10 @@ def render(s):
     for f in s["fans"]:
         vals = [f"{f['rpm']} rpm" if f["rpm"] is not None else "", f"{f['percent']}%" if f["percent"] is not None else ""]
         lines.append(f"FAN   {f['name']}  " + ("  ".join(v for v in vals if v) or "n/a"))  # n/a: unreadable
-    return "\n".join(lines)
+    extra = counters_lines(s)
+    if extra and lines[-1]:
+        lines.append("")
+    return "\n".join(lines + extra)
 
 
 def explain(addr, e):
