@@ -6,6 +6,7 @@ Format (net/wireless/wext-proc.c): "name: status link[.] level[.] noise[.] ...",
 updated since the last read and level / noise are dBm (negative) when the driver reports dBm, otherwise a
 value of unspecified unit; a noise of -256 is "not available".
 """
+import errno
 import re
 import os
 import socket
@@ -117,7 +118,14 @@ def link_connected(name, ifindex, root="/sys/class/net", read=_read):
     """Kernel link carrier, not the wireless signal-update bit. Paths/reads are injectable.
     A mismatched index is not trusted (device replacement or incompatible sysfs scope)."""
     before = int(read(f"{root}/{name}/ifindex").strip())
-    carrier = read(f"{root}/{name}/carrier").strip()
+    try:
+        carrier = read(f"{root}/{name}/carrier").strip()
+    except OSError as e:
+        # Linux rejects carrier reads on administratively down interfaces.
+        # Confirm IFF_UP is clear; unrelated failures must remain visible.
+        if e.errno != errno.EINVAL or int(read(f"{root}/{name}/flags").strip(), 16) & 1:
+            raise
+        carrier = "0"
     after = int(read(f"{root}/{name}/ifindex").strip())
     if before != ifindex or after != ifindex:
         return None
