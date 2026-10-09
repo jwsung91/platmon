@@ -303,3 +303,81 @@ def test_real_host_reading():
     assert names == sorted(names) and status["state"] in ("ok", "partial", "unavailable")
     if os.path.exists("/proc/self/net/dev"):
         assert "lo" in names and span is not None
+
+
+def test_namespace_is_looked_up_every_time_and_hashed_once(monkeypatch):
+    from collector import network
+    hashed = []
+    real = network.namespace_id
+    monkeypatch.setattr(network, "namespace_id", lambda st: hashed.append((st.st_dev, st.st_ino)) or real(st))
+    h = Host(eth0=(2, (0, 0, 0, 0), (0, 0, 0, 0)))
+    stats = []
+    netns = h.netns
+    h.netns = lambda: stats.append(1) or netns()
+    net = h.counters()
+    ids = []
+    for _ in range(3):
+        ids.append(sample(net)[0]["scope"]["id"])
+        h.t += S
+    assert len(stats) == 3 and hashed == [(1, 100)] and len(set(ids)) == 1 and ids[0] == real(h.netns())
+
+
+def test_namespace_a_b_a_and_a_failure_in_between():
+    from collector.network import namespace_id
+    h = Host(eth0=(2, (0, 0, 0, 0), (0, 0, 0, 0)))
+    net = h.counters()
+    a = sample(net)[0]["scope"]["id"]
+    h.ns, h.t = (1, 200), h.t + S
+    out = sample(net)[0]
+    b = out["scope"]["id"]
+    assert b != a and b == namespace_id(h.netns()) and by_name(out)["eth0"]["reason"] == "namespace_changed"
+    h.ns, h.t = (1, 100), h.t + S
+    out = sample(net)[0]
+    assert out["scope"]["id"] == a and by_name(out)["eth0"]["reason"] == "namespace_changed"
+    h.ns_error, h.t = OSError(5, "EIO"), h.t + S
+    out, _, status = sample(net)
+    assert out["scope"]["id"] is None and by_name(out)["eth0"]["reason"] == "identity_unavailable"  # never the old id
+    assert status["issues"] == [{"target": "netns", "reason": "io_error"}]
+    h.ns_error, h.t = None, h.t + S
+    out, _, status = sample(net)
+    assert out["scope"]["id"] == a and by_name(out)["eth0"]["reason"] == "warmup" and status["state"] == "ok"
+    h.t += S
+    assert by_name(sample(net)[0])["eth0"]["reason"] is None
+
+
+def test_same_inode_on_another_device_is_another_namespace():
+    h = Host(eth0=(2, (0, 0, 0, 0), (0, 0, 0, 0)))
+    net = h.counters()
+    a = sample(net)[0]["scope"]["id"]
+    h.ns, h.t = (2, 100), h.t + S
+    out = sample(net)[0]
+    assert out["scope"]["id"] != a and by_name(out)["eth0"]["reason"] == "namespace_changed"
+
+
+def test_the_namespace_id_is_kept_per_instance():
+    h1, h2 = Host(), Host()
+    h2.ns = (1, 300)
+    one, two = h1.counters(), h2.counters()
+    a = sample(one)[0]["scope"]["id"]
+    b = sample(two)[0]["scope"]["id"]
+    assert a != b and sample(one)[0]["scope"]["id"] == a and one._ns != two._ns
+
+
+def _counter_before(text):  # the previous implementation, for comparison
+    from collector.network import MAX_COUNTER
+    if not (text.isascii() and text.isdigit()) or int(text) > MAX_COUNTER:
+        raise ValueError(text)
+    return int(text)
+
+
+@pytest.mark.parametrize("text", ["0", "00", "7", str(2**64 - 1), str(2**64), "1" + "0" * 30, "-1", "+1", "1.5", "1e3",
+                                  "", " ", "abc", "٣", "²", "0x10", "1_000", "１"])
+def test_counter_accepts_exactly_what_it_did(text):
+    from collector.network import counter
+    try:
+        expected = _counter_before(text)
+    except ValueError:
+        with pytest.raises(ValueError):
+            counter(text)
+    else:
+        assert counter(text) == expected and type(counter(text)) is int

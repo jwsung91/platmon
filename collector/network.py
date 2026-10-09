@@ -35,9 +35,10 @@ def valid_name(name):
 
 def counter(text):
     """An unsigned 64-bit counter in ASCII digits; ValueError otherwise (sign, decimals, other digits)."""
-    if not (text.isascii() and text.isdigit()) or int(text) > MAX_COUNTER:
+    value = int(text) if text.isascii() and text.isdigit() else -1
+    if not 0 <= value <= MAX_COUNTER:
         raise ValueError(text)
-    return int(text)
+    return value
 
 
 def parse(text):
@@ -97,6 +98,7 @@ class NetworkCounters:
         self.clock, self._path, self._netns, self._indexes, self._read = clock, path, netns, indexes, read
         self._max_gap = None if max_gap is None else round(max_gap * 1e9)
         self._last = None  # (elapsed ns the reading began, namespace id or None, {(ifindex, name): counters})
+        self._ns = None    # ((st_dev, st_ino), id) of the last successful lookup: the id is not hashed again
 
     def sample(self, group):
         """(network output, read span or None). Read problems are noted in group (a sysfs.Group); a broken
@@ -111,7 +113,11 @@ class NetworkCounters:
     def _sample(self, group):
         ns = None
         try:
-            ns = namespace_id(self._netns())
+            st = self._netns()  # looked up on every reading; only the id of the same device/inode is reused
+            key = (st.st_dev, st.st_ino)
+            if self._ns is None or self._ns[0] != key:
+                self._ns = (key, namespace_id(st))
+            ns = self._ns[1]
         except OSError as e:
             group.note("netns", reason_of(e), f"{NETNS}: {e.strerror}")
         out = {"scope": {"kind": SCOPE, "id": ns}, "provider": PROVIDER, "interfaces": [], "read": None}
