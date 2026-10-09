@@ -4,6 +4,7 @@ Contract: docs/api.md."""
 import json
 import os
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .cli import render
@@ -14,17 +15,44 @@ BRAND_ASSETS = {
     "/assets/brand/platmon-logo-dark.svg": "platmon-logo-dark.svg",
     "/assets/brand/favicon.svg": "favicon.svg",
 }
-LIVE = ("/api/stats", "/api/status", "/api/observations", "/text")
+LIVE = ("/api/stats", "/api/status", "/api/observations", "/api/history", "/text")
+MAX_POINTS, MAX_PREFIX = 600, 128
 
 
-def make_handler(sampler, web=True, observations=None):
-    """observations: the service's collector.slow.Observations (low-frequency groups), or None."""
+def history_query(history, query):
+    """(prefix, seconds, points) from /api/history?prefix=&seconds=&points=, bounded; ValueError if bad."""
+    q = urllib.parse.parse_qs(query, max_num_fields=3)
+    prefix = q.get("prefix", [""])[0]
+    seconds = float(q.get("seconds", [history.retention])[0])
+    points = int(q.get("points", [300])[0])
+    if len(prefix) > MAX_PREFIX or not 0 < seconds <= history.retention or not 0 < points <= MAX_POINTS:
+        raise ValueError(query)
+    return prefix, seconds, points
+
+
+def make_handler(sampler, web=True, observations=None, history=None):
+    """observations: the service's collector.slow.Observations (low-frequency groups), or None.
+    history: its collector.history.History, or None (then /api/history is 404)."""
     def observed():
         return observations.view() if observations else {"schema_version": 1, "instance_id": sampler.instance_id,
                                                           "clock": dict(sampler.clock), "groups": {}}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            path, _, query = self.path.partition("?")
+            if history is not None and path == "/api/history":  # read-only, bounded; never collects
+                try:
+                    prefix, seconds, points = history_query(history, query)
+                except ValueError:
+                    self.send_error(400, "prefix (at most 128 characters), seconds (up to the retention) and points "
+                                         f"(1 to {MAX_POINTS}) only")
+                    return
+                series, dropped = history.view(sampler._elapsed(), prefix, seconds, points)
+                body = {"schema_version": 1, "instance_id": sampler.instance_id, "retention_s": history.retention,
+                        "interval_ms": round(sampler.interval * 1000, 3), "dropped_series": dropped, "series": series}
+                self.path = path  # for the no-store header
+                self.reply(200, json.dumps(body).encode(), "application/json")
+                return
             if self.path == "/api/status":  # never waits for the first snapshot; 200 even when not ready
                 body, ctype = json.dumps(sampler.read()[1]).encode(), "application/json"
             elif self.path == "/api/observations":  # low-frequency groups with their own ages; always 200
@@ -74,10 +102,10 @@ def make_handler(sampler, web=True, observations=None):
     return Handler
 
 
-def start(sampler, cfg, observations=None):
+def start(sampler, cfg, observations=None, history=None):
     """cfg: the [http] config section (bind, port, web)."""
     httpd = ThreadingHTTPServer((cfg.get("bind"), cfg.getint("port")),
-                                make_handler(sampler, cfg.getboolean("web"), observations))
+                                make_handler(sampler, cfg.getboolean("web"), observations, history))
     print(f"platmon http on {cfg.get('bind')}:{cfg.getint('port')}", flush=True)
     t = threading.Thread(target=httpd.serve_forever, name="http", daemon=True)
     t.start()

@@ -35,7 +35,8 @@ In a browser: `http://<host>:9797`. Without Python, from any machine with curl (
 `watch -n1 curl -s <host>:9797/text` shows the same screen as `platmon`. Raw data: `http://<host>:9797/api/stats`, collector state:
 `http://<host>:9797/api/status` (fields and freshness rules: [docs/api.md](docs/api.md); per-interface
 network counters: [docs/network.md](docs/network.md); disk I/O counters: [docs/disk-io.md](docs/disk-io.md); storage capacity, opt-in: [docs/storage.md](docs/storage.md); Wi-Fi signal, opt-in:
-[docs/wifi.md](docs/wifi.md); TCP connect probe to configured targets, opt-in: [docs/probe.md](docs/probe.md)). The API has no
+[docs/wifi.md](docs/wifi.md); TCP connect probe to configured targets, opt-in: [docs/probe.md](docs/probe.md); recent history, opt-in:
+[docs/history.md](docs/history.md)). The API has no
 authentication. Run it on trusted networks only.
 
 To run the server in the foreground instead (e.g. while developing):
