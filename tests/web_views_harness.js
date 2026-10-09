@@ -3,8 +3,9 @@ const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:a
 const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 let now = 0, nextTimer = 0, focused = '', failure = false;
 const elements = {}, intervals = [], timers = new Map(), listeners = [], requests = [];
+const navigation = {};
 const el = id => elements[id] ||= {innerHTML: '', textContent: '', value: '', hidden: false, attrs: {}, handlers: {},
-  setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(k, fn) { this.handlers[k] = fn; }, focus() { focused = id; }};
+  setAttribute(k, v) { this.attrs[k] = v; }, addEventListener(k, fn) { this.handlers[k] = fn; }, focus() { focused = id; }, scrollIntoView() {}};
 const stats = {model: 'Fixture', platform: 'Linux', uptime: 12, system: {}, power_mode: null,
   cpu: [{id: 0, usage: 20, freq: null}, {id: 1, usage: 40, freq: null}], gpu: null,
   memory: {used: 2e9, total: 8e9, swap_total: 0}, disk: {used: 5e9, total: 10e9},
@@ -14,6 +15,8 @@ const stats = {model: 'Fixture', platform: 'Linux', uptime: 12, system: {}, powe
 const history = {retention_s: 600, series: {'cpu/0/usage': [[1, 2000, 20]], 'memory/used_bytes': [[1, 1000, 2e9]],
   'network/ns/1/eth0/rx_bytes_per_s': [[1, 3000, 1024]], 'temperature/name:cool': [[1, 1000, 40]]}};
 const context = vm.createContext({AbortController, console, performance: {now: () => now},
+  location: {hash: ''}, history: {replaceState(_, __, hash) { context.location.hash = hash; }},
+  window: {addEventListener(type, fn) { navigation[type] = fn; }},
   document: {visibilityState: 'visible', getElementById: el, querySelectorAll: () => [],
     addEventListener: (_, fn) => listeners.push(fn)},
   setInterval: fn => intervals.push(fn), setTimeout: (fn, ms) => { timers.set(++nextTimer, {fn, ms}); return nextTimer; },
@@ -110,5 +113,12 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   assert.equal(el('system-l4t-row').hidden, true);
   await switchTo('thermal');
   assert(el('pwr').innerHTML.includes('MAXN_SUPER'), 'power mode remains in the thermal view');
+  assert.equal(context.location.hash, '#thermal', 'selection is stored in the URL');
+  const beforeNavigation = requests.length;
+  context.location.hash = '#system'; navigation.hashchange();
+  assert.equal(el('panel-system').hidden, false);
+  context.location.hash = '#unknown'; navigation.hashchange();
+  assert.equal(el('panel-overview').hidden, false, 'unknown links fall back to Overview');
+  assert.equal(requests.length, beforeNavigation, 'System and Overview navigation do not fetch');
   console.log('views, summaries, keyboard, shared polling, cached errors and hidden-page suspension: passed');
 })().catch(e => { console.error(e); process.exitCode = 1; });

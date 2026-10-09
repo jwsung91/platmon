@@ -47,6 +47,9 @@ OS, kernel, architecture, hostname and available board-specific information such
 remains in Temperature & power. System updates only changed values and makes no optional API requests.
 The common header keeps the model, connection
 errors and data age visible in every view. Tabs support arrow-key focus and Enter/Space activation.
+On narrow screens a swipe hint helps reveal the remaining tabs. Selecting a tab updates the URL
+fragment (for example, `#system`), so reloading or opening that link restores the view; unknown
+fragments fall back to Overview. Selecting tabs replaces the current history entry.
 Only the active view renders; detail tabs share cached history, and a hidden browser page suspends
 polling until it returns. This does not pause the device's collector or history recording.
 
