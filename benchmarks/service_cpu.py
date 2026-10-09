@@ -78,6 +78,7 @@ def main(argv=None):
     config = configparser.ConfigParser()
     config.read(a.ini)
     history_enabled = config.getboolean('history', 'enabled', fallback=False)
+    interval_ms = config.getfloat('core', 'interval', fallback=1.0) * 1000
     base = f"http://127.0.0.1:{a.port}"
     # Never accidentally measure or terminate an existing service on this port.
     with socket.socket() as check:
@@ -87,6 +88,7 @@ def main(argv=None):
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     samples, health, history_samples, observation_samples = [], [], [], []
     errors = Counter()
+    published = {}
     final_documents = {}
     forced_kill = False
     try:
@@ -116,6 +118,9 @@ def main(argv=None):
                 results["stats"].append(r[:3])
                 if r[3]:
                     sample = r[3].get('sample', {})
+                    published[sample['sequence']] = sample['duration_ms']
+                    if sample['instance_id'] != health[0]['instance_id']:
+                        errors['instance_changed'] += 1
                     if sample.get('data_age_basis') != 'oldest_current_read_start':
                         errors['freshness_fallback'] += 1
                     for name, value in r[3].get('collectors', {}).items():
@@ -154,6 +159,8 @@ def main(argv=None):
             proc.kill()
             proc.wait(10)
     elapsed = end[0] - start[0]
+    stderr = proc.stderr.read().decode(errors='replace')
+    missing = max(published) - min(published) + 1 - len(published) if published else None
     out = {"ini": os.path.basename(a.ini), "page": a.page, "elapsed_s": elapsed, "cpu_s": end[1] - start[1],
            "cpu_pct_one_core": 100 * (end[1] - start[1]) / elapsed, "memory_start": start[2], "memory_end": end[2],
            "requests": {k: {"n": len(v), "statuses": dict(Counter(c for c, _, _ in v)),
@@ -163,7 +170,13 @@ def main(argv=None):
            "exit": proc.returncode, "forced_kill": forced_kill,
            "pid": proc.pid, "pid_gone": not os.path.exists(f'/proc/{proc.pid}'),
            "port_closed": get(base + '/api/status')[0] == -1,
-           "stderr_tail": proc.stderr.read().decode(errors="replace")[-2000:],
+           "stderr_tail": stderr[-2000:], 'stderr_bytes': len(stderr.encode()),
+           'stderr_sha256': hashlib.sha256(stderr.encode()).hexdigest(),
+           'collection_failures_logged': stderr.count('platmon: collect failed:'),
+           'stale_collections_dropped_logged': stderr.count('result dropped'),
+           'observed_samples': {'count': len(published), 'missing_sequences': missing,
+                                'duration_ms_max': max(published.values(), default=None),
+                                'overruns': sum(v > interval_ms for v in published.values())},
            "python": platform.python_version(), 'source_sha': a.source_sha,
            'ini_sha256': hashlib.sha256(open(a.ini, 'rb').read()).hexdigest(),
            'memory_samples': samples, 'health': health,
