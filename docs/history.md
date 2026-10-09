@@ -65,6 +65,9 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 
 - At most `min(3602, retention / min(core interval, 1 s) + 2)` points per series and 64 series; series beyond that are not kept and
   counted in `dropped_series`. IDs are limited to 512 characters; only finite numeric values are retained.
+  Each publisher removes points older than its current retention cutoff when it appends. Low-frequency
+  series therefore release expired points without waiting to fill the core-cadence point cap; HTTP reads
+  still only copy/filter and never mutate the stored history.
   At very fast cadences, the point cap can shorten the effective retained window; retention is an upper limit. A series not seen for longer than `retention` is removed, so devices that come
   and go do not pile up.
 - `/api/history?prefix=…&seconds=…&points=…` (all optional): series whose id starts with `prefix` (at most
