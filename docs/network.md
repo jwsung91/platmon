@@ -65,9 +65,10 @@ the host's NICs; with `network_mode: host`, or platmon running natively, it is t
 platmon does not enter another namespace.
 
 - `scope.id`: `netns1:` and a SHA-256 of the device and inode `/proc/self/ns/net` resolves to. Two
-  readings with the same id are from the same namespace while it exists; the id says nothing about the
-  machine, is not a hardware or machine id, and a namespace created later can get the same one. Read it
-  together with `sample.instance_id`. `null` when it could not be read.
+  readings with the same id are from the same namespace while it exists. It is not a hardware or machine
+  id: the host's initial namespace has the same device and inode on every Linux machine, so natively
+  running platmons on different hosts show the same id, and a namespace created later can get the id of
+  one that is gone. Read it together with `sample.instance_id`. `null` when it could not be read.
 - An interface is matched to its earlier reading by namespace, index (`ifindex`, `null` if not known) and
   name together.
 - Limits: the namespace, the index list and the counters are three reads, not one snapshot. If an
@@ -124,4 +125,4 @@ A one-off `collect(network=NetworkCounters())` has all interfaces in `warmup` an
 No numbers on the web page, in the `platmon` command or `/text` (a `partial`/`error` group is named in
 the existing "Collection:" line). Not collected: Wi-Fi signal (RSSI), round-trip time or ping, packet
 capture, link speed and duplex, access point scans, disk I/O, pressure stall information (PSI),
-filesystem usage, history.
+filesystem usage, history. Measured cost: [performance/network-product.md](performance/network-product.md).
