@@ -75,8 +75,9 @@ def parent_of(name, root=SYS_CLASS_BLOCK):
 
 def filesystem_capacity(path, device):
     """Pin a directory, verify its filesystem, then read capacity through the same descriptor.
+    O_PATH avoids requiring directory read permission for filesystem metadata.
     A mount replaced after mountinfo must not lend its capacity to the previous device."""
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
+    fd = os.open(path, os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
     try:
         st = os.fstat(fd)
         if (os.major(st.st_dev), os.minor(st.st_dev)) != device:

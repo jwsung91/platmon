@@ -452,3 +452,30 @@ def test_file_bind_fallback_keeps_descriptor_identity_check(tmp_path):
     expected = os.statvfs(tmp_path)
     assert out["filesystems"][0]["total_bytes"] == expected.f_blocks * expected.f_frsize
     assert status["state"] == "ok"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="requires unprivileged permission enforcement")
+def test_capacity_does_not_require_directory_read_permission(tmp_path):
+    from collector.storage import filesystem_capacity
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    device = mount.stat().st_dev
+    mount.chmod(0)
+    try:
+        expected = os.statvfs(mount)
+        result = filesystem_capacity(mount, (os.major(device), os.minor(device)))
+        assert result.f_blocks == expected.f_blocks and result.f_frsize == expected.f_frsize
+    finally:
+        mount.chmod(0o700)
+
+
+def test_capacity_rejects_symlinks_and_regular_files(tmp_path):
+    from collector.storage import filesystem_capacity
+    device = tmp_path.stat().st_dev
+    file = tmp_path / "file"
+    file.write_text("x")
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path, target_is_directory=True)
+    for path in (file, link):
+        with pytest.raises(OSError):
+            filesystem_capacity(path, (os.major(device), os.minor(device)))

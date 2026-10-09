@@ -162,3 +162,39 @@ def test_raw_zero_and_invalid_signal_range():
     rows, bad = parse(HEAD + RAW.replace('70.   70.', '70.    0.'))
     assert not bad and rows[0]["signal_raw"] == 0 and rows[0]["signal_dbm"] is None
     assert parse(HEAD + PI.replace('-64.', '-300.'))[1] == [("wlan0", "invalid_data")]
+
+
+@pytest.mark.parametrize("flags,after,expected", [("0x0", "3", False), ("0x1000", "3", False), ("0x0", "4", None)])
+def test_down_carrier_is_disconnected_without_issue(flags, after, expected):
+    import errno
+    from collector.wifi import link_connected
+    indexes = iter(["3", after])
+    def read(path):
+        if path.endswith("/ifindex"):
+            return next(indexes)
+        if path.endswith("/flags"):
+            return flags
+        raise OSError(errno.EINVAL, "interface down")
+    g = sysfs.Group("wifi")
+    out = Wifi(read=lambda p: HEAD + PI, netns=lambda: SimpleNamespace(st_dev=1, st_ino=2),
+               indexes=lambda: [(3, "wlan0")],
+               link=lambda name, index: link_connected(name, index, read=read))(g)
+    item = out["interfaces"][0]
+    assert item["connected"] is expected
+    assert item["connection_state"] == ("disconnected" if expected is False else "unknown")
+    assert item["signal_dbm"] is None
+    assert g.status()["state"] == "ok" and not g.status()["issues"]
+
+
+@pytest.mark.parametrize("error,flags", [(22, "0x1"), (5, "0x0"), (13, "0x0")])
+def test_carrier_errors_are_not_all_treated_as_down(error, flags):
+    from collector.wifi import link_connected
+    def read(path):
+        if path.endswith("/ifindex"):
+            return "3"
+        if path.endswith("/flags"):
+            return flags
+        raise OSError(error, "failed")
+    with pytest.raises(OSError) as caught:
+        link_connected("wlan0", 3, read=read)
+    assert caught.value.errno == error
