@@ -70,7 +70,7 @@ def hwmon_chips(root="/sys/class/hwmon", *groups):
 
 # Diagnostics of optional metrics (collectors.<group> in /api/stats). Reasons in PROBLEMS are read failures,
 # most serious first; ABSENT ones say why there is no value without calling it an error, most specific first.
-PROBLEMS = ("internal_error", "permission_denied", "io_error", "disappeared", "invalid_data")
+PROBLEMS = ("internal_error", "permission_denied", "io_error", "disappeared", "mount_changed", "invalid_data")
 ABSENT = ("no_data", "not_exposed", "not_detected", "unsupported_platform")
 OPTIONAL = ("cpu_frequency", "gpu", "temperature", "power", "fans", "power_mode", "board_info")
 MAX_ISSUES, MAX_TARGET = 32, 64
