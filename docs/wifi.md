@@ -24,9 +24,11 @@ stays in `network` ([network.md](network.md)), at its 1 s cadence.
 The file's format and meaning come from the kernel's `net/wireless/wext-proc.c` and `wext-compat.c`
 (cfg80211's wireless-extensions view):
 
-- `connected`: the kernel updated the interface's signal since the previous read of the file, which
-  cfg80211 does whenever it has station data, i.e. while associated. A listed interface that is not
-  connected shows `false` and **no** signal, link quality or noise: never the last value seen, never 0.
+- `connected`: kernel carrier from `/sys/class/net/<name>/carrier`, with ifindex checked before and
+  after to reject device replacement/scope mismatch. True/false describes the kernel link, not Internet
+  reachability or Wi-Fi authentication. `null` means unknown; `connection_state` explains unavailable,
+  unsupported or permission-denied observations. A signal-update dot alone never determines it.
+  A disconnected/unknown interface has no current signal/quality/noise in the published result.
 - `signal_dbm`: the signal level in dBm when the driver reports dBm (the kernel prints those as negative
   numbers). `signal_raw`: the level of a driver that reports no unit (a non-negative number); platmon does
   not convert it to dBm. One of the two is set while connected.
@@ -59,6 +61,18 @@ interval = 5      ; seconds between observations, 1 to 3600
 
 5 s is a starting point, not a derived optimum. Shown on the web page ("Wi-Fi") and in the `platmon`
 command and `/text` (`WIFI` lines) with the observation's age; "not connected" when not associated.
+
+Connection semantics changed in observations schema version 2; see [observations.md](observations.md#version-2-compatibility-boundary).
+Sysfs and process-network scope must describe the same interface. Name/index checks catch visible
+mismatches, not an undetectable replacement reusing both. AP/other modes can have carrier without a
+station signal. WEXT alone cannot distinguish association, missing station data and a failed driver
+query; nl80211 would provide richer status but requires a separate, bounded protocol implementation.
+This provider keeps the small passive proc/sysfs path, never requests SSID/BSSID and never scans.
+Its supported signal range is the kernel's signed dBm or unspecified raw unit, never an inferred conversion.
+
+Official semantics reviewed (no source code copied):
+[wireless proc output](https://github.com/torvalds/linux/blob/master/net/wireless/wext-proc.c),
+[cfg80211 compatibility interface](https://github.com/torvalds/linux/blob/master/net/wireless/wext-compat.c).
 
 ## Not included
 
