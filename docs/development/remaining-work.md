@@ -9,7 +9,28 @@ Last update: 2026-10-09. Resume baseline: `e1e7c9f38bfac83e9844ddb8110a9eae08a7f
 (`origin/main`, #32–#39 already merged before this resumed task). The table below records historical
 implementation; merging alone does **not** complete the expanded validation requirements.
 
-## Current checkpoint — resumed integration
+## Current checkpoint — authorized final validation
+
+The owner authorized necessary merges on 2026-10-09. #40, #43 and #41 are merged;
+main is `efb3af6c12873195f9b3cfe23ad68cbd5ff802b3`, with successful main CI.
+#42 now targets main; #44 follows its updated head. Neither duplicates Disk work in its diff.
+The seven-stage post-integration request is at 3/7 complete (status, frontend, Disk), with
+History ARM and final integration validation running. Production remains `8525942`.
+
+Exact measured candidate: `30d377a9b7cd470d655367398dab39c3b1f5313a`. The
+[final plan](../performance/final-candidate-plan.md) fixes a 60-minute board budget for two
+ABBA blocks and 1830 s retention; it supersedes the earlier stop after 660 s. The earlier
+CPU matrix overlapped an independent validation and is historical, not the final gate.
+Local final runtime tests: 672 passed / 3 skipped; candidate CI 37904134307/37904140826
+passed on Python 3.9 and 3.13. Runtime files in the merged component branches are identical.
+Final-page Chromium fixtures pass; the 660 s real-page soak is running.
+
+Actual systemd DynamicUser execution still needs administrator authentication; Pi unit syntax
+verification passes. PSI remains unsupported on ARM; no external TCP target is approved.
+These documented limits do not authorize privilege workarounds or production changes.
+Raw evidence is in `.validation/final-rc-evidence/` and `~/platmon-final-rc-30d377a/`.
+
+## Historical checkpoint — resumed integration
 
 The eight requested stages have **4/8 completed within the documented support scope** (1, 2, 3, 5).
 Stages 4 and 6 have implementation/automated checks but environment or target validation gaps;
@@ -53,6 +74,50 @@ authentication. `sudo -n true` requires a password on the available hosts; no cr
 new capability or production-unit change is used to bypass it. Extended history stability needs a
 separately recorded experiment budget. Remote TCP needs an owner-selected allowlisted target; PSI
 normal ARM validation needs an already-supported environment, without reboot/kernel changes.
+
+## Merge checkpoint (2026-10-09)
+
+The owner authorized necessary merges. #40 is merged at `4b1bc080`; its lifecycle tests and
+viewer fixes are preserved in this branch. #41 retains the independently measured classifier
+`1eae3a4` and the completed two-block ARM results in the Disk report. This merge resolves
+documentation only; classifier and measured collector code are unchanged. Integration #46
+contains the combined History, Storage and Wi-Fi work and is undergoing final bounded validation.
+Production rollout and release publication remain unapproved.
+
+## Historical resumed work checkpoint
+
+- Branch: `feat/history-observation-contract`, stacked on Disk PR #41 at
+  `1eae3a4bd5ddc6395d6c9c871e6af60b61041f27`; history follow-up PR pending.
+  UI follow-up: #40, `33ada21`, signed; Python 3.9 CI 645/1, Python 3.13 CI 644/2 passed/skipped
+  on push and PR event (runs 37891815033, 37891851001); branch `fix/frontend-observation-contract`.
+  Clean worktree at entry. No user changes were present.
+- Stage 1: **in progress**. Three classification-cache regressions reproduced and fixed; focused
+  Disk/Network/provenance tests: **179 passed**. New ARM measurement required (plan in disk report); raw SHA-256 prefixes for the integrated
+  `c2752c1` runs checked on both boards and matched. No collection changes in the UI follow-up.
+- Stage 2: in progress. Reproduced missing observation windows, hidden zero in-flight counters, duplicate
+  hanging optional HTTP requests and cached observations not becoming stale. CLI/web fixes and regression
+  tests added; `pytest -v`: **643 passed / 3 skipped**, focused CLI/web: **68 passed**; final CI pending. Real Chromium fixture checks cover 1280/390 px, PSI/Wi-Fi panels, escaped
+  labels, 503, a real 5 s timeout and 120 repeated renders (not a long-duration stability claim).
+- Stages 3–6: implementations retained; validation still required against the complete work order.
+  PSI normal-path ARM support and approved external probe targets remain unavailable; defaults stay off.
+- Stage 7: **in progress, not complete**. Existing history explicitly excludes low-frequency groups;
+  observation-ID-based append, explicit missing/elapsed-gap markers, gap-preserving downsampling,
+  CPU/slow graphs and elapsed spacing implemented here. Wi-Fi gets namespace/index identity; no signal
+  unit change. Local full tests: 654 passed / 3 skipped including the additional graph test;
+  CI, real browser and real-time board retention verification pending. Maximum configuration synthetic
+  tracemalloc: 22,505,990 bytes retained, 28,765,190 bytes peak with one read/JSON; targets 32/64 MiB.
+- Stage 8: **waiting for validation**. Container/systemd isolation, board history retention, the second
+  integrated ABBA block, and final exact-HEAD CI/measurement reconciliation remain outstanding.
+- Devices rechecked over SSH: both production checkouts are `8525942`; Orin's original container and
+  Pi's original process are running. No production modifications. Private state and local validation
+  logs are in `.validation/20261009-resume/` (ignored), with original ARM raw still on the boards.
+- Main CI run `37890446587`: Python 3.9 **642 passed / 1 skipped**, Python 3.13 **641 passed / 2 skipped**;
+  Node-backed web tests and real hosted-runner PSI tests executed. These are baseline, not follow-up CI.
+- Local baseline: `pytest -v`, Python 3.12, **640 passed / 3 skipped** with loopback allowed. The initial
+  sandbox run failed on denied sockets; no assertions were weakened to accommodate the sandbox.
+- Disk measurement is running in each board's `~/platmon-diskbench-1eae3a4/`, 8 windows (do not restart).
+  Next: finalize the history PR and validate the integrated tree with #40.
+  Nothing in this resumed task authorizes merging, production deployment or release publication.
 
 ## Historical implementation
 

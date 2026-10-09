@@ -2,6 +2,14 @@
 
 Measured product/benchmark commit: `e919baf72a5c5100dd5468188fcc97b119b287f6`. Source hash `4912055833f36dcd`, benchmark hash `5dcc5ddcf361cef8`. [Predeclared plan](resumed-integration-plan.md). The later reconciliation of #45 changes web display, tests, bench reporting and documentation; collector, service and CLI runtime are identical. These measurements use the older benchmark named here, not its later diagnostics.
 
+## Qualification after concurrent-run audit
+
+The original two-block CPU matrix overlaps an independent Wi-Fi validation near its beginning
+(the interrupted run's start records are 15:41 KST). Preserve these raw values, but do not use
+the complete matrix as uncontended final-candidate evidence. Low-frequency call measurements
+and retention occurred later. A new bounded final run is declared in
+[final-candidate-plan.md](final-candidate-plan.md); its results will be recorded separately.
+
 ## Service CPU
 
 Native, 1 s collector and stats client; observations/history requests every 10 s. Each window: 30 s warmup + 120 s measurement. Default means Network and Disk on, other groups off. All means Storage 30 s, Wi-Fi 5 s, unsupported PSI, history 600 s and TCP connect 10 s to the isolated service loopback listener. Process user+system CPU includes all worker threads; no helper service process. The client is excluded.
