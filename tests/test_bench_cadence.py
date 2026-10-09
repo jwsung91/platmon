@@ -638,3 +638,18 @@ def test_slow_cost_times_each_real_observation(tmp_path):
     assert r["count"] == 3 and len(r["samples"]) == 3 and r["observe_cpu_ms"]["n"] == 3
     assert all(s["state"] in ("ok", "partial", "unavailable") for s in r["samples"])
     assert r["source_hash"] and r["bench_hash"]
+
+
+def test_service_cpu_measures_the_real_service(tmp_path):
+    import socket
+    from benchmarks import service_cpu
+    with socket.socket() as free:
+        free.bind(("127.0.0.1", 0))
+        port = free.getsockname()[1]
+    ini = tmp_path / "t.ini"
+    ini.write_text(f"[history]\nenabled = yes\n[http]\nbind = 127.0.0.1\nport = {port}\n")
+    out = tmp_path / "s.json"
+    service_cpu.main(["--ini", str(ini), "--port", str(port), "--warmup", "1", "--measure", "2", "--page", "--out", str(out)])
+    r = json.loads(out.read_text())
+    assert r["exit"] == 0 and r["requests"]["stats"]["n"] >= 2 and r["requests"]["stats"]["errors"] == 0
+    assert r["cpu_pct_one_core"] >= 0 and r["memory_end"]["rss_kib"] > 0
