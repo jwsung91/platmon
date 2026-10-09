@@ -24,6 +24,7 @@
   .track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
   .fill { height: 100%; background: var(--bar); transition: width .3s; }
   .fill.hot { background: var(--warn); }
+  .kv span:first-child { overflow-wrap: anywhere; min-width: 0; margin-right: 8px; }
   .kv { display: flex; justify-content: space-between; margin: 3px 0; font-variant-numeric: tabular-nums; }
   #err, #coll { color: var(--warn); }
 </style>
@@ -149,10 +150,12 @@ function storageRows() {
   const age = Math.round((o.data_age_ms + performance.now() - obsAt) / 1000);
   const fss = Array.isArray(d.filesystems) ? d.filesystems : [], parts = Array.isArray(d.partitions) ? d.partitions : [];
   return `<div class="muted">observed ${age} s ago${o.stale ? ' (not current)' : ''}</div>` +
-    fss.map(f => kv(esc(f.mount_points.map(m => m.path + (m.read_only ? ' (ro)' : '')).join(', ')),
+    fss.map(f => kv(esc(f.mount_points[0].path + (f.mount_points[0].read_only ? ' (ro)' : '') +
+        (f.mount_points.length > 1 ? ` +${f.mount_points.length - 1} more` : '')),
       f.total_bytes != null ? `${gib(f.used_bytes)}/${gib(f.total_bytes)} · ${gib(f.available_bytes)} free` : 'capacity unknown') +
       `<div class="muted">${esc(f.fstype)} · ${esc(f.device || f.major + ':' + f.minor)}</div>`).join('') +
-    parts.map(p => kv(esc(p.name), `${gib(p.size_bytes)} · ${p.mount_points.length ? esc(p.mount_points.join(', ')) : 'not mounted'}`)).join('');
+    parts.map(p => kv(esc(p.name), `${gib(p.size_bytes)} · ${p.mount_points.length ? esc(p.mount_points[0] +
+      (p.mount_points.length > 1 ? ` +${p.mount_points.length - 1} more` : '')) : 'not mounted'}`)).join('');
 }
 
 // optional groups that could not read everything, as in cli.py; nothing for absent sensors or older servers
