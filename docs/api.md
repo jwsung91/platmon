@@ -20,7 +20,9 @@ The metrics (`cpu`, `gpu`, `memory`, `disk`, `temperature`, `power`, `fans`, `ti
 keys, units and types. Schema version 1 adds `schema_version`, `sample`, `collectors` and, from the
 service, `sensor_meta` next to them; answers without `schema_version` come from an older platmon (legacy)
 and have no sample metadata. With `[network] enabled = yes` (the default) there is also `network`: the
-interface counters and rates of platmon's own network namespace, described in [network.md](network.md).
+interface counters and rates of platmon's own network namespace, described in [network.md](network.md), and
+with `[disk_io] enabled = yes` (the default) `disk_io`: the I/O counters and rates of each physical disk, in
+[disk-io.md](disk-io.md).
 
 ```json
 {
@@ -55,7 +57,7 @@ interface counters and rates of platmon's own network namespace, described in [n
   to rounding), and `data_age_ms` how old the data is, counted as `data_age_basis` says:
   - `oldest_current_read_start` (the service): from the start of the earliest read this snapshot's data
     comes from: the CPU reading of this collection, memory, disk, uptime, every sensor value in it, and
-    the network counters' read (`network.read`).
+    the network and disk counters' reads (`network.read`, `disk_io.read`).
     Not counted: the CPU baseline (the start of `cpu_sampling.window_ms`), failed reads, load candidates
     that were not used, and names, labels and other text. `data_age_ms <= cycle_age_ms`.
   - `cycle_start_upper_bound`: from the start of the collection (`data_age_ms = cycle_age_ms`). Used for
@@ -194,7 +196,8 @@ stays listed with `rpm` or `percent` `null`; a CPU's `freq` and the GPU's `freq`
 `gpu` is `null` without a load; `power_mode` is `null`; `system.l4t` is missing. A measured `0` is `0`.
 
 `collectors` has one entry per optional group: `cpu_frequency`, `gpu`, `temperature`, `power`, `fans`,
-`power_mode`, `board_info` (the L4T release), and `network` while it is enabled ([network.md](network.md)):
+`power_mode`, `board_info` (the L4T release), and `network` / `disk_io` while enabled ([network.md](network.md),
+[disk-io.md](disk-io.md)):
 
 ```json
 "collectors": {

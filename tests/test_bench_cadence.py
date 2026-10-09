@@ -590,3 +590,41 @@ def test_network_product_plan_and_comparability():
                    {"scope": dict(scope, collectors={"core": "ok", "temperature": "ok"})}):
         bad = [ok[0], dict(ok[1], **change)]
         assert cadence.mismatches(bad), change
+
+
+# ---------- the product's Disk I/O off/on on top of Network on (phase disk-product) ----------
+
+def test_product_disk_on_and_off_change_the_real_calls(tmp_path, capsys):
+    runs = {}
+    for v in ("off", "on"):
+        runs[v] = short_serve(tmp_path, "on", "--product-disk", v)
+        assert runs[v]["product_disk"] == v and len(runs[v]["tables"]["network"]["rows"]) > 0  # network on in both
+    on, off = runs["on"], runs["off"]
+    assert len(on["tables"]["disk"]["rows"]) == len(on["tables"]["attempt"]["rows"]) > 0 and off["tables"]["disk"]["rows"] == []
+    assert "disk_io" not in on["scope"]["collectors"] and on["scope"]["product_disk"] == off["scope"]["product_disk"]
+    results = tmp_path / "results.jsonl"
+    rec = lambda s: dict(run_rec(s), cond={"phase": "disk-product", "clients": 0, "poll": 1.0, "block": "c0-1"})  # noqa: E731
+    results.write_text("".join(json.dumps(rec(s)) + "\n" for s in (off, on, on, off)))
+    capsys.readouterr()
+    cadence.main(["report", str(results)])
+    out = json.loads(capsys.readouterr().out)
+    assert out["network_comparisons"] == [] and len(out["disk_comparisons"]) == 1
+    c = out["disk_comparisons"][0]
+    assert c["arms"] == {"b0": "disk off", "b1": "disk on"} and c["disk_calls_when_off"] == 0 and c["disk_ms"]["n"] > 0
+    cadence.main(["report", "--md", str(results)])
+    assert "disk call p95" in capsys.readouterr().out
+
+
+def test_product_disk_needs_a_stated_network_setting(tmp_path):
+    with pytest.raises(SystemExit):
+        cadence.main(["serve", "--variant", "B0", "--product-disk", "on", "--interval", "1", "--out", str(tmp_path / "x")])
+
+
+def test_disk_product_plan_and_source_hash(monkeypatch):
+    plan = cadence.plan("disk-product", [], clients=(1,), blocks=2)
+    assert [(c["net"], c["disk"], c["block"]) for c in plan] == [
+        ("on", v, b) for b in ("c1-1", "c1-2") for v in ("off", "on", "on", "off")]
+    seen = []
+    monkeypatch.setattr(cadence, "sha256_files", lambda paths: seen.extend(paths) or "x")
+    cadence.source_hash()
+    assert any(p.endswith("collector/disk_io.py") for p in seen)
