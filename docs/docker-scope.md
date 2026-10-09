@@ -67,3 +67,18 @@ and capacities were compared, not merely endpoint status codes. Raw snapshots an
 are retained locally in `.validation/container-host-audit/` and on Orin in
 `~/platmon-container-audit-6984ff6/`. Candidate containers/networks and test ports are reclaimed.
 No new CPU-budget or normal PSI performance claim is made by this availability audit.
+
+## Final candidate checks
+
+Candidate `ce16d07` passed an isolated host-network run on 127.0.0.1:19799. The image's own health
+check became healthy on that non-default port. Every host interface matched `socket.if_nameindex`,
+Network/Wi-Fi namespace IDs agreed, Wi-Fi was connected at -50 dBm, Storage was `ok`, and 38 History
+series included Wi-Fi. `/text` displayed Wi-Fi and Storage. The non-root user was 65534:65534 and
+privileged mode was false. The candidate container and port were removed, and the operating bridge
+container's identity/start time stayed unchanged during this check.
+
+Pi PSI was separately enabled with the owner's approval and password-authenticated administrator
+step. After reboot and native service restart, CPU/memory/I/O pressure collectors report `ok`.
+Orin kernel replacement was explicitly deferred. [PR #48](https://github.com/jwsung91/platmon/pull/48)
+records final main CI and deployment status. Historical bridge limitations in earlier reports refer
+to their measured revisions and are not the current host-network configuration.
