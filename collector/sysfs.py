@@ -187,6 +187,7 @@ class Trace:
     def __init__(self, clock):
         self.clock, self.required = clock, {}
         self.network = None  # (start, end) of the network counters' read, when there is one
+        self.disk_io = None  # the same for the disk counters
 
     def timed(self, name, fn, *args):
         start = self.clock()

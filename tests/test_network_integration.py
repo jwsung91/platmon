@@ -51,7 +51,7 @@ def test_on_unless_disabled_and_kept_by_the_service(monkeypatch, tmp_path, text)
     """No config file, an INI without [network] (from before it existed), an empty [network], or yes."""
     collect = started(monkeypatch, None if text is None else ini_file(tmp_path, text))
     assert collect.func is collector.collect_recorded
-    cpu, logged, clock, network = collect.args
+    cpu, logged, clock, network, _ = collect.args
     assert isinstance(network, NetworkCounters) and network.clock is clock is cpu._clock
     assert network._max_gap == cpu._max_gap == 5 * S
 
