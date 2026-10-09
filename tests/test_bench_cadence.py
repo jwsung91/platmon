@@ -657,6 +657,12 @@ def test_service_cpu_measures_the_real_service(tmp_path):
     assert r['requests']['history']['statuses'] == {}  # 2 s window: next optional poll not due
     assert r['history_samples'] and len(r['health']) == 2
     assert r['final_documents']['history_full']['retention_s'] == 600
+    # A stopped HTTPServer may leave TIME_WAIT sockets; the next window must still start.
+    service_cpu.main(["--ini", str(ini), "--port", str(port), "--warmup", "0", "--measure", "1",
+                      "--out", str(out)])
+    restarted = json.loads(out.read_text())
+    assert restarted['exit'] == 0 and restarted['port_closed'] and restarted['pid_gone']
+    assert restarted['health'][0]['instance_id'] != r['health'][0]['instance_id']
 
 
 def test_service_bench_rejects_an_occupied_port(tmp_path):

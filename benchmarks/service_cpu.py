@@ -81,6 +81,7 @@ def main(argv=None):
     base = f"http://127.0.0.1:{a.port}"
     # Never accidentally measure or terminate an existing service on this port.
     with socket.socket() as check:
+        check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # match HTTPServer; allow prior TIME_WAIT
         check.bind(("127.0.0.1", a.port))
     proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "platmon.py"), a.ini], cwd=ROOT,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
