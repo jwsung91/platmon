@@ -127,6 +127,8 @@ class History:
                     self._owners[sid] = owner
                 if sid in present:
                     self._seen[sid] = started
+                while series and series[0][1] < cutoff:
+                    series.popleft()  # slow publishers must release expired points before reaching the count cap
                 if series and (gap_before or started - series[-1][1] > gap_ns):
                     series.append((sequence, started - 1, None))  # explicit break after a stalled publisher
                 number = value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
