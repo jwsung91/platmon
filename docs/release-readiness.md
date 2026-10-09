@@ -1,6 +1,28 @@
 # Release readiness (integration of #32–#38)
 
-## Resumed candidate status (2026-10-09)
+## Current final candidate status (2026-10-09)
+
+The owner authorized necessary merges. #40, #43 and #41 are merged; their main CI passed.
+#42 now targets main, #44 follows #42, and #46 preserves all component changes and #45's
+validation work. The exact measured code is `30d377a9b7cd470d655367398dab39c3b1f5313a`;
+the initial normal merges and documentation updates preserved that runtime byte-for-byte.
+A subsequent regression test reproduced a one-attempt core failure being hidden in the history
+line. #42 `00781fd` corrects it with internal publication metadata; no API change. The remaining
+component merges are held for corrected-runtime validation, and the measurements below are baseline.
+
+[Final measured results](performance/final-candidate-results.md) supersede the earlier CPU matrix:
+two uncontended ABBA blocks pass the default <=2% CPU target on each ARM board. The final-page
+661 s Chromium soak passes with constant live DOM and no JS errors. Local tests are 672 passed /
+3 skipped; candidate CI is 674/1 (Python 3.9) and 673/2 (Python 3.13), including Node and hosted PSI.
+The bounded 1830 s ARM retention run is still in progress; Orin compose verification follows it.
+
+Network/Disk remain on; Storage/PSI/Wi-Fi/TCP/history remain off. Storage/Wi-Fi call p95 still
+exceeds 2 ms. Actual systemd DynamicUser execution is unverified because administrator
+authentication is unavailable; Pi unit static verification succeeds. ARM PSI is unsupported and
+no external probe target is approved. Sampled duration coverage is not full per-attempt accounting.
+Production stays at `8525942`; deployment, tags, releases and registry pushes remain unapproved.
+
+## Historical resumed candidate status (2026-10-09)
 
 **Review candidate; not fully release-ready.** #46 combines #40–#44 and the concurrent #45 follow-up
 without modifying main. Exact component HEADs and eight-stage status are in

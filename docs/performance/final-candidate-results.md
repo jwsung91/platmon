@@ -29,6 +29,8 @@ durations stayed below 23.564 ms (Orin) / 15.161 ms (Pi), with no observed overr
 One Orin window's 1 s client missed two intermediate published sequence numbers; the other 15
 windows have no missing sequence within their observed ranges. This is sampled duration coverage,
 not proof of every attempt's timing or scheduler delay. It is not reported as a collection failure.
+Each process used a distinct instance ID. Within each run, status, stats, observations and enabled
+history agreed on the instance; no prior instance survived the successive restarts.
 
 The earlier `e919baf` matrix is historical because another validation overlapped its beginning.
 These windows ran without that competing benchmark. Original evidence is retained unchanged.
@@ -55,3 +57,16 @@ Raw windows, source, INIs, before/after state, input hashes and scripts remain i
 `~/platmon-final-rc-30d377a/` on each board and private `.validation/final-rc-evidence/` locally.
 The final result manifest will be recorded when the bounded run completes. Production remains
 `8525942`; no deployment, release, tag, registry push or old-image/raw cleanup is part of this run.
+
+Executed window command (the INI alone selects A/B, in ABBAABBA order):
+
+```bash
+python3 benchmarks/service_cpu.py --ini default.ini --port 19869 --page \
+  --source-sha 30d377a9b7cd470d655367398dab39c3b1f5313a \
+  --warmup 30 --measure 120 --out run-1-default.json
+```
+
+The separate retention command uses `--ini all.ini --warmup 30 --measure 1800 --out retention.json`.
+The preserved `run_final.py` supplies the remaining identical arguments, refuses an exhausted
+budget, checks results and snapshots production before/after. These commands target only the
+isolated archived directory and loopback port, never the production checkout.

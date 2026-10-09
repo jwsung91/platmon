@@ -15,7 +15,7 @@ The owner authorized necessary merges on 2026-10-09. #40, #43 and #41 are merged
 main is `efb3af6c12873195f9b3cfe23ad68cbd5ff802b3`, with successful main CI.
 #42 now targets main; #44 follows its updated head. Neither duplicates Disk work in its diff.
 The seven-stage post-integration request is at 3/7 complete (status, frontend, Disk), with
-History ARM and final integration validation running. Production remains `8525942`.
+History and integration reopened by a reproduced single-failure gap defect. Production remains `8525942`.
 
 Exact measured candidate: `30d377a9b7cd470d655367398dab39c3b1f5313a`. The
 [final plan](../performance/final-candidate-plan.md) fixes a 60-minute board budget for two
@@ -23,7 +23,11 @@ ABBA blocks and 1830 s retention; it supersedes the earlier stop after 660 s. Th
 CPU matrix overlapped an independent validation and is historical, not the final gate.
 Local final runtime tests: 672 passed / 3 skipped; candidate CI 37904134307/37904140826
 passed on Python 3.9 and 3.13. Runtime files in the merged component branches are identical.
-Final-page Chromium fixtures pass; the 660 s real-page soak is running.
+Final-page Chromium fixtures and the 661 s real-page soak pass. All 16 ARM CPU windows pass;
+the 1830 s retention run is still in progress. These are now pre-correction baseline results:
+#42 `00781fd` fixes a reproduced one-attempt core failure that was connected across the history
+graph. Its focused 50 tests and full 662/3 pass locally. Corrected-runtime integration and board
+validation must complete before #42/#44/#46 can merge.
 
 Actual systemd DynamicUser execution still needs administrator authentication; Pi unit syntax
 verification passes. PSI remains unsupported on ARM; no external TCP target is approved.
