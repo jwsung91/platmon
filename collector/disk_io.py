@@ -13,8 +13,8 @@ SCOPE = "host_block_devices"  # block devices are not namespaced: a container se
 DISKSTATS = "/proc/diskstats"
 SYS_BLOCK = "/sys/block"
 SECTOR = 512  # /proc/diskstats counts sectors of 512 bytes whatever the device's own sector size
-# Fields after major, minor, name (Documentation/admin-guide/iostats.rst): 11 since 2.6, 15 with discards
-# (4.18), 17 with flushes (5.5). Only the first 11 are used; more are accepted for later kernels.
+# Fields after major, minor, name (Documentation/block/stat.rst, admin-guide/iostats.rst): 11 on older
+# kernels, then discard and flush fields. Only the first 11 are used; more are accepted.
 MIN_FIELDS = 11
 IO = ("ios", "merges", "bytes", "time_ms")
 

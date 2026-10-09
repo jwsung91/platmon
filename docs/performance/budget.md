@@ -81,3 +81,19 @@ Re-evaluated from the `31b4bbc` measurements; not a new experiment and not a new
 Network is therefore **on by default**, with `[network] enabled = no` to turn it off; an INI that already
 says `no` stays off. Further features are measured on top of this configuration, and the headroom above
 is not a reserved share for any of them.
+
+## Disk I/O under this policy
+
+Measured on top of Network on ([disk-io-product.md](disk-io-product.md), `e184f8c`, after one design
+review: the first round missed the call p95 criterion on the Raspberry Pi).
+
+| | Orin Nano | Raspberry Pi 4 |
+| --- | --- | --- |
+| whole process with Network and Disk I/O on (≤ 2.0 %) | 1.750 % | 1.558 % |
+| collector CPU per collection, off → on | +1.46 ms | +1.12 ms |
+| request CPU (`do_GET`), off → on | +0.05 ms | +0.08 ms |
+| disk call elapsed p95 (≤ 2 ms) | 0.937 ms | 1.176 ms |
+| regressions | none | none |
+| headroom to 2.0 % (means) | about 0.25 pp | about 0.44 pp |
+
+Disk I/O is therefore **on by default**, with `[disk_io] enabled = no` to turn it off.

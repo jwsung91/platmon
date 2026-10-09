@@ -55,13 +55,18 @@ stays listed; a name that disappears is forgotten, and comes back with a new loo
 - `name`, `major`, `minor`: the kernel's device name and number. `disks` is sorted by name.
 - `read`, `write`: the kernel's cumulative counters since the device appeared: completed `ios`, `merges`
   (adjacent requests merged), `bytes` (sectors × 512: `/proc/diskstats` counts 512-byte sectors whatever
-  the device's own sector size) and `time_ms` spent on those requests. `in_flight`: requests in progress
+  the device's own sector size, as Documentation/block/stat.rst defines) and `time_ms` spent on those
+  requests (milliseconds, measured with nanosecond precision and truncated since 4.19). `in_flight`: requests in progress
   now (a gauge, not a counter). `io_time_ms`: time with at least one request in flight.
 - `rates`, over `window_ms`: `read_bytes_per_s`, `write_bytes_per_s` (bytes, not bits),
-  `reads_per_s`, `writes_per_s` (completed requests), and `io_time_ratio`: the share of the window with
-  I/O in flight. It is not utilisation or saturation: a device that serves many requests in parallel
-  (NVMe) can be at 1.0 with capacity to spare. The kernel and platmon use different clocks for it, so it can
-  be slightly above 1. Counters that did not move give `0.0`.
+  `reads_per_s`, `writes_per_s` (completed requests), and `io_time_ratio`: the `io_time_ms` difference
+  divided by the window, the share of the window the kernel counted as "doing I/O". It is not utilisation,
+  saturation or remaining capacity: a device that serves many requests in parallel (NVMe) can be at 1.0
+  with capacity to spare. The kernel documents the counter's limits: since Linux 5.0 it counts jiffies in
+  which at least one request was started or completed, and with concurrent requests that run longer than
+  two jiffies some I/O time may not be counted (Documentation/admin-guide/iostats.rst). The kernel's
+  jiffies and platmon's elapsed clock differ, so the ratio can be slightly above 1; it is reported as
+  computed, not clamped. Counters that did not move give `0.0`.
 - `window_ms`, `reason`: as for network ([network.md](network.md#fields)). Reasons: `warmup` (no earlier
   reading of this major:minor and name), `invalid_interval`, `gap` (more than `max(3 × interval, 5 s)`),
   `counter_regressed` (one counter went down: the device was reset or replaced under the same number and
@@ -72,8 +77,13 @@ Each valid reading is the next baseline, also when it gives no rate; a collectio
 
 ## Scope
 
-`scope.kind` is `host_block_devices`: block devices are not namespaced, so platmon in a container (as in
-`compose.yaml`) shows the host's disks, like a native one. On 32-bit kernels some counters are 32-bit and
+`scope.kind` is `host_block_devices`: `/proc/diskstats` is not namespaced, so platmon in a container
+(as in `compose.yaml`, which keeps the container's own `/sys`) lists the host's block devices like a
+native one. What the selection sees depends on the environment and was checked only natively on the two
+boards: in a container the `/sys/block` links must be visible (a restricted or missing `/sys` makes every
+lookup fail, reported per disk); in a virtual machine the "physical" disks are the VM's virtual disks
+(virtio, emulated SCSI), which sit outside `devices/virtual/` and are therefore collected; WSL 2 shows its
+virtual SCSI disks the same way. A container deployment of this feature has not been benchmarked. On 32-bit kernels some counters are 32-bit and
 wrap; a wrap shows as `counter_regressed` for one reading.
 
 ## Diagnostics and freshness
@@ -110,4 +120,4 @@ Then platmon makes no `DiskCounters`, reads neither `/proc/diskstats` nor `/sys/
 No numbers on the web page, in the `platmon` command or `/text` (a `partial`/`error` group is named in
 the existing "Collection:" line). Not collected: partitions, logical volumes, zram, discard and flush
 counters, the weighted time field, per-process I/O, SMART data, filesystem usage beyond `disk`,
-pressure stall information (PSI).
+pressure stall information (PSI). Measured cost: [performance/disk-io-product.md](performance/disk-io-product.md).
