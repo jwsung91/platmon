@@ -26,8 +26,8 @@ PARTS = """major minor  #blocks  name
 """
 
 
-def mi(major_minor, path, fstype, source, opts="rw,relatime", optional="shared:1"):
-    return f"25 1 {major_minor} / {path} {opts} {optional} - {fstype} {source} rw"
+def mi(major_minor, path, fstype, source, opts="rw,relatime", optional="shared:1", super_opts="rw"):
+    return f"25 1 {major_minor} / {path} {opts} {optional} - {fstype} {source} {super_opts}"
 
 
 MOUNTS = "\n".join([
@@ -76,10 +76,23 @@ def observe(h):
 
 def test_parse_mountinfo_escapes_optional_fields_and_bad_lines():
     mounts, bad = parse_mountinfo(MOUNTS + "garbage line\n26 1 x:y / /a rw - ext4 /dev/a rw\n")
-    assert mounts[1] == (259, 1, "/srv/bind dir", True, "ext4", "/dev/nvme0n1p1")
+    assert mounts[1] == (259, 1, "/srv/bind dir", False, "ext4", "/dev/nvme0n1p1")  # ro bind of an rw filesystem
     assert mounts[0][3] is False and len(mounts) == 7
     assert [t for t, _ in bad] == ["line8", "line9"]
     assert unescape("a\\040b\\011c\\012d\\134e") == "a b\tc\nd\\e"
+
+
+def test_read_only_is_the_filesystem_not_this_process_mount():
+    """A sandboxed service (systemd ProtectSystem=strict, a read-only bind mount) sees the host's writable
+    filesystems as read-only mounts in its own namespace; only the super-options say the filesystem is
+    read-only."""
+    sandboxed = mi("259:1", "/", "ext4", "/dev/nvme0n1p1", opts="ro,relatime")
+    assert parse_mountinfo(sandboxed)[0][0][3] is False
+    really = mi("259:1", "/", "ext4", "/dev/nvme0n1p1", opts="ro,relatime", super_opts="ro")
+    assert parse_mountinfo(really)[0][0][3] is True
+    assert parse_mountinfo(mi("259:1", "/", "ext4", "/dev/nvme0n1p1", super_opts="ro,noatime"))[0][0][3] is True
+    missing = "25 1 259:1 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p1"  # no super-options: not a mountinfo line
+    assert parse_mountinfo(missing) == ([], [("line1", "invalid_data")])
 
 
 def test_parse_partitions():
@@ -92,7 +105,7 @@ def test_local_block_filesystems_once_each_with_all_mount_points():
     assert h.statted == ["/"]  # tmpfs, squashfs, nfs, fuse and overlay are never statvfs'ed; the bind once
     assert out["filesystems"] == [{
         "device": "nvme0n1p1", "major": 259, "minor": 1, "fstype": "ext4", "source": "/dev/nvme0n1p1",
-        "mount_points": [{"path": "/", "read_only": False}, {"path": "/srv/bind dir", "read_only": True}],
+        "mount_points": [{"path": "/", "read_only": False}, {"path": "/srv/bind dir", "read_only": False}],
         "total_bytes": 1000 * 4096, "used_bytes": 750 * 4096, "available_bytes": 200 * 4096}]
     assert out["partitions"] == [
         {"name": "nvme0n1p1", "disk": "nvme0n1", "major": 259, "minor": 1, "size_bytes": 975237540 * 1024,

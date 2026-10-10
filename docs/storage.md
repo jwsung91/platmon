@@ -45,7 +45,12 @@ partition table is read or changed.
   - `device`: the kernel name of its device number (`major`:`minor` from mountinfo), e.g. `nvme0n1p1` or
     `dm-0`; `null` when the number has no block device name (btrfs and some others use an anonymous
     number). `source`: the mount source as mountinfo gives it.
-  - `fstype`, `mount_points` (`path`, `read_only` from that mount's options).
+  - `fstype`, `mount_points` (`path`, and `read_only`: whether the filesystem itself is mounted read
+    only, from the mountinfo super-options, so every mount point of one filesystem says the same).
+    A read-only mount in platmon's own namespace is not reported: a service hardened with
+    `ProtectSystem=strict` (the shipped unit) or a read-only bind mount sees the host's writable
+    filesystems as read-only mounts, which says something about platmon's process, not about the
+    filesystem it reports on.
   - `total_bytes`, `used_bytes`, `available_bytes` from `statvfs`, as `df` computes them: total =
     blocks × fragment size, used = total − free, available = what unprivileged users can still write
     (`f_bavail`; less than total − used when blocks are reserved for root). `null` when `statvfs` failed
@@ -64,7 +69,8 @@ Only mounts whose source is a `/dev/` device and whose type is a local disk file
   filesystems (`proc`, `sysfs`, `cgroup`, ...): they are memory, layers or read-only images, not disk
   space.
 
-The mount namespace is platmon's own: in a container (as in `compose.yaml`) that is the container's
+The mount namespace is platmon's own (which is why `read_only` comes from the filesystem, not the
+mount): in a container (as in `compose.yaml`) that is the container's
 mounts (its overlay root is left out; the host's root bind-mounted at `/host/root` is listed with that
 path), while `/proc/partitions` lists the host's partitions. Other host filesystems need their own
 explicit directory bind mounts; the root bind is deliberately non-recursive. Mount points can contain names chosen by

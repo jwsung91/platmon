@@ -31,7 +31,11 @@ def parse_mountinfo(text, fstypes=None):
     """[(major, minor, mount point, read only, fstype, source)] of the mounts (only those of fstypes, if
     given: the other lines are not converted), and [(target, why)] for lines that do not parse (left out).
     Format (proc(5)): id parent major:minor root mount-point options [optional fields...] - fstype source
-    super-options."""
+    super-options.
+    Read only comes from the super-options (the filesystem itself), not from the per-mount options: a
+    sandboxed service (systemd ProtectSystem, a read-only bind mount) sees the host's writable
+    filesystems as read-only mounts in its own namespace, and that is a property of this process, not of
+    the filesystem it reports on."""
     mounts, bad = [], []
     for n, line in enumerate(text.split("\n"), 1):
         if not line.strip():
@@ -44,10 +48,11 @@ def parse_mountinfo(text, fstypes=None):
                 continue
             major, minor = (int(x) for x in f[2].split(":"))
             source = unescape(f[sep + 2])
+            read_only = "ro" in f[sep + 3].split(",")
         except (ValueError, IndexError):
             bad.append((f"line{n}", "invalid_data"))
             continue
-        mounts.append((major, minor, unescape(f[4]), "ro" in f[5].split(","), fstype, source))
+        mounts.append((major, minor, unescape(f[4]), read_only, fstype, source))
     return mounts, bad
 
 
