@@ -169,10 +169,13 @@ const clickGroup = prefix => el('history-groups').handlers.click({target: {close
   run('renderHistory()');
   const drawn = () => (el('hist').innerHTML.match(/data-series=/g) || []).length;
   assert.equal(drawn(), 21, 'every series of every kind on, with no cap');
+  assert.deepEqual(el('hist').innerHTML.match(/<h3>[^<]+<\/h3>/g), ['<h3>CPU cores</h3>', '<h3>RAM</h3>'],
+    'one section per kind, cores and RAM apart, in the button row order');
   assert(el('history-groups').innerHTML.includes('CPU cores 20') && el('history-groups').innerHTML.includes('RAM 1'));
   assert.equal((el('history-groups').innerHTML.match(/aria-pressed="true"/g) || []).length, 2);
   clickGroup('cpu/');
   assert.equal(drawn(), 1);
+  assert.deepEqual(el('hist').innerHTML.match(/<h3>[^<]+<\/h3>/g), ['<h3>RAM</h3>'], 'a kind that is off has no section');
   assert(el('history-groups').innerHTML.includes('data-group="cpu/" aria-pressed="false"'));
   clickGroup('memory/');
   assert.equal(drawn(), 0);

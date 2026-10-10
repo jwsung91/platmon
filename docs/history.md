@@ -92,8 +92,10 @@ With history on, the Resources, Network, Storage and Temperature & power tabs sh
 temperature, network, disk or low-frequency series: one graph per series, bounded by the endpoint's own
 series limit. A row of buttons above the graphs lists the kinds of series that view has with how many each
 covers ("CPU cores 22", "RAM 1"); a button turns its kind off and on, and a view with only one kind has no
-buttons. Turning every kind off leaves the buttons in place with a notice instead of graphs. The choice
-lasts while the page is open. Individual series are not selected one at a time. Each graph uses its own
+buttons. Each kind that is on gets its own labelled section, in the order of the button row, so a single
+RAM graph is never mixed into a wall of cores. Turning every kind off leaves the buttons in place with a
+notice instead of graphs. The choice lasts while the page is open. Individual series are not selected one
+at a time. Each graph uses its own
 scale and shows the latest value next to it, "no value" when the latest point is a gap; a gap breaks the
 line. Horizontal position uses actual elapsed age, not equally spaced indexes. Each row says the latest
 point age, advanced with browser elapsed time between responses; these are historical values, not a fresh live reading.

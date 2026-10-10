@@ -89,6 +89,7 @@ const history = {retention_s: 600, series: {
       const graph = await page.locator('#hist svg path.line').first().getAttribute('d');
       assert(graph.split('M').length > 2, 'missing buckets break paths');
       assert.equal(await page.locator('#history-groups button').count(), 2);
+      assert.deepEqual(await page.locator('#hist .hist-group h3').allInnerTexts(), ['CPU cores', 'RAM']);
       await page.locator('#history-groups button[data-group="cpu/"]').click();
       assert.equal(await page.locator('#hist svg').count(), 1);
       assert((await page.locator('#hist').innerText()).includes('RAM used'));

@@ -156,7 +156,9 @@
   #history-groups button { padding: 4px 10px; font-size: 12px; color: var(--muted); background: var(--card);
     border: 1px solid var(--border); border-radius: 999px; cursor: pointer; }
   #history-groups button[aria-pressed="true"] { color: var(--fg); border-color: var(--ok); font-weight: 600; }
-  #hist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+  #hist { display: flex; flex-direction: column; gap: 18px; }
+  .hist-group h3 { margin: 0 0 8px; font-size: 12px; font-weight: 650; color: var(--muted); }
+  .hist-group > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
   .chart { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
   .chart-head, .chart-foot { display: flex; justify-content: space-between; gap: 8px; }
   .chart-head { font-size: 13px; }
@@ -170,7 +172,7 @@
   .spark .area { fill: var(--ok); fill-opacity: .08; }
   .cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--muted); pointer-events: none; }
   .tip { position: absolute; bottom: 100%; margin-bottom: 4px; padding: 4px 8px; border-radius: 6px; background: var(--fg); color: var(--bg); font: 11px/1.3 var(--mono); white-space: nowrap; pointer-events: none; }
-  #hist > .muted { grid-column: 1 / -1; font-size: 12px; }
+  #hist > .muted { font-size: 12px; }
 
   .narrow { display: none; }
   @media (max-width: 639px) {
@@ -497,22 +499,31 @@ function spark(points) {
   close();
   return svg((area ? `<path class="area" d="${area}"/>` : '') + `<path class="line" d="${line}"/>`);
 }
+function chartOf(id, points, rule) {
+  const latest = points[points.length - 1], last = latest[2], vs = points.map(p => p[2]).filter(v => v != null);
+  const lo = vs.length && histValue(id, Math.min(...vs)), hi = vs.length && histValue(id, Math.max(...vs));
+  return `<div class="card chart"><div class="chart-head"><span>${esc(rule[1](id.match(rule[0])))}</span><span>${last == null ? 'no value' : histValue(id, last)}</span></div>` +
+    `<div class="plot" data-series="${esc(id)}">${spark(points)}</div>` +
+    `<div class="chart-foot"><span>${!vs.length ? '' : lo === hi ? lo : lo + ' – ' + hi}</span>` +
+    `<span data-history-age="${Number(latest[1])}">${historyAge(latest[1])}</span></div></div>`;
+}
+// One section per kind of series, in the button row's order: a single RAM graph never sits in a wall of cores.
 function histRows() {
   const series = hist && hist.series && typeof hist.series === 'object' ? hist.series : {};
-  const rows = [];
-  for (const [id, points] of Object.entries(series)) {
-    const rule = HIST_LABEL.find(([re]) => re.test(id));
-    if (!rule || !historyMatches(id) || histOff.has(histGroup(id))
-      || !Array.isArray(points) || !points.length) continue;
-    const latest = points[points.length - 1], last = latest[2], vs = points.map(p => p[2]).filter(v => v != null);
-    const lo = vs.length && histValue(id, Math.min(...vs)), hi = vs.length && histValue(id, Math.max(...vs));
-    rows.push(`<div class="card chart"><div class="chart-head"><span>${esc(rule[1](id.match(rule[0])))}</span><span>${last == null ? 'no value' : histValue(id, last)}</span></div>` +
-      `<div class="plot" data-series="${esc(id)}">${spark(points)}</div>` +
-      `<div class="chart-foot"><span>${!vs.length ? '' : lo === hi ? lo : lo + ' – ' + hi}</span>` +
-      `<span data-history-age="${Number(latest[1])}">${historyAge(latest[1])}</span></div></div>`);
+  const sections = [];
+  for (const [prefix, label] of HIST_GROUPS) {
+    if (histOff.has(prefix)) continue;
+    const rows = [];
+    for (const [id, points] of Object.entries(series)) {
+      const rule = HIST_LABEL.find(([re]) => re.test(id));
+      if (!rule || !historyMatches(id) || histGroup(id) !== prefix
+        || !Array.isArray(points) || !points.length) continue;
+      rows.push(chartOf(id, points, rule));
+    }
+    if (rows.length) sections.push(`<div class="hist-group"><h3>${esc(label)}</h3><div>${rows.join('')}</div></div>`);
   }
   // Every kind off leaves the panel with its buttons, so the viewer can turn one back on.
-  return rows.join('') || (histMatching().length ? '<div class="muted">Every group is off · turn one on above</div>' : '');
+  return sections.join('') || (histMatching().length ? '<div class="muted">Every group is off · turn one on above</div>' : '');
 }
 // The series this view can draw, labelled ones only: the list and the buttons agree on it.
 const histMatching = () => Object.keys((hist && hist.series && typeof hist.series === 'object' ? hist.series : {}))
