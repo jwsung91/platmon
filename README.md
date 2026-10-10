@@ -62,7 +62,8 @@ authentication. Run it on trusted networks only.
 
 The web page opens with an Overview of CPU, memory, available GPU, root filesystem capacity and the
 hottest temperature, each colored by level (warning from 80 %, critical from 90 %; temperatures
-from 85/95 °C on Jetson Orin, 75/80 °C on Raspberry Pi and 80/90 °C elsewhere; instantaneous values).
+from 85/95 °C on Jetson Orin, 75/80 °C on Raspberry Pi and 80/90 °C elsewhere; instantaneous values;
+set other levels in `[thresholds]` of `platmon.ini`).
 A Needs attention strip lists every reading at or above its warning level and links to its tab.
 CPU is the mean of measured cores; Network lists separate readings
 for up to four non-loopback interfaces, shows any omission count and links to the full Network tab.
@@ -83,7 +84,7 @@ polling until it returns. This does not pause the device's collector or history 
 
 To run the server in the foreground instead (e.g. while developing):
 `python3 platmon.py [platmon.ini]`. `platmon.ini` lists every option with its default (collection
-interval, collector on/off switches, HTTP bind/port, web page on/off).
+interval, collector on/off switches, HTTP bind/port, web page on/off, web page warning levels).
 All monitoring features default to enabled. Existing explicit `enabled = no` values still override
 the defaults; omitted sections adopt the new defaults. Unsupported hardware keeps its unavailable
 state. History uses memory only and retains 600 seconds by default. Probe stays idle until

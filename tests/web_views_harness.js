@@ -30,6 +30,7 @@ const flush = async () => { for (let n = 0; n < 6; n++) await new Promise(setImm
 const count = prefix => requests.filter(url => url.startsWith(prefix)).length;
 const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush(); };
 (async () => {
+  el('levels').textContent = JSON.stringify({gpu: [70, 85]});  // as the server fills it in from [thresholds]
   run(code); await flush();
   assert.equal(count('api/stats'), 1);
   assert.equal(count('api/history'), 0, 'overview does not request graphs');
@@ -46,6 +47,11 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   assert(orin.includes('pill warn') && !orin.includes('pill crit'), 'Jetson Orin warns from 85 °C, critical from 95 °C');
   assert(attention({platform: 'Raspberry Pi', temperature: {cpu: 82}}).includes('pill crit'), 'Raspberry Pi is critical from 80 °C');
   assert(attention({platform: 'PC', temperature: {cpu: 82}}).includes('pill warn'), 'other boards warn from 80 °C');
+  assert(attention({gpu: {usage: 75, freq: null}}).includes('href="#resources">GPU'), 'configured GPU level: warns from 70 %');
+  assert(!full.includes('href="#resources">CPU'), 'unset levels keep their defaults');
+  run('LIMITS.temperature = [60, 70]');
+  assert(attention({platform: 'Jetson Orin', temperature: {cpu: 65}}).includes('pill warn'), 'a configured temperature level replaces the board default');
+  run('LIMITS.temperature = null');
   assert(el('overview').innerHTML.includes('eth0') && !el('overview').innerHTML.includes('999999'));
   const networkOverview = interfaces => run('overviewRows({...latestStats, network: ' + JSON.stringify({interfaces}) + '})');
   const rate = (name, rx) => ({name, rates: {rx_bytes_per_s: rx, tx_bytes_per_s: 0}});

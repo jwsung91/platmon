@@ -15,3 +15,5 @@ API schema versions are independent of release versions.
 - Web viewer redesign: sticky header with a Live/Partial/Offline status, banners for connection loss and partial
   collection, warning/critical levels with threshold ticks, a Needs attention strip, tables, chart hover readout,
   a bottom tab bar on narrow screens and the running version in the footer.
+- `[thresholds]` in `platmon.ini` sets the web page's warning and critical levels; an empty temperature keeps
+  the board default.
