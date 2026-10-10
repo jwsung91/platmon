@@ -15,7 +15,7 @@ fs.mkdirSync(output, {recursive: true});
    await page.waitForFunction(() => document.querySelector('#overview').textContent.includes('CPU'));
    await page.waitForTimeout(1500);
    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-   assert(await page.locator('.brand img').evaluate(img => img.complete && img.naturalWidth > 0));
+   assert(await page.locator('.identity img').evaluate(img => img.complete && img.naturalWidth > 0));
    await page.screenshot({path: path.join(output, `live-${width}.png`), fullPage: true});
   }
   await page.locator('#tab-network').click(); // exercise optional endpoints during the soak

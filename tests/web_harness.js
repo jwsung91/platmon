@@ -51,11 +51,12 @@ global.fetch = (url, opts) => {
   fetches++; return answers.shift()((opts || {}).signal);
 };
 const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
-const report = step => { captureViews(); console.log(JSON.stringify({
-  step, err: el('err').textContent, age: el('age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
+let views = {};
+const report = step => { views = captureViews(); console.log(JSON.stringify({
+  step, err: el('err').textContent, age: el('status').title, status: el('status').textContent, err_age: el('err-age').textContent, shows_data: el('cpu').innerHTML.includes('CPU0'),
   refresh_scheduled: timers.filter(t => t.fn && (t.ms === 1000 || t.ms === 0)).length,  // next update, normal or at once
   age_timers: intervals.length, fetches, cpu: el('cpu').innerHTML, coll: el('coll').textContent,
-  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches,
+  net: el('net').innerHTML, dio: el('dio').innerHTML, psi: el('psi').innerHTML, sto: el('sto').innerHTML, wifi: el('wifi').innerHTML, probe: el('probe').innerHTML, hist: el('hist').innerHTML, hist_fetches: histFetches, obs_fetches: obsFetches, ...views,
 })); };
 const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1000); await settle(); if (step) report(step); };
 
@@ -100,6 +101,8 @@ const next = async (answer, step) => { answers.push(answer); now += 1000; fire(1
       const saved = activeTab; let all = '';
       for (const tab of TABS.slice(1)) { activeTab = tab; all += histRows(); }
       activeTab = saved; $('hist').innerHTML = all;
+      return {net_cap: latestStats ? netCaption(latestStats) : '',
+        obs_age: Object.fromEntries(['storage', 'wifi', 'probe'].map(g => [g, observationAge(g)]))};
     };
   `);
   await settle(); report('ok');

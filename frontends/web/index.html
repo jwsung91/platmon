@@ -2,146 +2,301 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>platmon</title>
 <link rel="icon" type="image/svg+xml" href="assets/brand/favicon.svg">
 <style>
-  :root { --bg: #f6f7f9; --card: #fff; --fg: #1d2127; --muted: #6b7280; --track: #e5e7eb; --bar: #2f7d5b; --warn: #c2410c; }
+  :root {
+    --bg: #f6f7f9; --card: #fff; --fg: #1d2127; --muted: #6b7280; --border: #e5e7eb; --line: #f1f2f4;
+    --track: #eef0f2; --tile: #f6f7f9; --header: rgba(246, 247, 249, .94);
+    --ok: #2f7d5b; --ok-text: #2f7d5b; --ok-bg: #e8f2ed;
+    --warn: #d9a21b; --warn-text: #8a6100; --warn-bg: #fdf5d3;
+    --crit: #c62828; --crit-text: #a11d1d; --crit-bg: #fdecec;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    color-scheme: light dark;
+  }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #121417; --card: #1c1f24; --fg: #e6e8eb; --muted: #9aa1ab; --track: #2c3037; --bar: #4fb286; --warn: #f0883e; }
+    :root {
+      --bg: #121417; --card: #1c1f24; --fg: #e6e8eb; --muted: #9aa1ab; --border: #2c3037; --line: #24282e;
+      --track: #2c3037; --tile: #23272d; --header: rgba(18, 20, 23, .92);
+      --ok: #4fb286; --ok-text: #4fb286; --ok-bg: #1b3328;
+      --warn: #e3b341; --warn-text: #e3b341; --warn-bg: #3a3013;
+      --crit: #f47067; --crit-text: #f47067; --crit-bg: #3d1f1f;
+    }
   }
   * { box-sizing: border-box; }
-  body { margin: 0 auto; max-width: 1320px; padding: 24px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
   [hidden] { display: none !important; }
-  header { margin-bottom: 24px; }
-  .brand { display: block; margin-bottom: 12px; }
-  .brand img { display: block; width: 176px; max-width: 100%; height: auto; }
-  h1 { font-size: 24px; margin: 0 0 4px; overflow-wrap: anywhere; }
-  .heading { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  #status { border: 1px solid var(--track); border-radius: 20px; padding: 3px 12px; font-weight: 600; }
-  #status[data-state="warning"] { color: var(--warn); }
-  .muted { color: var(--muted); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; }
-  section, .metric { background: var(--card); border: 1px solid var(--track); border-radius: 12px; padding: 18px; min-width: 0; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
-  .tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--track); margin-bottom: 20px; }
-  .tab-hint { display: none; margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); }
   button, select { font: inherit; color: inherit; }
-  .tabs button { white-space: nowrap; border: 0; border-bottom: 3px solid transparent; padding: 12px 16px; background: transparent; cursor: pointer; }
-  .tabs [aria-selected="true"] { border-bottom-color: var(--bar); color: var(--bar); font-weight: 700; }
-  :focus-visible { outline: 2px solid var(--bar); outline-offset: 3px; }
-  .summary { grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); }
-  .metric strong { display: block; font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; margin: 8px 0; }
-  .metric small { display: block; color: var(--muted); overflow-wrap: anywhere; }
-  .metric h2 { margin: 0; overflow-wrap: anywhere; }
-  #overview-network-details a { color: var(--bar); }
-  .empty { padding: 16px 0; color: var(--muted); }
-  #history-panel { margin-top: 20px; }
-  .history-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px; }
-  .history-heading h2 { margin: 0; }
-  select { max-width: 100%; padding: 6px; background: var(--card); border: 1px solid var(--track); border-radius: 6px; }
-  #hist { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
-  .history-caption { grid-column: 1 / -1; }
-  .history-series { min-width: 0; }
-  .row { display: grid; grid-template-columns: 48px 1fr auto; gap: 8px; align-items: center; margin: 4px 0; font-variant-numeric: tabular-nums; }
-  .track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
-  .fill { height: 100%; background: var(--bar); }
-  .fill.hot { background: var(--warn); }
-  .spark { display: block; width: 100%; height: 56px; margin-top: 8px; }
-  .spark path { fill: none; stroke: var(--bar); stroke-width: 1.5; }
-  .kv span:first-child { overflow-wrap: anywhere; min-width: 0; margin-right: 8px; }
-  .kv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 8px; margin: 8px 0; font-variant-numeric: tabular-nums; }
-  .kv span:last-child { text-align: right; overflow-wrap: anywhere; }
-  #err, #coll { color: var(--warn); }
-  .system-card { max-width: 800px; }
-  #coll, #err { overflow-wrap: anywhere; }
-  @media (max-width: 540px) { body { padding: 16px; } section, .metric { padding: 14px; } .tabs button { padding: 10px 12px; } }
-  @media (max-width: 540px) { .tab-hint { display: block; } }
+  :focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; }
+  a { color: var(--ok); text-decoration: none; }
+  a:hover { color: var(--fg); }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+
+  /* header: the blur sits on a pseudo-element, so the narrow fixed tab bar is not contained by the header */
+  header { position: sticky; top: 0; z-index: 5; border-bottom: 1px solid var(--border); }
+  header::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--header); backdrop-filter: blur(8px); }
+  .head, main, footer { max-width: 1200px; margin: 0 auto; }
+  .head { padding: 14px 24px 0; display: flex; flex-direction: column; gap: 10px; }
+  .head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+  .identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .identity img { display: block; width: 30px; height: 30px; flex: none; }
+  h1 { margin: 0; font-size: 16px; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
+  #subtitle { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+  #status { color: var(--muted); background: var(--track); }
+  #status[data-state="live"] { color: var(--ok-text); background: var(--ok-bg); }
+  #status[data-state="partial"] { color: var(--warn-text); background: var(--warn-bg); }
+  #status[data-state="offline"] { color: var(--crit-text); background: var(--crit-bg); }
+
+  .tabs { display: flex; gap: 4px; overflow-x: auto; margin: 0 -4px; }
+  .tabs button { flex: none; border: 0; background: transparent; padding: 10px 12px 11px; cursor: pointer; white-space: nowrap; color: var(--muted); font-weight: 500; }
+  .tabs button:hover { color: var(--fg); }
+  .tabs [aria-selected="true"] { color: var(--fg); font-weight: 650; box-shadow: inset 0 -2px 0 var(--ok); }
+
+  main { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+  main > * { transition: opacity .3s; }
+  main[data-offline="true"] > :not(.banner) { opacity: .45; }
+  [role="tabpanel"] { display: flex; flex-direction: column; gap: 16px; }
+  .banner { margin: 0; padding: 12px 16px; border-radius: 10px; font-size: 13px; overflow-wrap: anywhere; }
+  .banner strong { font-weight: 650; margin-right: 10px; }
+  .banner.crit { background: var(--crit-bg); color: var(--crit-text); }
+  .banner.warn { background: var(--warn-bg); color: var(--warn-text); }
+  footer { padding: 8px 24px 32px; text-align: right; font: 12px/1.4 var(--mono); color: var(--muted); }
+
+  /* cards */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; min-width: 0; }
+  .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  h2 { margin: 0; font-size: 14px; font-weight: 650; }
+  .cap { font-size: 12px; color: var(--muted); }
+  .note { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+  .empty-card { padding: 48px 24px; text-align: center; }
+  .empty-card h2 { font-size: 15px; margin-bottom: 6px; }
+  .empty-card p { margin: 0 auto; max-width: 440px; font-size: 13px; color: var(--muted); }
+  .chip { font: 600 11px/1 var(--mono); padding: 5px 8px; border-radius: 6px; background: var(--ok-bg); color: var(--ok); }
+  .badge { font: 600 10px/1 var(--mono); padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted); }
+
+  /* bars: threshold ticks read as small gaps */
+  .bar { position: relative; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 3px; background: var(--ok); transition: width .4s; }
+  .bar > div.warn { background: var(--warn); }
+  .bar > div.crit { background: var(--crit); }
+  .bar > span { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--card); }
+  .t-warn { color: var(--warn-text) !important; }
+  .t-crit { color: var(--crit-text) !important; }
+
+  /* tables */
+  .table { overflow-x: auto; }
+  .tr { display: grid; grid-template-columns: var(--cols); gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line); font: 13px/1.4 var(--mono); }
+  .tr > span { min-width: 0; overflow-wrap: anywhere; }
+  .tr > span:not(:first-child) { text-align: right; }
+  .tr.th { padding: 6px 0; font: 12px/1.5 var(--sans); color: var(--muted); border-bottom-color: var(--track); }
+  .tr.idle { opacity: .45; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .kv > span:first-child { color: var(--muted); overflow-wrap: anywhere; }
+  .kv > span:last-child { font-family: var(--mono); text-align: right; overflow-wrap: anywhere; }
+
+  /* overview */
+  /* the #overview link also names this element: keep the browser from scrolling it under the sticky header */
+  #overview { display: flex; flex-direction: column; gap: 16px; scroll-margin-top: 100vh; }
+  .attention { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 12px 16px; font-size: 13px; }
+  .attention strong { font-weight: 650; margin-right: 4px; }
+  .attention .pill { font-size: 13px; }
+  .attention .warn { background: var(--warn-bg); color: var(--warn-text); }
+  .attention .crit { background: var(--crit-bg); color: var(--crit-text); }
+  .attention .warn::before { background: var(--warn); }
+  .attention .crit::before { background: var(--crit); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; }
+  .metric { display: flex; flex-direction: column; gap: 10px; }
+  .metric-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+  .metric-head span:first-child { font-weight: 600; }
+  .metric-head span:last-child { color: var(--muted); overflow-wrap: anywhere; text-align: right; }
+  .value { font: 600 32px/1 var(--mono); letter-spacing: -.02em; }
+  .unit { font-size: 16px; color: var(--muted); margin-left: 2px; }
+  .detail { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+  /* resources */
+  .cores { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
+  .core { background: var(--tile); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; white-space: nowrap; }
+  .core > span:first-child { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .core strong { font: 600 18px/1 var(--mono); }
+  .core .bar { height: 4px; background: var(--border); }
+  .core > span:last-child { font: 11px/1 var(--mono); color: var(--muted); }
+  #cpu > .muted { margin-top: 10px; font-size: 12px; }
+  .meters { display: flex; flex-direction: column; gap: 14px; }
+  .meter { display: flex; flex-direction: column; gap: 6px; }
+  .meter-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+  .meter-head span:last-child { font-family: var(--mono); color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+
+  /* storage, temperature, system */
+  .fs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 6px 24px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .fs-name { display: flex; align-items: center; gap: 8px; min-width: 0; font: 600 13px/1.4 var(--mono); }
+  .fs-name span:first-child { overflow-wrap: anywhere; min-width: 0; }
+  .fs .meter-head { font: 12px/1.5 var(--mono); }
+  h3 { margin: 18px 0 4px; font-size: 13px; font-weight: 650; }
+  .temps { display: flex; flex-direction: column; gap: 12px; }
+  .temp { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr) 72px; gap: 12px; align-items: center; font-size: 13px; }
+  .temp > span:first-child { overflow-wrap: anywhere; }
+  .temp > span:last-child { font-family: var(--mono); text-align: right; }
+  .system-card { max-width: 760px; padding: 6px 18px; }
+  .sys { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .sys > span:first-child { color: var(--muted); overflow-wrap: anywhere; }
+  .sys > span:last-child { font-family: var(--mono); overflow-wrap: anywhere; }
+
+  /* history */
+  #history-panel { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+  .history-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; }
+  .history-heading > div { display: flex; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; }
+  select { max-width: 100%; padding: 4px 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; }
+  #hist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+  .chart { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .chart-head, .chart-foot { display: flex; justify-content: space-between; gap: 8px; }
+  .chart-head { font-size: 13px; }
+  .chart-head span:first-child { overflow-wrap: anywhere; }
+  .chart-head span:last-child { font: 600 13px/1.5 var(--mono); white-space: nowrap; }
+  .chart-foot { font: 11px/1.3 var(--mono); color: var(--muted); flex-wrap: wrap; }
+  .chart-foot span { white-space: nowrap; }
+  .plot { position: relative; touch-action: pan-y; }
+  .spark { display: block; width: 100%; height: 56px; }
+  .spark .line { fill: none; stroke: var(--ok); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+  .spark .area { fill: var(--ok); fill-opacity: .08; }
+  .cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--muted); pointer-events: none; }
+  .tip { position: absolute; bottom: 100%; margin-bottom: 4px; padding: 4px 8px; border-radius: 6px; background: var(--fg); color: var(--bg); font: 11px/1.3 var(--mono); white-space: nowrap; pointer-events: none; }
+  #hist > .muted { grid-column: 1 / -1; font-size: 12px; }
+
+  .narrow { display: none; }
+  @media (max-width: 639px) {
+    .head { padding: 12px 16px; }
+    main { padding: 16px; }
+    footer { padding: 8px 16px 88px; }
+    .wide { display: none; }
+    .narrow { display: inline; }
+    /* one set of tab buttons: the same tablist becomes a fixed bottom bar */
+    .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; margin: 0; gap: 0; overflow: hidden;
+      display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); background: var(--header); backdrop-filter: blur(8px);
+      border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
+    .tabs button { min-height: 56px; padding: 6px 2px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+    .tabs [aria-selected="true"] { color: var(--ok-text); box-shadow: inset 0 2px 0 var(--ok); }
+    .card { padding: 14px; }
+    .system-card { padding: 4px 14px; }
+    .sys { grid-template-columns: 110px minmax(0, 1fr); }
+  }
 </style>
 </head>
 <body>
 <header>
-  <picture class="brand">
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/platmon-logo-dark.svg">
-    <img src="assets/brand/platmon-logo-light.svg" alt="platmon" width="220" height="63">
-  </picture>
-  <div class="heading"><h1 id="model">Platform status</h1><span id="status" role="status">Connecting</span></div>
-  <div class="muted" id="age"></div>
-  <div id="coll"></div>
-  <div id="err"></div>
-</header>
-<main>
-  <p class="tab-hint" id="tab-hint">↔ Swipe left or right to see all tabs</p>
-  <div class="tabs" role="tablist" aria-label="Monitoring views" aria-describedby="tab-hint">
-    <button id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true">Overview</button>
-    <button id="tab-resources" role="tab" aria-controls="panel-resources" aria-selected="false" tabindex="-1">Resources</button>
-    <button id="tab-network" role="tab" aria-controls="panel-network" aria-selected="false" tabindex="-1">Network</button>
-    <button id="tab-storage" role="tab" aria-controls="panel-storage" aria-selected="false" tabindex="-1">Storage</button>
-    <button id="tab-thermal" role="tab" aria-controls="panel-thermal" aria-selected="false" tabindex="-1">Temperature & power</button>
-    <button id="tab-system" role="tab" aria-controls="panel-system" aria-selected="false" tabindex="-1">System</button>
+  <div class="head">
+    <div class="head-row">
+      <div class="identity">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="assets/brand/platmon-icon-dark.svg">
+          <img src="assets/brand/platmon-icon-light.svg" alt="platmon" width="30" height="30">
+        </picture>
+        <div><h1 id="model">Platform status</h1><div id="subtitle"></div></div>
+      </div>
+      <span id="status" class="pill" role="status" data-state="idle">Connecting</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Monitoring views">
+      <button id="tab-overview" role="tab" aria-controls="panel-overview" aria-selected="true">Overview</button>
+      <button id="tab-resources" role="tab" aria-controls="panel-resources" aria-selected="false" tabindex="-1">Resources</button>
+      <button id="tab-network" role="tab" aria-controls="panel-network" aria-selected="false" tabindex="-1">Network</button>
+      <button id="tab-storage" role="tab" aria-controls="panel-storage" aria-selected="false" tabindex="-1">Storage</button>
+      <button id="tab-thermal" role="tab" aria-controls="panel-thermal" aria-selected="false" tabindex="-1" aria-label="Temperature &amp; power">Temp<span class="wide"> &amp; power</span></button>
+      <button id="tab-system" role="tab" aria-controls="panel-system" aria-selected="false" tabindex="-1">System</button>
+    </nav>
   </div>
+</header>
+<main id="main" data-offline="false">
+  <p id="err-banner" class="banner crit" hidden><strong>Not current</strong><span id="err"></span><span id="err-age"></span></p>
+  <p id="coll-banner" class="banner warn" hidden><strong>Collection</strong><span id="coll"></span></p>
   <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
-    <div id="overview" class="grid summary"><p class="empty">Waiting for data…</p></div>
-    <p id="overview-network-details" hidden><a href="#network">All network interfaces and details →</a></p>
+    <div id="overview"><p class="muted">Waiting for data…</p></div>
   </div>
   <div id="panel-resources" role="tabpanel" aria-labelledby="tab-resources" tabindex="0" hidden>
+    <section class="card" data-card hidden><div class="card-head"><h2>CPU cores</h2><span class="cap" id="cpu-cap"></span></div><div id="cpu"></div></section>
     <div class="grid">
-      <section data-card hidden><h2>CPU cores</h2><div id="cpu"></div></section>
-      <section data-card hidden><h2>GPU & memory</h2><div id="res"></div></section>
-      <section data-card hidden><h2>Resource pressure</h2><div id="psi"></div></section>
+      <section class="card" data-card hidden><div class="card-head"><h2>GPU &amp; memory</h2></div><div id="res"></div></section>
+      <section class="card" data-card hidden><div class="card-head"><h2>Resource pressure</h2><span class="cap">Share of time stalled · avg10</span></div><div id="psi"></div></section>
     </div>
   </div>
   <div id="panel-network" role="tabpanel" aria-labelledby="tab-network" tabindex="0" hidden>
-    <p id="network-empty" class="empty">No network data available.</p>
+    <section id="network-empty" class="card empty-card"><h2>No network data</h2>
+      <p>No interface, Wi-Fi or TCP connect readings are available. They appear here automatically when collected.</p></section>
+    <section class="card" data-card hidden><div class="card-head"><h2>Interfaces</h2><span class="cap" id="net-cap"></span></div><div id="net"></div></section>
     <div class="grid">
-      <section data-card hidden><h2>Interfaces</h2><div id="net"></div></section>
-      <section data-card hidden><h2>Wi-Fi</h2><div id="wifi"></div></section>
-      <section data-card hidden><h2>TCP connect</h2><div id="probe"></div></section>
+      <section class="card" data-card hidden><div class="card-head"><h2>Wi-Fi</h2><span class="cap" data-observation-age="wifi"></span></div><div id="wifi"></div></section>
+      <section class="card" data-card hidden><div class="card-head"><h2>TCP connect</h2><span class="cap" data-observation-age="probe"></span></div><div id="probe"></div></section>
     </div>
   </div>
   <div id="panel-storage" role="tabpanel" aria-labelledby="tab-storage" tabindex="0" hidden>
-    <div class="grid">
-      <section data-card hidden><h2>Root filesystem</h2><div id="root-disk"></div></section>
-      <section data-card hidden><h2>Disk I/O</h2><div id="dio"></div></section>
-      <section data-card hidden><h2>Filesystems & partitions</h2><div id="sto"></div></section>
-    </div>
+    <section class="card" data-card hidden><div class="card-head"><h2>Filesystems</h2><span class="cap" data-observation-age="storage"></span></div><div id="sto"></div></section>
+    <section class="card" data-card hidden><div class="card-head"><h2>Disk I/O</h2><span class="cap">I/O time = share of window with I/O in flight</span></div><div id="dio"></div></section>
   </div>
   <div id="panel-thermal" role="tabpanel" aria-labelledby="tab-thermal" tabindex="0" hidden>
-    <p id="thermal-empty" class="empty">No temperature, power or fan data available.</p>
+    <section id="thermal-empty" class="card empty-card"><h2>No temperature, power or fan data</h2>
+      <p>This board reports no thermal zones, power rails or fans. Readings appear here automatically when the hardware exposes them.</p></section>
     <div class="grid">
-      <section data-card hidden><h2>Temperature</h2><div id="temp"></div></section>
-      <section data-card hidden><h2>Power & fans</h2><div id="pwr"></div></section>
+      <section class="card" data-card hidden><div class="card-head"><h2>Temperature</h2><span class="cap">Bar scale 0–100 °C</span></div><div id="temp"></div></section>
+      <section class="card" data-card hidden><div class="card-head"><h2>Power &amp; fans</h2><span id="pwr-cap"></span></div><div id="pwr"></div></section>
     </div>
   </div>
   <div id="panel-system" role="tabpanel" aria-labelledby="tab-system" tabindex="0" hidden>
-    <section class="system-card">
-      <h2>System information</h2>
-      <div class="kv" id="system-platform-row" hidden><span>Platform</span><span id="system-platform"></span></div>
-      <div class="kv" id="system-uptime-row" hidden><span>Uptime</span><span id="system-uptime"></span></div>
-      <div class="kv" id="system-os-row" hidden><span>OS</span><span id="system-os"></span></div>
-      <div class="kv" id="system-kernel-row" hidden><span>Kernel</span><span id="system-kernel"></span></div>
-      <div class="kv" id="system-arch-row" hidden><span>Architecture</span><span id="system-arch"></span></div>
-      <div class="kv" id="system-hostname-row" hidden><span>Hostname</span><span id="system-hostname"></span></div>
-      <div class="kv" id="system-l4t-row" hidden><span>L4T</span><span id="system-l4t"></span></div>
+    <section class="card system-card" aria-label="System information">
+      <div class="sys" id="system-platform-row" hidden><span>Platform</span><span id="system-platform"></span></div>
+      <div class="sys" id="system-uptime-row" hidden><span>Uptime</span><span id="system-uptime"></span></div>
+      <div class="sys" id="system-os-row" hidden><span>OS</span><span id="system-os"></span></div>
+      <div class="sys" id="system-kernel-row" hidden><span>Kernel</span><span id="system-kernel"></span></div>
+      <div class="sys" id="system-arch-row" hidden><span>Architecture</span><span id="system-arch"></span></div>
+      <div class="sys" id="system-hostname-row" hidden><span>Hostname</span><span id="system-hostname"></span></div>
+      <div class="sys" id="system-l4t-row" hidden><span>L4T</span><span id="system-l4t"></span></div>
       <div id="system-extra"></div>
     </section>
   </div>
   <section id="history-panel" aria-labelledby="history-title" hidden>
     <div class="history-heading"><h2 id="history-title">Recent history</h2>
-      <label for="history-series">Series</label><select id="history-series"><option value="">All in this view</option></select>
+      <div><span class="cap" id="history-cap"></span>
+        <label class="cap" for="history-series">Series</label><select id="history-series"><option value="">All in this view</option></select></div>
     </div>
-    <p class="muted">Each graph uses its own scale. Gaps mean unavailable samples.</p>
     <div id="hist"></div>
   </section>
 </main>
+<footer>platmon v@VERSION@</footer>
 <script>
 const $ = id => document.getElementById(id);
 const gib = b => (b / 2 ** 30).toFixed(1) + 'G';
-const row = (label, pct, text) =>
-  `<div class="row"><span>${label}</span><div class="track"><div class="fill${pct > 85 ? ' hot' : ''}" style="width:${Math.min(pct, 100)}%"></div></div><span>${text}</span></div>`;
 const SYSTEM_FIELDS = ['os', 'kernel', 'arch', 'hostname', 'l4t'];
-const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
 const esc = v => String(v).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
+// a grid table: cols is the CSS column template; a row is its cells' HTML, idle rows are dimmed
+const tr = (cells, cls = '') => `<div class="tr${cls}">${cells.map(c => `<span>${c}</span>`).join('')}</div>`;
+const table = (cols, head, rows, minWidth = 0) => `<div class="table"><div style="--cols:${cols}${minWidth ? `;min-width:${minWidth}px` : ''}">` +
+  tr(head, ' th') + rows.join('') + '</div></div>';
+const muted = text => `<span class="muted">${text}</span>`;
+
+// Status levels: ok below warn, warn from warn, crit from crit. Instantaneous values, no persistence.
+// CPU/GPU/filesystem: common monitoring defaults. Temperatures: below the board's throttling points
+// (Jetson Orin software throttling ≈99 °C; Raspberry Pi Arm throttling from 80 °C), else a generic fallback.
+const LIMITS = {cpu: [80, 90], gpu: [80, 90], memory: [80, 90], fs: [80, 90]};
+const TEMP_LIMITS = {'Jetson Orin': [85, 95], 'Raspberry Pi': [75, 80]};
+const tempLimits = s => TEMP_LIMITS[s.platform] || [80, 90];
+const level = (v, [warn, crit]) => v >= crit ? 'crit' : v >= warn ? 'warn' : 'ok';
+const textLevel = lv => lv === 'ok' ? '' : ' t-' + lv;
+const pctOf = (used, total) => total ? 100 * used / total : 0;
+// a bar on a 0–100 scale; limits add the level color and, unless ticks is false, two threshold ticks
+const bar = (pct, limits, ticks = true) => `<div class="bar"><div class="${limits ? level(pct, limits) : 'ok'}" style="width:${Math.max(0, Math.min(pct, 100)).toFixed(1)}%"></div>` +
+  (limits && ticks ? limits.map(t => `<span style="left:${t}%"></span>`).join('') : '') + '</div>';
+const meter = (label, text, pct, limits) =>
+  `<div class="meter"><div class="meter-head"><span>${label}</span><span>${text}</span></div>${bar(pct, limits)}</div>`;
+const mhz = hz => hz ? (hz / 1e6).toFixed(0) + ' MHz' : '';
+const uptimeText = seconds => {
+  const up = Math.floor(seconds);
+  return `${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`;
+};
+
 const TABS = ['overview', 'resources', 'network', 'storage', 'thermal', 'system'];
 let activeTab = 'overview', latestStats = null;
 const wantsObs = () => activeTab === 'network' || activeTab === 'storage';
@@ -183,31 +338,36 @@ const perS = v => {
   while (Math.abs(v) >= 1024 && i < 3) { v /= 1024; i++; }
   return (i ? v.toFixed(1) : v.toFixed(0)) + ' ' + ['B/s', 'KiB/s', 'MiB/s', 'GiB/s'][i];
 };
-const windowText = x => Number.isFinite(x.window_ms) ? ` · window ${(x.window_ms / 1000).toFixed(3)} s` : '';
 const why = x => esc(RATE_REASONS[x.reason] || x.reason);
 const listOf = (obj, key) => obj && Array.isArray(obj[key]) ? obj[key] : [];
+const idle = r => r && !r.rx_bytes_per_s && !r.tx_bytes_per_s ? ' idle' : '';
+const netCaption = s => {
+  const timed = listOf(s.network, 'interfaces').find(i => Number.isFinite(i.window_ms));
+  return "This process's network namespace" + (timed ? ` · window ${(timed.window_ms / 1000).toFixed(3)} s` : '') + ' · errors and drops are totals';
+};
 function netRows(s) {
   const items = listOf(s.network, 'interfaces');
-  return items.length ? '<div class="muted">bytes/s · this process\'s network namespace</div>' + items.map(i => {
-    const r = i.rates, bad = ['errors', 'dropped'].filter(k => i.rx[k] || i.tx[k]).map(k => `${k} ${i.rx[k]}/${i.tx[k]}`);
-    return kv(esc(i.name), r ? `rx ${perS(r.rx_bytes_per_s)} · tx ${perS(r.tx_bytes_per_s)}` : why(i)) +
-      (r ? `<div class="muted">rx ${r.rx_packets_per_s.toFixed(1)} · tx ${r.tx_packets_per_s.toFixed(1)} packets/s${windowText(i)}</div>` : '') +
-      (bad.length ? `<div class="muted">${bad.join(' · ')} (rx/tx, total)</div>` : '');
-  }).join('') : '';
+  return items.length ? table('minmax(90px, 1fr) 110px 110px 150px 110px',
+    ['Interface', '↓ Receive', '↑ Send', 'Packets/s rx · tx', 'Errors · drops'], items.map(i => {
+      const r = i.rates, total = k => ((i.rx || {})[k] || 0) + ((i.tx || {})[k] || 0);
+      const errs = `${total('errors')} · ${total('dropped')}`;
+      return tr([esc(i.name), r ? perS(r.rx_bytes_per_s) : why(i), r ? perS(r.tx_bytes_per_s) : '',
+        r ? muted(`${r.rx_packets_per_s.toFixed(1)} · ${r.tx_packets_per_s.toFixed(1)}`) : '',
+        total('errors') || total('dropped') ? `<span class="t-warn">${errs}</span>` : muted(errs)], idle(r));
+    }), 600) : '';
 }
 function diskRows(s) {
   const items = listOf(s.disk_io, 'disks');
-  return items.map(d => {
-    const r = d.rates;
-    return kv(esc(d.name), r ? `read ${perS(r.read_bytes_per_s)} · write ${perS(r.write_bytes_per_s)}` : why(d)) +
-      (r ? `<div class="muted">reads ${r.reads_per_s.toFixed(1)}/s · writes ${r.writes_per_s.toFixed(1)}/s · I/O time ${(100 * r.io_time_ratio).toFixed(1)}%` +
-        windowText(d) + '</div>' : '') +
-      (d.in_flight != null ? `<div class="muted">in flight ${d.in_flight}</div>` : '');
-  }).join('');
+  return items.length ? table('minmax(90px, 1fr) 110px 110px 140px 80px', ['Disk', 'Read', 'Write', 'Ops/s r · w', 'I/O time'],
+    items.map(d => {
+      const r = d.rates;
+      return tr([esc(d.name), r ? perS(r.read_bytes_per_s) : why(d), r ? perS(r.write_bytes_per_s) : '',
+        r ? muted(`${r.reads_per_s.toFixed(1)} · ${r.writes_per_s.toFixed(1)}`) : '', r ? (100 * r.io_time_ratio).toFixed(1) + '%' : '']);
+    }), 560) : '';
 }
 
 // Low-frequency groups (/api/observations) change on their own cadence: asked for at most every 10 s, only
-// while a view needs them, on the same 1 s timer as the age line; a 404 is not asked again.
+// while a view needs them, on the same 1 s timer as the age display; a 404 is not asked again.
 // Their age is the server's data_age_ms plus browser time since that answer, like the sample age.
 let obs = null, obsAt = 0, obsAsked = -Infinity, obsSupported = true, obsRequest = null;
 async function pollObs() {
@@ -238,38 +398,45 @@ function observationAge(group) {
   const age = Math.round((g.observation.data_age_ms + performance.now() - obsAt) / 1000);
   return `observed ${age} s ago${observationStale(g) ? ' (not current)' : ''}`;
 }
-const observationCaption = group => `<div class="muted" data-observation-age="${group}">${observationAge(group)}</div>`;
 // TCP connect time to the configured targets (not ICMP ping): the latest attempt, and recent failures
 function probeRows() {
   const g = obs && obs.groups && obs.groups.probe, o = g && g.observation, d = g && g.data;
   const items = d && Array.isArray(d.targets) ? d.targets : [];
   if (!o || !items.length) return '';
-  return observationCaption('probe') + items.map(t =>
-    kv(esc(t.address.includes(':') ? `[${t.address}]:${t.port}` : `${t.address}:${t.port}`),
-      (t.connect_ms != null ? t.connect_ms.toFixed(1) + ' ms' : esc(t.reason)) + ` · failed ${t.failures}/${t.attempts}`)).join('');
+  return table('minmax(0, 1fr) 80px 80px', ['Target', 'Latest', 'Failed'], items.map(t =>
+    tr([esc(t.address.includes(':') ? `[${t.address}]:${t.port}` : `${t.address}:${t.port}`),
+      t.connect_ms != null ? t.connect_ms.toFixed(1) + ' ms' : esc(t.reason),
+      `<span class="${t.failures ? 't-warn' : 'muted'}">${t.failures}/${t.attempts}</span>`])));
 }
-// the signal while connected, never the last one after; a value without dBm is shown without a unit
+// the signal while connected, never the last one after; a value without dBm is shown without a unit or bar
 function wifiRows() {
   const g = obs && obs.groups && obs.groups.wifi, o = g && g.observation, d = g && g.data;
   const items = d && Array.isArray(d.interfaces) ? d.interfaces : [];
   if (!o || !items.length) return '';
-  return observationCaption('wifi') + items.map(i => kv(esc(i.name),
-    i.connected !== true ? (i.connected === false ? 'not connected' : esc(i.connection_state || 'unknown')) : i.signal_dbm != null ? i.signal_dbm + ' dBm'
-      : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a') +
-    (i.connected && i.link_quality != null ? `<div class="muted">link quality ${i.link_quality}</div>` : '')).join('');
+  return '<div class="meters">' + items.map(i => {
+    const state = i.connected !== true ? (i.connected === false ? 'not connected' : esc(i.connection_state || 'unknown'))
+      : i.signal_dbm != null ? i.signal_dbm + ' dBm' : i.signal_raw != null ? `signal ${i.signal_raw} (unit not reported)` : 'signal n/a';
+    return `<div class="meter"><div class="meter-head"><span class="mono">${esc(i.name)}</span><span>${state}</span></div>` +
+      (i.connected === true && i.signal_dbm != null ? bar((i.signal_dbm + 90) / 60 * 100) : '') +
+      (i.connected === true ? `<div class="detail">Connected${i.link_quality != null ? ' · link quality ' + i.link_quality : ''}</div>` : '') + '</div>';
+  }).join('') + '</div>';
 }
+const fsPct = f => f.total_bytes ? pctOf(f.used_bytes, f.total_bytes) : -1;
 function storageRows() {
   const g = obs && obs.groups && obs.groups.storage, o = g && g.observation, d = g && g.data;
   if (!o || !d) return '';
   const fss = Array.isArray(d.filesystems) ? d.filesystems : [], parts = Array.isArray(d.partitions) ? d.partitions : [];
   if (!fss.length && !parts.length) return '';
-  return observationCaption('storage') +
-    fss.map(f => kv(esc(f.mount_points[0].path + (f.mount_points[0].read_only ? ' (ro)' : '') +
-        (f.mount_points.length > 1 ? ` +${f.mount_points.length - 1} more` : '')),
-      f.total_bytes != null ? `${gib(f.used_bytes)}/${gib(f.total_bytes)} · ${gib(f.available_bytes)} free` : 'capacity unknown') +
-      `<div class="muted">${esc(f.fstype)} · ${esc(f.device || f.major + ':' + f.minor)}</div>`).join('') +
-    parts.map(p => kv(esc(p.name), `${gib(p.size_bytes)} · ${p.mount_points.length ? esc(p.mount_points[0] +
-      (p.mount_points.length > 1 ? ` +${p.mount_points.length - 1} more` : '')) : 'not mounted'}`)).join('');
+  return [...fss].sort((a, b) => fsPct(b) - fsPct(a)).map(f => {
+    const m = f.mount_points, pct = fsPct(f);
+    return '<div class="fs"><div><div class="fs-name"><span>' + esc(m[0].path) + '</span>' +
+      (m[0].read_only ? '<span class="badge">ro</span>' : '') + (m.length > 1 ? muted(`+${m.length - 1} more`) : '') + '</div>' +
+      `<div class="detail">${esc(f.fstype)} · ${esc(f.device || f.major + ':' + f.minor)}</div></div>` +
+      (f.total_bytes != null ? meter(`${gib(f.used_bytes)} / ${gib(f.total_bytes)} · ${pct.toFixed(0)}%`,
+        `${gib(f.available_bytes)} free`, pct, LIMITS.fs) : muted('capacity unknown')) + '</div>';
+  }).join('') + (parts.length ? '<h3>Partitions</h3>' + table('minmax(0, 1fr) 80px minmax(0, 1fr)', ['Partition', 'Size', 'Mounted at'],
+    parts.map(p => tr([esc(p.name), gib(p.size_bytes), p.mount_points.length ? esc(p.mount_points[0] +
+      (p.mount_points.length > 1 ? ` +${p.mount_points.length - 1} more` : '')) : muted('not mounted')]))) : '');
 }
 
 // One bounded history cache shared across detail views, fetched at most every 10 s.
@@ -287,18 +454,29 @@ const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^temperature\/(?:name:)?(.+)$/, m => 'temp ' + m[1].slice(0, 12)],
   [/^network\/[^/]+\/\d+\/([^/]+)\/(rx|tx)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
   [/^disk_io\/[^/]+\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`]];
+const histValue = (id, v) => id.startsWith('temperature') ? v.toFixed(1) + ' °C' : id.startsWith('cpu/') ? v.toFixed(1) + '%'
+  : id.includes('/wifi/') ? v.toFixed(1) + ' dBm' : id.includes('/probe/') ? v.toFixed(1) + ' ms'
+  : id.startsWith('memory') || id.includes('/storage/') ? gib(v) : perS(v);
+// x of a point on the 0–200 chart: spaced by its age, so irregular intervals stay irregular
+const histX = (points, p) => {
+  const oldest = points[0][1], newest = points[points.length - 1][1];
+  return oldest > newest ? 200 * (oldest - p[1]) / (oldest - newest) : 0;
+};
 function spark(points) {
   const vs = points.map(p => p[2]).filter(v => v != null), lo = Math.min(...vs), hi = Math.max(...vs);
-  if (!vs.length) return '';
-  const oldest = points[0][1], newest = points[points.length - 1][1];
+  const svg = paths => `<svg class="spark" viewBox="0 0 200 28" preserveAspectRatio="none">${paths}</svg>`;
+  if (!vs.length) return svg('');  // keeps the chart's height
   const y = v => hi > lo ? 26 - 24 * (v - lo) / (hi - lo) : 14;
-  let d = '', pen = false;
-  points.forEach((p, i) => {
-    if (p[2] == null) { pen = false; return; }
-    d += `${pen ? 'L' : 'M'}${(oldest > newest ? 200 * (oldest - p[1]) / (oldest - newest) : 0).toFixed(1)},${y(p[2]).toFixed(1)}`;
-    pen = true;
+  let line = '', area = '', run = [];
+  const close = () => { if (run.length > 1) area += `M${run[0][0]},28L${run.map(p => p.join(',')).join('L')}L${run[run.length - 1][0]},28Z`; run = []; };
+  points.forEach(p => {
+    if (p[2] == null) { close(); return; }
+    const xy = [histX(points, p).toFixed(1), y(p[2]).toFixed(1)];
+    line += `${run.length ? 'L' : 'M'}${xy.join(',')}`;
+    run.push(xy);
   });
-  return `<svg class="spark" viewBox="0 0 200 28" preserveAspectRatio="none"><path d="${d}"/></svg>`;
+  close();
+  return svg((area ? `<path class="area" d="${area}"/>` : '') + `<path class="line" d="${line}"/>`);
 }
 function histRows() {
   const series = hist && hist.series && typeof hist.series === 'object' ? hist.series : {};
@@ -307,15 +485,16 @@ function histRows() {
     const rule = HIST_LABEL.find(([re]) => re.test(id));
     if (!rule || !historyMatches(id) || ($('history-series').value && $('history-series').value !== id)
       || !Array.isArray(points) || !points.length || rows.length >= 12) continue;
-    const latest = points[points.length - 1], last = latest[2];
-    rows.push('<div class="history-series">' + kv(esc(rule[1](id.match(rule[0]))), last == null ? 'no value' : id.startsWith('temperature') ? last.toFixed(1) + ' °C'
-      : id.startsWith('cpu/') ? last.toFixed(1) + '%' : id.includes('/wifi/') ? last.toFixed(1) + ' dBm'
-      : id.includes('/probe/') ? last.toFixed(1) + ' ms' : id.startsWith('memory') || id.includes('/storage/') ? gib(last) : perS(last)) +
-      `<div class="muted" data-history-age="${Number(latest[1])}">${historyAge(latest[1])}</div>` + spark(points) + '</div>');
+    const latest = points[points.length - 1], last = latest[2], vs = points.map(p => p[2]).filter(v => v != null);
+    const lo = vs.length && histValue(id, Math.min(...vs)), hi = vs.length && histValue(id, Math.max(...vs));
+    rows.push(`<div class="card chart"><div class="chart-head"><span>${esc(rule[1](id.match(rule[0])))}</span><span>${last == null ? 'no value' : histValue(id, last)}</span></div>` +
+      `<div class="plot" data-series="${esc(id)}">${spark(points)}</div>` +
+      `<div class="chart-foot"><span>${!vs.length ? '' : lo === hi ? lo : lo + ' – ' + hi}</span>` +
+      `<span data-history-age="${Number(latest[1])}">${historyAge(latest[1])}</span></div></div>`);
   }
-  return rows.length ? `<div class="muted history-caption">last ${Math.round(hist.retention_s / 60)} min</div>` + rows.join('') +
-    (!$('history-series').value && Object.keys(series).filter(id => historyMatches(id) && HIST_LABEL.some(([re]) => re.test(id))).length > rows.length
-      ? `<div class="muted history-caption">showing first ${rows.length} · choose a series above to see more</div>` : '') : '';
+  return rows.join('') + (rows.length && !$('history-series').value
+    && Object.keys(series).filter(id => historyMatches(id) && HIST_LABEL.some(([re]) => re.test(id))).length > rows.length
+    ? `<div class="muted">showing first ${rows.length} · choose a series above to see more</div>` : '');
 }
 const historyAge = age => `latest point ${Math.round((age + performance.now() - histAt) / 1000)} s ago`;
 function renderHistory() {
@@ -329,8 +508,24 @@ function renderHistory() {
     return `<option value="${esc(id)}">${esc(rule[1](id.match(rule[0])))}</option>`;
   }).join('');
   select.value = ids.includes(previous) ? previous : '';
+  $('history-cap').textContent = `Last ${Math.round(hist.retention_s / 60)} min · each chart has its own scale · gaps = no sample`;
   $('hist').innerHTML = histRows();
   $('history-panel').hidden = !$('hist').innerHTML;
+}
+// hover or touch: the nearest point's value and age above the chart
+function readout(event) {
+  document.querySelectorAll('#hist .cursor, #hist .tip').forEach(e => e.remove());
+  const plot = event.target.closest && event.target.closest('.plot');
+  const id = plot && plot.dataset.series, points = id && hist && hist.series[id];
+  if (!points) return;
+  const box = plot.getBoundingClientRect(), at = 200 * (event.clientX - box.left) / box.width;
+  let best = null;
+  for (const p of points) if (p[2] != null && (!best || Math.abs(histX(points, p) - at) < Math.abs(histX(points, best) - at))) best = p;
+  if (!best) return;
+  const x = histX(points, best) / 2, shift = x < 15 ? 0 : x > 85 ? -100 : -50;
+  const when = best === points[points.length - 1] ? 'now' : Math.round((best[1] + performance.now() - histAt) / 1000) + ' s ago';
+  plot.insertAdjacentHTML('beforeend', `<span class="cursor" style="left:${x}%"></span>` +
+    `<span class="tip" style="left:${x}%;transform:translateX(${shift}%)">${esc(histValue(id, best[2]))} · ${when}</span>`);
 }
 async function pollHist() {
   const now = performance.now();
@@ -354,16 +549,15 @@ async function pollHist() {
 // pressure stall information: the kernel's 10 s averages of the share of time tasks were stalled (not usage)
 function psiRows(s) {
   const res = s.pressure && s.pressure.resources && typeof s.pressure.resources === 'object' ? s.pressure.resources : {};
-  const rows = Object.entries(res).map(([name, r]) => kv(esc(name), `some ${r.some.avg10.toFixed(1)}%` + (r.full ? ` · full ${r.full.avg10.toFixed(1)}%` : '')));
-  return rows.length ? '<div class="muted">avg10 · share of time stalled</div>' + rows.join('') : '';
+  const rows = Object.entries(res).map(([name, r]) => tr([esc(name), r.some.avg10.toFixed(1) + '%', muted(r.full ? r.full.avg10.toFixed(1) + '%' : '—')]));
+  return rows.length ? table('minmax(0, 1fr) 80px 80px', ['Resource', 'Some', 'Full'], rows) : '';
 }
 
 // optional groups that could not read everything, as in cli.py; nothing for absent sensors or older servers
 function collectionNote(s) {
   const c = s.collectors && typeof s.collectors === 'object' ? s.collectors : {};
-  const bad = Object.entries(c).filter(([name, v]) => name !== 'core' && v && (v.state === 'partial' || v.state === 'error'))
-    .map(([name, v]) => name + ' ' + v.state);
-  return bad.length ? 'Collection: ' + bad.join(', ') : '';
+  return Object.entries(c).filter(([name, v]) => name !== 'core' && v && (v.state === 'partial' || v.state === 'error'))
+    .map(([name, v]) => name + ' ' + v.state).join(', ');
 }
 
 function hideEmptyPanels() {
@@ -373,52 +567,80 @@ function hideEmptyPanels() {
 }
 
 function overviewRows(s) {
-  const metric = (label, value, detail) => `<article class="metric"><h2>${esc(label)}</h2><strong>${esc(value)}</strong><small>${esc(detail)}</small></article>`;
-  const cpus = s.cpu.filter(c => Number.isFinite(c.usage));
-  const m = s.memory, d = s.disk;
-  let html = metric('CPU', cpus.length ? (cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length).toFixed(1) + '%' : 'Unavailable',
-    `Mean of ${cpus.length} measured cores` + (cpuNote(s) ? ' · ' + cpuNote(s) : ''));
-  html += metric('RAM', (100 * m.used / m.total).toFixed(1) + '%', `${gib(m.used)} / ${gib(m.total)}`);
-  html += metric('Root filesystem', (100 * d.used / d.total).toFixed(1) + '%', `${gib(d.used)} / ${gib(d.total)}`);
-  if (s.gpu) html += metric('GPU', s.gpu.usage.toFixed(1) + '%', s.gpu.freq ? (s.gpu.freq / 1e6).toFixed(0) + ' MHz' : 'Frequency unavailable');
-  const temps = Object.entries(s.temperature).filter(([, value]) => Number.isFinite(value));
+  const cards = [], alerts = [];
+  // value null: unavailable, no bar; limits give the level, the threshold ticks and a Needs attention entry
+  const metric = (label, sub, value, unit, limits, detail, tab, name = label) => {
+    const lv = value == null ? 'ok' : level(value, limits);
+    if (lv !== 'ok') alerts.push({lv, tab, name, value: value.toFixed(1) + (unit === '°C' ? ' °C' : unit)});
+    cards.push(`<article class="card metric"><div class="metric-head"><span>${esc(label)}</span><span>${esc(sub)}</span></div>` +
+      (value == null ? '<div class="value">Unavailable</div>'
+        : `<div class="value${textLevel(lv)}">${value.toFixed(1)}<span class="unit">${unit}</span></div>${bar(value, limits)}`) +
+      (detail ? `<div class="detail">${esc(detail)}</div>` : '') + '</article>');
+  };
+  const cpus = s.cpu.filter(c => Number.isFinite(c.usage)), m = s.memory, d = s.disk, note = cpuNote(s);
+  metric('CPU', s.cpu.length + (s.cpu.length === 1 ? ' core' : ' cores'),
+    cpus.length ? cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length : null, '%', LIMITS.cpu,
+    `Mean of ${cpus.length} measured cores` + (note ? ' · ' + note : ''), 'resources');
+  metric('Memory', gib(m.total), pctOf(m.used, m.total), '%', LIMITS.memory, `${gib(m.used)} used · ${gib(m.total - m.used)} free`, 'resources');
+  if (s.gpu) metric('GPU', mhz(s.gpu.freq), s.gpu.usage, '%', LIMITS.gpu, '', 'resources');
+  metric('Root filesystem', gib(d.total), pctOf(d.used, d.total), '%', LIMITS.fs, `${gib(d.used)} used · ${gib(d.total - d.used)} free`, 'storage', '/');
+  const temps = Object.entries(s.temperature).filter(([, value]) => Number.isFinite(value)).sort((a, b) => b[1] - a[1]);
   if (temps.length) {
-    const [name, value] = temps.reduce((max, entry) => entry[1] > max[1] ? entry : max);
-    html += metric('Highest temperature', value.toFixed(1) + ' °C', name);
+    metric('Temperature', temps[0][0], temps[0][1], '°C', tempLimits(s), `Hottest of ${temps.length} ${temps.length === 1 ? 'sensor' : 'sensors'}`, 'thermal', temps[0][0]);
+    for (const [name, value] of temps.slice(1)) {  // every hot sensor, not only the hottest
+      const lv = level(value, tempLimits(s));
+      if (lv !== 'ok') alerts.push({lv, tab: 'thermal', name, value: value.toFixed(1) + ' °C'});
+    }
   }
+  // other filesystems, from the storage observation when the Storage view fetched it; the root card covers /
+  const fsData = obs && obs.groups && obs.groups.storage && obs.groups.storage.data;
+  for (const f of listOf(fsData, 'filesystems')) {
+    const lv = f.total_bytes && !f.mount_points.some(p => p.path === '/') ? level(fsPct(f), LIMITS.fs) : 'ok';
+    if (lv !== 'ok') alerts.push({lv, tab: 'storage', name: f.mount_points[0].path, value: fsPct(f).toFixed(0) + '%'});
+  }
+  alerts.sort((a, b) => (b.lv === 'crit') - (a.lv === 'crit'));
+  let html = alerts.length ? '<div class="card attention"><strong>Needs attention</strong>' + alerts.map(a =>
+    `<a class="pill ${a.lv}" href="#${a.tab}">${esc(a.name)} <span class="mono">${esc(a.value)}</span></a>`).join('') + '</div>' : '';
+  html += `<div class="metrics">${cards.join('')}</div>`;
   // Show individual readings: names and traffic volume do not identify the host's uplink.
   const interfaces = listOf(s.network, 'interfaces').filter(i => i.name !== 'lo');
   if (interfaces.length) {
     const shown = interfaces.slice(0, 4);
-    html += `<article class="metric"><h2>Network · ${interfaces.length} ${interfaces.length === 1 ? 'interface' : 'interfaces'}</h2>` +
-      shown.map(i => kv(esc(i.name), i.rates
-        ? `↓ ${perS(i.rates.rx_bytes_per_s)} · ↑ ${perS(i.rates.tx_bytes_per_s)}` : why(i))).join('') +
-      (shown.length < interfaces.length ? `<small>Showing ${shown.length} of ${interfaces.length}</small>` : '') +
-      '</article>';
+    html += '<section class="card"><div class="card-head"><h2>Network</h2><a class="cap" href="#network">All interfaces →</a></div>' +
+      table('minmax(0, 1fr) 110px 110px', ['Interface', '↓ Receive', '↑ Send'], shown.map(i => tr([esc(i.name),
+        i.rates ? perS(i.rates.rx_bytes_per_s) : why(i), i.rates ? muted(perS(i.rates.tx_bytes_per_s)) : ''], idle(i.rates)))) +
+      (shown.length < interfaces.length ? `<p class="note">Showing ${shown.length} of ${interfaces.length}</p>` : '') + '</section>';
   }
   return html;
 }
 function renderResources(s) {
-  const note = cpuNote(s);
-  $('cpu').innerHTML = s.cpu.map(c => row('CPU' + c.id, c.usage, c.usage.toFixed(1) + '%' + (c.freq ? ` ${(c.freq / 1e6).toFixed(0)}MHz` : ''))).join('') +
+  const note = cpuNote(s), cpus = s.cpu.filter(c => Number.isFinite(c.usage));
+  const unavailable = (s.cpu_sampling && s.cpu_sampling.unavailable || []).length;
+  $('cpu-cap').textContent = cpus.length ? `mean ${(cpus.reduce((sum, c) => sum + c.usage, 0) / cpus.length).toFixed(1)}% · ` +
+    `${cpus.length} of ${s.cpu.length + unavailable} measured` : '';
+  $('cpu').innerHTML = (s.cpu.length ? '<div class="cores">' + s.cpu.map(c => `<div class="core"><span>CPU${c.id}</span>` +
+    `<strong class="${textLevel(level(c.usage, LIMITS.cpu))}">${c.usage.toFixed(1)}%</strong>` +
+    bar(c.usage, LIMITS.cpu, false) + `<span>${mhz(c.freq) || '&nbsp;'}</span></div>`).join('') + '</div>' : '') +
     (note ? `<div class="muted">${esc(note)}</div>` : '');
   const m = s.memory, g = s.gpu;
-  $('res').innerHTML =
-    (g ? row('GPU', g.usage, g.usage.toFixed(1) + '%' + (g.freq ? ` ${(g.freq / 1e6).toFixed(0)}MHz` : '')) : '') +
-    row('RAM', 100 * m.used / m.total, `${gib(m.used)}/${gib(m.total)}`) +
-    (m.swap_total ? row('SWAP', 100 * m.swap_used / m.swap_total, `${gib(m.swap_used)}/${gib(m.swap_total)}`) : '');
+  $('res').innerHTML = '<div class="meters">' +
+    (g ? meter('GPU', g.usage.toFixed(1) + '%' + (g.freq ? ' · ' + mhz(g.freq) : ''), g.usage, LIMITS.gpu) : '') +
+    meter('RAM', `${gib(m.used)} / ${gib(m.total)}`, pctOf(m.used, m.total), LIMITS.memory) +
+    (m.swap_total ? meter('Swap', `${gib(m.swap_used)} / ${gib(m.swap_total)}`, pctOf(m.swap_used, m.swap_total), LIMITS.memory) : '') + '</div>';
   $('psi').innerHTML = psiRows(s);
 }
 function renderThermal(s) {
-  $('temp').innerHTML = Object.entries(s.temperature).map(([k, v]) => kv(esc(k), v.toFixed(1) + ' °C')).join('');
-  $('pwr').innerHTML = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
-    s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('') +
-    (s.power_mode ? kv('Power mode', esc(s.power_mode)) : '');
+  const temps = Object.entries(s.temperature).sort((a, b) => b[1] - a[1]);
+  $('temp').innerHTML = temps.length ? '<div class="temps">' + temps.map(([k, v]) =>
+    `<div class="temp"><span>${esc(k)}</span>${bar(v, tempLimits(s))}<span>${v.toFixed(1)} °C</span></div>`).join('') + '</div>' : '';
+  const rows = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
+    s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
+  $('pwr-cap').innerHTML = s.power_mode ? `<span class="chip">MODE ${esc(s.power_mode)}</span>` : '';
+  $('pwr').innerHTML = rows || (s.power_mode ? '<p class="muted">No power rails or fans reported.</p>' : '');
 }
 function renderSystem(s) {
-  const sys = s.system || {}, up = Math.floor(s.uptime);
-  const fields = {platform: s.platform,
-    uptime: `${Math.floor(up / 86400)}d ${String(Math.floor(up % 86400 / 3600)).padStart(2, '0')}:${String(Math.floor(up % 3600 / 60)).padStart(2, '0')}`};
+  const sys = s.system || {};
+  const fields = {platform: s.platform, uptime: uptimeText(s.uptime)};
   for (const key of SYSTEM_FIELDS) fields[key] = sys[key];
   for (const [key, value] of Object.entries(fields)) {
     const text = value == null ? '' : String(value);
@@ -427,22 +649,21 @@ function renderSystem(s) {
   }
   // Preserve additional board-specific fields without changing the API or rebuilding stable rows.
   const extra = Object.entries(sys).filter(([key, value]) => !SYSTEM_FIELDS.includes(key) && value)
-    .map(([key, value]) => kv(esc(key), esc(value))).join('');
+    .map(([key, value]) => `<div class="sys"><span>${esc(key)}</span><span>${esc(value)}</span></div>`).join('');
   if ($('system-extra').innerHTML !== extra) $('system-extra').innerHTML = extra;
 }
 function renderActive() {
   if (!latestStats || !visible()) return;
   const s = latestStats;
-  if (activeTab === 'overview') {
+  if (activeTab === 'overview') {  // rebuilt every second: keyboard focus stays on the same link
+    const links = () => [...document.querySelectorAll('#overview a')], at = links().indexOf(document.activeElement);
     $('overview').innerHTML = overviewRows(s);
-    $('overview-network-details').hidden = !listOf(s.network, 'interfaces').some(i => i.name !== 'lo');
+    if (at >= 0 && links()[at]) links()[at].focus();
   }
   else if (activeTab === 'resources') renderResources(s);
-  else if (activeTab === 'network') $('net').innerHTML = netRows(s);
-  else if (activeTab === 'storage') {
-    $('root-disk').innerHTML = row('DISK', 100 * s.disk.used / s.disk.total, `${gib(s.disk.used)}/${gib(s.disk.total)}`);
-    $('dio').innerHTML = diskRows(s);
-  } else if (activeTab === 'thermal') renderThermal(s);
+  else if (activeTab === 'network') { $('net').innerHTML = netRows(s); $('net-cap').textContent = netCaption(s); }
+  else if (activeTab === 'storage') $('dio').innerHTML = diskRows(s);
+  else if (activeTab === 'thermal') renderThermal(s);
   else if (activeTab === 'system') renderSystem(s);
   hideEmptyPanels();
 }
@@ -451,10 +672,14 @@ function renderObservations() {
   if (activeTab === 'storage') $('sto').innerHTML = storageRows();
   if (activeTab === 'network') { $('wifi').innerHTML = wifiRows(); $('probe').innerHTML = probeRows(); }
   hideEmptyPanels();
+  updateDetailAges();
 }
 function render(s) {
   // Keep the last good snapshot for instant view switches even if the next request fails.
   $('model').textContent = s.model;
+  const sys = s.system || {};
+  $('subtitle').textContent = [sys.hostname, s.platform, Number.isFinite(s.uptime) ? 'up ' + uptimeText(s.uptime) : '']
+    .filter(Boolean).join(' · ');
   $('coll').textContent = collectionNote(s);
   latestStats = s;
   renderActive();
@@ -487,19 +712,27 @@ function sampleOf(s, t0) {
   return ok ? {kind: 'sample', seq: m.sequence, ageMs: m.data_age_ms, t0} : {kind: 'invalid', t0};
 }
 
+// The status pill says Live, Partial or Offline; its tooltip carries the sample number and data age.
+// Offline shows a banner with the error and the last good data's age, and dims the views.
 function showAge() {
-  const status = failing ? 'Connection issue' : checking ? 'Checking' : !shown ? 'Connecting'
-    : $('coll').textContent ? 'Partial data' : 'Connected';
+  const coll = $('coll').textContent;
+  const [status, state] = failing ? ['Offline', 'offline'] : checking ? ['Checking', 'idle'] : !shown ? ['Connecting', 'idle']
+    : coll ? ['Partial', 'partial'] : ['Live', 'live'];
   if ($('status').textContent !== status) $('status').textContent = status;
-  $('status').setAttribute('data-state', failing || $('coll').textContent ? 'warning' : 'ok');
-  if (!shown) { $('age').textContent = ''; return; }
+  $('status').setAttribute('data-state', state);
+  $('main').setAttribute('data-offline', String(failing));
+  $('err-banner').hidden = !failing;
+  $('coll-banner').hidden = failing || !coll;
+  if (!shown) { $('status').title = $('err-age').textContent = ''; return; }
   const since = performance.now() - shown.t0;
   const secs = ms => Math.round(ms / 1000) + ' s';
   const text = shown.kind === 'sample' ? `sample #${shown.seq} · data age ${secs(shown.ageMs + since)}`
     : `response received ${secs(since)} ago · ` + (shown.kind === 'legacy'
       ? 'this server reports no sample age' : 'sample age unavailable (invalid metadata)');
   const line = failing ? 'last good: ' + text + ' (not current)' : checking ? 'checking… last seen: ' + text : text;
-  $('age').textContent = line[0].toUpperCase() + line.slice(1);
+  $('status').title = line[0].toUpperCase() + line.slice(1);
+  $('err-age').textContent = failing ? (shown.kind === 'sample' ? ` Showing the last good sample, ${secs(shown.ageMs + since)} old.`
+    : ` Showing the last good answer, received ${secs(since)} ago.`) : '';
 }
 
 // One request at a time; whatever happens, the next one is scheduled. On failure the last good values
@@ -561,6 +794,8 @@ for (const [index, tab] of TABS.entries()) {
   });
 }
 $('history-series').addEventListener('change', () => { $('hist').innerHTML = histRows(); });
+$('hist').addEventListener('pointermove', readout);
+$('hist').addEventListener('pointerleave', readout);
 document.addEventListener('visibilitychange', () => {
   epoch++;
   clearTimeout(refresh); refresh = null;

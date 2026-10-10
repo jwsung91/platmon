@@ -60,16 +60,22 @@ network counters: [docs/network.md](docs/network.md); disk I/O counters: [docs/d
 [docs/history.md](docs/history.md); pressure stall information: [docs/pressure.md](docs/pressure.md)). The API has no
 authentication. Run it on trusted networks only.
 
-The web page opens with an Overview of CPU, RAM, root filesystem capacity and available GPU,
-temperature and network readings. CPU is the mean of measured cores; Network lists separate readings
+The web page opens with an Overview of CPU, memory, available GPU, root filesystem capacity and the
+hottest temperature, each colored by level (warning from 80 %, critical from 90 %; temperatures
+from 85/95 °C on Jetson Orin, 75/80 °C on Raspberry Pi and 80/90 °C elsewhere; instantaneous values).
+A Needs attention strip lists every reading at or above its warning level and links to its tab.
+CPU is the mean of measured cores; Network lists separate readings
 for up to four non-loopback interfaces, shows any omission count and links to the full Network tab.
 It does not infer an uplink or sum overlapping interfaces. Resources, Network, Storage and
-Temperature & power tabs show details and related recent history. System lists the platform, uptime,
+Temperature & power tabs show details and related recent history; hovering or touching a chart shows
+the nearest point's value and age. System lists the platform, uptime,
 OS, kernel, architecture, hostname and available board-specific information such as L4T; power mode
 remains in Temperature & power. System updates only changed values and makes no optional API requests.
-The common header keeps the model, connection
-errors and data age visible in every view. Tabs support arrow-key focus and Enter/Space activation.
-On narrow screens a swipe hint helps reveal the remaining tabs. Selecting a tab updates the URL
+The common header keeps the model, host, uptime and a Live/Partial/Offline status visible in every view;
+the status tooltip shows the sample number and data age. When requests fail, a banner names the error
+and the age of the data still shown, and the views are dimmed. The footer shows the running version.
+Tabs support arrow-key focus and Enter/Space activation.
+On narrow screens the tabs move to a bar at the bottom. Selecting a tab updates the URL
 fragment (for example, `#system`), so reloading or opening that link restores the view; unknown
 fragments fall back to Overview. Selecting tabs replaces the current history entry.
 Only the active view renders; detail tabs share cached history, and a hidden browser page suspends

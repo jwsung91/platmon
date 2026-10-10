@@ -57,22 +57,22 @@ const history = {retention_s: 600, series: {
       assert((await page.locator('#overview').innerText()).includes('br-example'));
       assert((await page.locator('#overview').innerText()).includes(bad));
       assert.equal(await page.locator('#overview img').count(), 0);
-      assert.equal(await page.locator('#tab-hint').isVisible(), width <= 540);
+      assert.equal(await page.locator('.tabs').evaluate(e => getComputedStyle(e).position), width < 640 ? 'fixed' : 'static');
       assert(!(await page.locator('header').innerText()).includes('Ubuntu 22.04.5 LTS'));
       assert(!(await page.locator('header').innerText()).includes('MAXN_SUPER'));
       assert.equal(await page.locator('#history-panel').isVisible(), false);
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'overview fits long interface names');
       await page.screenshot({path: path.join(output, `overview-${width}.png`), fullPage: true});
-      await page.locator('#overview-network-details a').focus();
+      await page.locator('#overview a[href="#network"]').focus();
       await page.evaluate(() => tick());
-      assert(await page.locator('#overview-network-details a').evaluate(a => a === document.activeElement), 'refresh preserves detail-link focus');
+      assert(await page.locator('#overview a[href="#network"]').evaluate(a => a === document.activeElement), 'refresh preserves detail-link focus');
       await page.keyboard.press('Enter');
       await page.waitForFunction(() => document.querySelector('#wifi').textContent.includes('-64 dBm'));
       await page.waitForTimeout(2200);
-      assert((await page.locator('#wifi').innerText()).includes('(not current)'));
-      assert((await page.locator('#net').innerText()).includes('window 1.234 s'));
+      assert((await page.locator('[data-observation-age="wifi"]').innerText()).includes('(not current)'));
+      assert((await page.locator('#net-cap').innerText()).includes('window 1.234 s'));
       assert.equal(await page.locator('section img').count(), 0);
-      assert(await page.locator('.brand img').evaluate(img => img.complete && img.naturalWidth > 0));
+      assert(await page.locator('.identity img').evaluate(img => img.complete && img.naturalWidth > 0));
       assert.equal(await page.evaluate(() => !!globalThis.injected), false);
       assert.equal(await page.locator('#hist svg').count(), 3);
       const histText = await page.locator('#hist').innerText();
@@ -86,7 +86,7 @@ const history = {retention_s: 600, series: {
       await page.locator('#tab-resources').click();
       assert.equal(await page.locator('#hist svg').count(), 12);
       assert((await page.locator('#hist').innerText()).includes('showing first 12'));
-      const graph = await page.locator('#hist svg path').first().getAttribute('d');
+      const graph = await page.locator('#hist svg path.line').first().getAttribute('d');
       assert(graph.split('M').length > 2, 'missing buckets break paths');
       await page.locator('#history-series').selectOption('cpu/58/usage');
       assert.equal(await page.locator('#hist svg').count(), 1);
@@ -109,8 +109,8 @@ const history = {retention_s: 600, series: {
       for (const tab of ['storage', 'thermal', 'system']) {
         await page.locator('#tab-' + tab).click();
         assert(await page.locator('#panel-' + tab).isVisible());
-        if (tab === 'storage') assert((await page.locator('#dio').innerText()).includes('in flight 0'));
-        if (tab === 'thermal') assert((await page.locator('#pwr').innerText()).includes('MAXN_SUPER'));
+        if (tab === 'storage') assert((await page.locator('#dio').innerText()).includes('warming up'));
+        if (tab === 'thermal') assert((await page.locator('#pwr-cap').innerText()).includes('MAXN_SUPER'));
         if (tab === 'system') {
           assert.equal(await page.locator('#system-os').innerText(), 'Ubuntu 22.04.5 LTS');
           assert.equal(await page.locator('#system-uptime').innerText(), '3d 07:41');

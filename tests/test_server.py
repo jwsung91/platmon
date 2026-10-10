@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from collector.sampler import METADATA_KEYS, Sampler
-from frontends.cli import render
+from frontends.cli import VERSION, render
 from frontends.server import make_handler
 
 
@@ -55,6 +55,7 @@ def plain(stats):
     (False, "/assets/brand/platmon-logo-light.svg", 404),
     (False, "/assets/brand/platmon-logo-dark.svg", 404),
     (False, "/assets/brand/favicon.svg", 404),
+    (False, "/assets/brand/platmon-icon-light.svg", 404),
 ])
 def test_routes(web, path, expected):
     from test_cli import FULL
@@ -67,6 +68,8 @@ def test_routes(web, path, expected):
             assert plain(stats) == FULL and stats["schema_version"] == 1 and stats["sample"]["sequence"] == 1
         if path == "/api/status":
             assert json.loads(body)["state"] == "ready"
+        if expected == 200 and path in ("/", "/index.html"):  # the footer carries the running version
+            assert f"platmon v{VERSION}".encode() in body and b"@VERSION@" not in body
         if path == "/text":  # the terminal view, unchanged by the metadata, no screen control codes
             assert body.decode() == render(FULL) + "\n" and b"\033[" not in body
         if path in ("/api/stats", "/api/status", "/text"):
@@ -76,7 +79,8 @@ def test_routes(web, path, expected):
         httpd.shutdown()
 
 
-@pytest.mark.parametrize("filename", ["platmon-logo-light.svg", "platmon-logo-dark.svg", "favicon.svg"])
+@pytest.mark.parametrize("filename", ["platmon-logo-light.svg", "platmon-logo-dark.svg", "favicon.svg",
+                                      "platmon-icon-light.svg", "platmon-icon-dark.svg"])
 def test_brand_assets(filename):
     asset = Path(__file__).resolve().parents[1] / "frontends" / "web" / "assets" / "brand" / filename
     httpd, base = serve(None)

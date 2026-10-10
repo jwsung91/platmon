@@ -27,7 +27,7 @@ Use the light and dark variants with their intended backgrounds. Keep the aspect
 spacing and solid fills. The transparent logo SVGs already include clear space.
 Use `favicon.svg` when a small icon needs to work against either page theme.
 
-The README and web page select the logo with `prefers-color-scheme`.
-The HTTP server exposes only the two logo SVGs and the favicon, and only when the web viewer
+The README selects the logo and the web page's header the icon with `prefers-color-scheme`.
+The HTTP server exposes only the two logo SVGs, the two icon SVGs and the favicon, and only when the web viewer
 is enabled. The other files remain repository assets; they are not general-purpose HTTP routes.
 The existing systemd installer and Dockerfile include this directory with `frontends/`.
