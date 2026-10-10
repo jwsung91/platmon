@@ -17,3 +17,8 @@ API schema versions are independent of release versions.
   a bottom tab bar on narrow screens and the running version in the footer.
 - `[thresholds]` in `platmon.ini` sets the web page's warning and critical levels; an empty temperature keeps
   the board default.
+- `platmon` live terminal view on interactive terminals: colored levels from the service's `[thresholds]`,
+  Needs attention, core grid, tables, sparklines, header status and an offline banner; `q` quits,
+  `NO_COLOR` and `PLATMON_ASCII` are honored. `--once`, pipes and `/text` are unchanged.
+- `/api/status` reports the configured `levels`.
+- Network rows on the web Overview and in `platmon` list the busiest interfaces first.

@@ -59,9 +59,11 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   assert(mixed.includes('br-example') && mixed.includes('eth0') && mixed.includes('wlan0'), 'bridge does not hide physical interface readings');
   assert(mixed.includes('1.0 KiB/s') && mixed.includes('2.0 KiB/s') && mixed.includes('0 B/s'));
   assert(mixed.includes('<div class="tr idle"><span>br-example') && !mixed.includes('first non-loopback'), 'idle interfaces are dimmed');
+  assert(mixed.indexOf('wlan0') < mixed.indexOf('eth0') && mixed.indexOf('eth0') < mixed.indexOf('br-example'), 'busiest interfaces first');
   assert(mixed.includes('href="#network">All interfaces'));
   const many = networkOverview(Array.from({length: 20}, (_, n) => rate('iface-' + n, n)));
   assert(many.includes('Showing 4 of 20') && !many.includes('iface-4<'), 'overview rows stay bounded');
+  assert(many.includes('iface-19<') && !many.includes('iface-0<'), 'the four busiest are shown');
   const missing = networkOverview([{name: '<b>wifi</b>', rates: null, reason: 'warmup'}]);
   assert(missing.includes('warming up') && missing.includes('&#60;b&#62;wifi') && !missing.includes('<b>'));
   assert(!networkOverview([rate('lo', 1)]).includes('All interfaces'));

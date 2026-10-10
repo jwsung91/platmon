@@ -606,7 +606,8 @@ function overviewRows(s) {
     `<a class="pill ${a.lv}" href="#${a.tab}">${esc(a.name)} <span class="mono">${esc(a.value)}</span></a>`).join('') + '</div>' : '';
   html += `<div class="metrics">${cards.join('')}</div>`;
   // Show individual readings: names and traffic volume do not identify the host's uplink.
-  const interfaces = listOf(s.network, 'interfaces').filter(i => i.name !== 'lo');
+  const traffic = i => i.rates ? i.rates.rx_bytes_per_s + i.rates.tx_bytes_per_s : -1;  // busiest first
+  const interfaces = listOf(s.network, 'interfaces').filter(i => i.name !== 'lo').sort((a, b) => traffic(b) - traffic(a));
   if (interfaces.length) {
     const shown = interfaces.slice(0, 4);
     html += '<section class="card"><div class="card-head"><h2>Network</h2><a class="cap" href="#network">All interfaces →</a></div>' +

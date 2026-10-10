@@ -67,7 +67,7 @@ def test_routes(web, path, expected):
             stats = json.loads(body)
             assert plain(stats) == FULL and stats["schema_version"] == 1 and stats["sample"]["sequence"] == 1
         if path == "/api/status":
-            assert json.loads(body)["state"] == "ready"
+            assert json.loads(body)["state"] == "ready" and "levels" not in json.loads(body)  # none configured
         if expected == 200 and path in ("/", "/index.html"):  # the footer carries the running version
             assert f"platmon v{VERSION}".encode() in body and b"@VERSION@" not in body
             assert b'<script type="application/json" id="levels">{}</script>' in body  # no levels: page defaults
@@ -95,13 +95,15 @@ def test_brand_assets(filename):
 
 
 def test_levels_reach_the_page():
-    """[thresholds] as the page's JSON, filled in when the page is served."""
+    """[thresholds] as the page's JSON, filled in when the page is served, and in /api/status."""
     levels = {"cpu": [70.0, 85.0], "temperature": None}
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(NoWait(lambda: None), True, levels=levels))
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
     try:
         body = get(f"http://127.0.0.1:{httpd.server_address[1]}/")[2]
         assert f'id="levels">{json.dumps(levels)}</script>'.encode() in body
+        status = json.loads(get(f"http://127.0.0.1:{httpd.server_address[1]}/api/status")[2])
+        assert status["levels"] == levels  # the same levels for the platmon command
     finally:
         httpd.shutdown()
 

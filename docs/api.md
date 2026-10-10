@@ -287,7 +287,9 @@ check uses `/api/stats` for that reason).
     "consecutive_failures": 1
   },
   "collecting_for_ms": null,
-  "clock": {"source": "boottime", "suspend_aware": true}
+  "clock": {"source": "boottime", "suspend_aware": true},
+  "levels": {"cpu": [80.0, 90.0], "gpu": [80.0, 90.0], "memory": [80.0, 90.0], "filesystem": [80.0, 90.0],
+             "temperature": null}
 }
 ```
 
@@ -305,6 +307,10 @@ check uses `/api/stats` for that reason).
   `collection_too_slow` (it took longer than `stale_after`). `consecutive_failures` resets on success.
 - `collecting_for_ms`: how long the running collection has taken so far, null between collections. A
   growing value does not mean the reads are making progress.
+- `levels`: the warning and critical levels from `[thresholds]` in `platmon.ini`, as `[warning, critical]`
+  in percent, and in °C for `temperature`; `temperature` is null when not set (clients use the board
+  default: Jetson Orin 85/95, Raspberry Pi 75/80, others 80/90). The web page and the `platmon` command
+  color readings with them. Absent from older servers: clients then use those defaults for every reading.
 
 ## Clock
 
@@ -315,7 +321,7 @@ suspended time, so ages can read too low right after a resume. Changes to the wa
 
 ## Web page
 
-The page shows `sample #N · data age S`: the server's `data_age_ms` plus browser time since that answer
+The page shows `sample #N · data age S` (in the status tooltip): the server's `data_age_ms` plus browser time since that answer
 arrived (transfer time is not included). Polling the same sample again does not reset it. On a failed
 request it keeps the last good values and says they are not current. For an older server without
 metadata it shows the time since its last answer instead, and says that it is not the sample's age.

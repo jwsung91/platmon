@@ -37,7 +37,8 @@ def history_query(history, query):
 def make_handler(sampler, web=True, observations=None, history=None, levels=None):
     """observations: the service's collector.slow.Observations (low-frequency groups), or None.
     history: its collector.history.History, or None (then /api/history is 404).
-    levels: the web page's warning and critical levels from [thresholds], or None for the page's defaults."""
+    levels: the warning and critical levels from [thresholds], for the web page and /api/status, or None for
+    the clients' defaults."""
     page_values = {b"@VERSION@": VERSION.encode(), b"@LEVELS@": json.dumps(levels or {}).encode()}
     def observed():
         return observations.view() if observations else {"schema_version": 2, "instance_id": sampler.instance_id,
@@ -61,7 +62,10 @@ def make_handler(sampler, web=True, observations=None, history=None, levels=None
                 self.reply(200, json.dumps(body).encode(), "application/json")
                 return
             if self.path == "/api/status":  # never waits for the first snapshot; 200 even when not ready
-                body, ctype = json.dumps(sampler.read()[1]).encode(), "application/json"
+                status = sampler.read()[1]
+                if levels is not None:  # [thresholds], for clients that color readings (the platmon command)
+                    status["levels"] = levels
+                body, ctype = json.dumps(status).encode(), "application/json"
             elif self.path == "/api/observations":  # low-frequency groups with their own ages; always 200
                 body, ctype = json.dumps(observed()).encode(), "application/json"
             elif self.path in ("/api/stats", "/text"):
