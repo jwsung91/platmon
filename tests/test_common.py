@@ -545,6 +545,23 @@ def test_inactive_thermal_zone_is_no_data(tmp_path, monkeypatch):
     assert g.status() == {"state": "ok", "reason": None, "issues": [], "issues_truncated": 0}
 
 
+def test_fan_speed_the_firmware_does_not_report_is_no_data(tmp_path, monkeypatch):
+    """A board that declares a fan but reports no tachometer (acpi_fan, EIO on fan1_input) has no speed to
+    read: an absent value like an inactive thermal zone, not a failure that makes the service degraded.
+    Another failure on the same attribute (no permission) stays a failure."""
+    root = fake_hwmon(tmp_path, [{"name": "acpi_fan", "fan1_input": 0}])
+    fail_reads(monkeypatch, {f"{root}/hwmon0/fan1_input": _errno.EIO})
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[2] == [{"name": "acpi_fan fan1", "rpm": None, "percent": None}]
+    assert g["fans"].status() == {"state": "unavailable", "reason": "no_data", "issues": [], "issues_truncated": 0}
+    assert g["fans"].details == []  # no failure, so nothing for the service log either
+    fail_reads(monkeypatch, {f"{root}/hwmon0/fan1_input": _errno.EACCES})
+    g = sysfs.groups("temperature", "power", "fans")
+    hwmon_sensors(root=root, groups=g)
+    assert g["fans"].status()["state"] == "error"
+    assert g["fans"].status()["issues"] == [{"target": "hwmon0.fan1", "reason": "permission_denied"}]
+
+
 def test_unexpected_error_in_one_group_is_internal_error(monkeypatch):
     def broken(root, *groups):
         raise RuntimeError("bug with /secret/path")

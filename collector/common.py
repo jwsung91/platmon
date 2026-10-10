@@ -86,7 +86,11 @@ def hwmon_sensors(skip=(), root="/sys/class/hwmon", groups=None):
             fan_idx = numbered(names, "fan", "_input")
             for n in fan_idx:
                 path = f"{d}/fan{n}_input"
-                rpm = fan_g.read(path, f"{dev}.fan{n}", found=path)  # None if unreadable, not 0
+                # None if unreadable, not 0. io_absent: a driver exposes the attribute whenever the
+                # firmware declares a fan (acpi_fan from an ACPI PNP0C0B object), and reading it returns
+                # EIO where the firmware reports no speed at all, as on boards whose embedded controller
+                # keeps the fan to itself. That is a fan without a tachometer, not a broken sensor.
+                rpm = fan_g.read(path, f"{dev}.fan{n}", found=path, io_absent=True)
                 span = fan_g.span
                 add_fan(label(fan_g, "fan", n, f"{chip} fan{n}"), n, None if rpm is None else fan_g.got(rpm), span, d)
             if not fan_idx and "pwm1" in names:  # pwm-fan without a tachometer
