@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    configure)
+        # Validate the preserved config before enabling or restarting any service.
+        /usr/bin/python3 -B -c '
+import sys
+sys.path.insert(0, "/usr/share/platmon")
+from platmon import load_config
+try:
+    load_config("/etc/platmon/platmon.ini")
+except ValueError as e:
+    sys.exit("invalid platmon config: " + str(e))
+'
+        if [ -e /usr/local/bin/platmon ] || [ -e /usr/local/sbin/platmon ]; then
+            echo "a local platmon command may shadow /usr/bin/platmon; check command -v platmon" >&2
+        fi
+        deb-systemd-helper unmask platmon.service >/dev/null || true
+        if deb-systemd-helper --quiet was-enabled platmon.service; then
+            deb-systemd-helper enable platmon.service >/dev/null || true
+        else
+            deb-systemd-helper update-state platmon.service >/dev/null || true
+        fi
+        if [ -d /run/systemd/system ]; then
+            systemctl --system daemon-reload
+            if [ -n "${2:-}" ]; then
+                deb-systemd-invoke restart platmon.service
+            else
+                deb-systemd-invoke start platmon.service
+            fi
+        fi
+        ;;
+esac
+exit 0

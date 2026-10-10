@@ -1,0 +1,70 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify tag commit is on main
+        run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "::error::release tag must point to a commit included in main"
+            exit 1
+          fi
+
+  checks:
+    needs: verify-main
+    uses: ./.github/workflows/test.yml
+
+  draft:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Verify release tag and changelog
+        id: version
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          from scripts.package import version
+          release = version()
+          tag = os.environ["GITHUB_REF_NAME"]
+          match = re.fullmatch(r"v" + re.escape(release) + r"(?:-([1-9][0-9]*))?", tag)
+          if not match:
+              raise SystemExit("tag does not match the application VERSION")
+          if f"## {release} —" not in Path("CHANGELOG.md").read_text():
+              raise SystemExit("release has no changelog entry")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("revision=" + (match.group(1) or "1") + "\n")
+          PY
+      - name: Build fixed-version release files
+        env:
+          REVISION: ${{ steps.version.outputs.revision }}
+        run: python3 scripts/package.py --revision "$REVISION"
+      - run: python3 scripts/check_package.py dist/*.deb
+      - name: Verify checksums
+        working-directory: dist
+        run: sha256sum -c SHA256SUMS
+      - name: Create draft release for acceptance review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.deb dist/*.tar.gz dist/BUILD.json dist/SHA256SUMS \
+            --verify-tag --draft --title "platmon $GITHUB_REF_NAME" --notes-file CHANGELOG.md

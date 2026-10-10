@@ -24,6 +24,7 @@ from collector.slow import Observations, Slow
 from collector.storage import Storage
 from collector.wifi import Wifi
 from frontends import server
+from frontends.cli import VERSION
 
 FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outputs that run inside the core
 
@@ -103,6 +104,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="platmon server: collector core + HTTP API (view it with the platmon command)")
     p.add_argument("config", nargs="?", help="INI file; built-in defaults apply without one")
     p.add_argument("--frontends", help=f"comma-separated, overrides enabled= in the config ({','.join(FRONTENDS)})")
+    p.add_argument("--version", action="version", version=f"platmon server {VERSION}")
     a = p.parse_args(argv)
     try:
         cfg = load_config(a.config, a.frontends.split(",") if a.frontends else None)
@@ -112,7 +114,7 @@ def main(argv=None):
     # exit cleanly on SIGTERM (systemd stop, docker stop); as PID 1 in a container Python would ignore it
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     # a container missing its device-tree mount shows up here as "PC"/"Linux" instead of the board
-    print(f"platmon: platform {PLATFORM}, board module {BOARD.__name__ if BOARD else 'none'}", flush=True)
+    print(f"platmon: platform {PLATFORM}, board module {BOARD.__name__ if BOARD else 'none'}, version {VERSION}", flush=True)
     interval = cfg["core"].getfloat("interval")
     clock = pick_clock()
     # CPU usage over the time since the previous reading; a longer break is not averaged over. This limit

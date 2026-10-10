@@ -3,7 +3,8 @@ Description=platmon platform monitor
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /opt/platmon/platmon.py /etc/platmon/platmon.ini
+ExecStart=/usr/bin/python3 /usr/share/platmon/platmon.py /etc/platmon/platmon.ini
+Environment=PYTHONDONTWRITEBYTECODE=1
 DynamicUser=yes
 ProtectSystem=strict
 ProtectHome=yes

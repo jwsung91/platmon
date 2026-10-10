@@ -14,6 +14,8 @@ import time
 import urllib.error
 import urllib.request
 
+# The release version lives here so the copied, single-file client stays standalone.
+VERSION = "0.1.0"
 PORT = 9797
 
 
@@ -276,6 +278,7 @@ def main(argv=None):
     p.add_argument("host", nargs="?", default="localhost", help=f"host[:port], default localhost:{PORT}")
     p.add_argument("interval", nargs="?", type=float, default=1.0, help="seconds between updates, default 1")
     p.add_argument("--once", action="store_true", help="print one snapshot without clearing the screen, then exit")
+    p.add_argument("--version", action="version", version=f"platmon {VERSION}")
     a = p.parse_args(argv)
     if not (math.isfinite(a.interval) and a.interval > 0):  # nan and inf would crash in time.sleep()
         p.error("interval must be a number greater than 0")
