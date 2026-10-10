@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -207,3 +208,42 @@ def test_source_update_validates_before_changing_files(source_install):
     assert (prefix / "old-code").read_text() == "previous release"
     assert unit.read_text() == "old unit\n"
     assert config.read_text() == "custom config"
+
+
+@pytest.mark.parametrize("target", ["ancestor", "tip", "unmerged"])
+def test_release_main_guard_with_real_git_history(tmp_path, target):
+    """Run the workflow's actual guard against isolated Git history, without publishing tags."""
+    remote, checkout = tmp_path / "remote.git", tmp_path / "checkout"
+
+    def git(*args, cwd=remote, **kwargs):
+        result = run("git", *args, cwd=cwd, **kwargs)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    git("init", "--bare", str(remote), cwd=tmp_path)
+    tree = git("hash-object", "-w", "-t", "tree", "--stdin", input="")
+
+    def commit(message, parent=None):
+        # Write fixture objects directly; this never invokes signing or repository hooks.
+        body = f"tree {tree}\n" + (f"parent {parent}\n" if parent else "")
+        body += "author Fixture <fixture@example.com> 1 +0000\n"
+        body += "committer Fixture <fixture@example.com> 1 +0000\n\n" + message + "\n"
+        return git("hash-object", "-w", "-t", "commit", "--stdin", input=body)
+
+    ancestor = commit("accepted base")
+    tip = commit("main tip", ancestor)
+    unmerged = commit("unmerged candidate", ancestor)
+    git("update-ref", "refs/heads/main", tip)
+    git("update-ref", "refs/heads/candidate", unmerged)
+    git("clone", "--no-checkout", str(remote), str(checkout), cwd=tmp_path)
+    git("checkout", "--detach", {"ancestor": ancestor, "tip": tip, "unmerged": unmerged}[target], cwd=checkout)
+    # An outdated local main ref must be refreshed from the remote by the guard.
+    git("update-ref", "refs/remotes/origin/main", ancestor, cwd=checkout)
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    block = workflow.split("      - name: Verify tag commit is on main\n        run: |\n", 1)[1]
+    guard = textwrap.dedent(block.split("\n\n", 1)[0])
+    result = run("bash", "-e", "-c", guard, cwd=checkout)
+    assert (result.returncode == 0) == (target != "unmerged"), result.stdout + result.stderr
+    assert git("rev-parse", "refs/remotes/origin/main", cwd=checkout) == tip
+    if target == "unmerged":
+        assert "release tag must point to a commit included in main" in result.stdout

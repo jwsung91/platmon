@@ -8,7 +8,22 @@ permissions:
   contents: read
 
 jobs:
+  verify-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify tag commit is on main
+        run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "::error::release tag must point to a commit included in main"
+            exit 1
+          fi
+
   checks:
+    needs: verify-main
     uses: ./.github/workflows/test.yml
 
   draft:

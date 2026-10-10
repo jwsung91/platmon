@@ -11,3 +11,4 @@ API schema versions are independent of release versions.
 - Server and CLI `--version`, source archive, build manifest and SHA-256 checksums.
 - Source installer stages updates and restores previous code/unit on startup failure.
 - Package and release validation workflows; an explicit version tag creates a draft release.
+- Release tags must reference commits included in main; existing version tags are protected from updates/deletion.

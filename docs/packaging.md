@@ -141,13 +141,23 @@ directories are never automatically deleted by subsequent updates or uninstall.
 2. Test fresh install, upgrade with an edited INI, downgrade, remove/purge and existing
    installation migration. CI uses an isolated container for dpkg lifecycle checks;
    actual systemd sandbox/startup and ARM device readings require real-device acceptance.
-3. Commit the reviewed change using the repository's signing/hooks policy. Tag the
-   verified commit as `v0.1.0`; use `v0.1.0-2` for packaging revision 2. Push only after
-   confirming the intended commit and required checks. This document does not create a tag.
-4. The release workflow verifies tag/version/changelog, runs tests and package checks,
+3. Merge the reviewed change into `main` using the repository's signing/hooks policy.
+   Tag the verified commit included in `main` as `v0.1.0`; use `v0.1.0-2` for packaging
+   revision 2. Confirm the intended commit and required checks before pushing the tag.
+   Creating a local tag alone does not start the workflow. This document does not create a tag.
+4. The release workflow fetches `main` and rejects tags whose commit is not an ancestor
+   of its current tip, before building. It verifies tag/version/changelog, runs tests and package checks,
    then creates a **draft** GitHub Release with the four artifacts. Review the attached
    bytes, acceptance evidence and notes before publishing the draft. Do not distribute
    a container image; the repository's existing image licensing policy still applies.
+
+The repository's active `release-tags` tag ruleset targets `refs/tags/v*`: new tags
+are allowed, but existing tags cannot be updated or deleted, with no bypass actors.
+Use a new application version or packaging revision instead of moving a release tag.
+The desired configuration is tracked in `.github/rulesets/release-tags.json`;
+changing that file alone does not change GitHub settings. Apply it through the repository
+ruleset API and confirm the live settings. The workflow's `main` check runs after a tag
+push; it prevents release creation rather than rejecting the original tag push.
 
 APT hosting is a later operational choice; no APT repository or signing key is created
 by these scripts. Releases currently use stable MAJOR.MINOR.PATCH versions only.
