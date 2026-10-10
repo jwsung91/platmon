@@ -1,8 +1,8 @@
-// Runs the <script> of frontends/web/index.html with a stub DOM, fake clocks and timers and scripted fetch
+// Runs the page script (<script id="app">) of frontends/web/index.html with a stub DOM, fake clocks and timers and scripted fetch
 // results, and prints one JSON line per step. Used by tests/test_web.py.
 //   node tests/web_harness.js frontends/web/index.html
 const fs = require('fs');
-const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script id="app">([\s\S]*?)<\/script>/)[1];
 
 const els = {};
 const el = id => (els[id] ||= {innerHTML: '', textContent: '', value: '', hidden: false, lastElementChild: null,

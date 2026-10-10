@@ -266,7 +266,8 @@
 </main>
 <footer>platmon v@VERSION@</footer>
 <script type="application/json" id="levels">@LEVELS@</script>
-<script>
+<!-- the page's code; tests/web_*harness.js find and run it by this id -->
+<script id="app">
 const $ = id => document.getElementById(id);
 const gib = b => (b / 2 ** 30).toFixed(1) + 'G';
 const SYSTEM_FIELDS = ['os', 'kernel', 'arch', 'hostname', 'l4t'];

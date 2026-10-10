@@ -1,6 +1,6 @@
 // View selection, bounded polling and hidden-page lifecycle with deterministic fixtures.
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
-const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script id="app">([\s\S]*?)<\/script>/)[1];
 let now = 0, nextTimer = 0, focused = '', failure = false;
 const elements = {}, intervals = [], timers = new Map(), listeners = [], requests = [];
 const navigation = {};

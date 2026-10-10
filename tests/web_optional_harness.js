@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
-const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script id="app">([\s\S]*?)<\/script>/)[1];
 const elements = {}, requests = [], timers = new Map(), intervals = [], listeners = [];
 let now = 0, next = 0;
 const context = vm.createContext({
