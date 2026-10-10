@@ -1,32 +1,8 @@
 # Remaining work
 
-## Container visibility and Pi PSI update (2026-10-09)
-
-Storage now skips file bind mounts when a valid directory on the same filesystem is available.
-The owner approved Docker host networking to restore host interfaces and Wi-Fi; configured HTTP
-ports also drive the image health check and start-script output. CPU/GPU/sensors/memory/Disk I/O
-were already visible; additional filesystems still need explicit directory binds. The complete
-comparison and actual-image checks are in [the Docker scope audit](../docker-scope.md).
-
-Pi PSI has been activated with `psi=1`, rebooted, and verified through the three kernel files and
-API (`ok`). Orin kernel changes remain deferred. No previous CPU/p95 miss is relabeled as passing.
-[PR #48](https://github.com/jwsung91/platmon/pull/48) records the final merge/CI/deployment state;
-older checkpoints below preserve their historical configurations and limitations.
-
-## Default enablement policy update (2026-10-09)
-
-After #40–#46 merged at `dc2875428892e99055e4dfe9c9afab0c2f7f1c52`, the owner requested
-all monitoring features enabled by default. Network, Disk I/O, Storage, Wi-Fi, PSI, Probe and
-History now default to enabled in both code and the shipped INI. Existing explicit off values
-remain effective; omitted sections adopt the new defaults. Probe with no configured targets
-stays idle without a worker, observation group or connection; targets require a restart to apply.
-Unsupported hardware retains its existing unavailable result. No production configuration is changed.
-
-This is an explicit policy choice, not a new performance pass. The previous supported all-on
-measurement (PSI excluded, loopback Probe) reached 2.174% of one core in one Orin short window,
-and 2.079% / 2.019% on Orin/Pi over retention. Storage/Wi-Fi call p95 still exceeds 2 ms.
-The 2% target and raw results remain unchanged; the new exact default configuration has not
-been ARM-benchmarked. Historical off-by-default statements below describe their measured revisions.
+The latest status updates (container visibility and Pi PSI, default enablement policy, 2026-10-09) and
+the release evidence are kept in one place: [release readiness](../release-readiness.md). This file tracks the
+staged plan, checkpoints, rollouts and device records.
 
 Status of the staged plan (Disk I/O → UI → storage capacity → PSI → Wi-Fi → RTT → history → release
 readiness). Checked against the repository and devices whenever work resumes. Statuses: done, in
