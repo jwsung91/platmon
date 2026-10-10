@@ -10,6 +10,11 @@ case "${1:-}" in
 esac
 [ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
 
+if command -v dpkg-query >/dev/null && [ "$(dpkg-query -W -f='${db:Status-Status}' platmon 2>/dev/null)" = installed ]; then
+    echo "platmon is managed by dpkg; use apt remove platmon (or apt purge platmon)" >&2
+    exit 1
+fi
+
 unit=/etc/systemd/system/platmon.service
 if [ -f "$unit" ]; then
     systemctl disable --now --quiet platmon

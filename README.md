@@ -13,6 +13,27 @@ One collector core runs on the device as a background service with an HTTP API; 
 - Shows the OS release, kernel, architecture and hostname (plus the L4T release on Jetson)
 - Detects the platform (Jetson Orin / Xavier, Raspberry Pi, PC, Linux) and hides what the board lacks
 
+## Install on a device
+
+Ubuntu/Debian-derived systems use a `.deb` package with a systemd service and the `platmon`
+command. The first version, `0.1.0`, is currently unreleased; build the package from this
+checkout, or use a fixed release's files when one is published:
+
+```sh
+python3 scripts/package.py --output dist/0.1.0-1
+python3 scripts/check_package.py dist/0.1.0-1/platmon_0.1.0-1_all.deb
+sudo apt install ./dist/0.1.0-1/platmon_0.1.0-1_all.deb
+platmon --version
+platmon --once
+```
+
+Requires the host's Python 3.9+ and systemd. The package preserves edited
+`/etc/platmon/platmon.ini`; use APT to update, remove or purge it. Code is installed in
+`/usr/share/platmon`, and the client in `/usr/bin/platmon`. Existing source/Docker installs
+need the explicit migration procedure before installation. See [packaging and releases](docs/packaging.md)
+for versions, checksums, migration, rollback and validation. Other Linux systems can use
+the versioned source archive and source scripts below.
+
 ## Usage
 
 platmon runs as a background service on the device (see "Run at boot": systemd or Docker), and you look at
@@ -26,7 +47,7 @@ platmon --once                   # one snapshot without clearing the screen (scr
 ```
 
 If the service is not running, `platmon` says so and how to start it. On the device the command comes
-with the service: `scripts/systemd/install.sh` puts it in `/usr/local/bin`, `scripts/docker/start.sh` in
+with the service: the Debian package puts it in `/usr/bin`, `scripts/systemd/install.sh` in `/usr/local/bin`, `scripts/docker/start.sh` in
 `~/.local/bin` (no sudo), and both update it when run again. On a PC that only watches devices, install
 just the command with `scripts/install-cli.sh` (or `--user`, no sudo); it is one standard-library Python
 file (`frontends/cli.py`).
@@ -77,10 +98,10 @@ tests/
 
 ### Run at boot
 
-Two ways: systemd or Docker. Both serve port 9797, so use one at a time; the scripts refuse to start
+Two ways: systemd (the package above, or the source scripts below) or Docker. Both serve port 9797, so use one at a time; the scripts refuse to start
 one way while the other is running (or, for systemd, still enabled at boot).
 
-**systemd** (the scripts ask for sudo):
+**systemd from source** (the scripts ask for sudo; packaged installs use APT/systemctl):
 
 ```sh
 scripts/systemd/install.sh              # install or update (after git pull), enable at boot, start, add `platmon`
@@ -90,7 +111,10 @@ scripts/systemd/uninstall.sh            # stop, disable, remove /opt/platmon, th
 scripts/systemd/uninstall.sh --purge    # ... and remove /etc/platmon too
 ```
 
-`install.sh` copies the code to `/opt/platmon` and the unit to `/etc/systemd/system/`. It creates
+`install.sh` stages the complete code, then stops and replaces `/opt/platmon` and installs a
+unit adapted to that path in `/etc/systemd/system/`. A failed replacement or readiness check
+restores the previous code/unit; a successful update keeps the previous files in the printed
+recovery directory. See [rollback](docs/packaging.md#rollback). It creates
 `/etc/platmon/platmon.ini` from `platmon.ini` only if that file does not exist yet, so your edits are
 kept. It checks the config first and changes nothing if it is invalid. Logs: `journalctl -u platmon`.
 The default port was 8080 before; an existing `/etc/platmon/platmon.ini` keeps its port, so edit it

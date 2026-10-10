@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|purge)
+        if [ -d /run/systemd/system ]; then
+            systemctl --system daemon-reload
+        fi
+        ;;
+esac
+if [ "$1" = purge ]; then
+    deb-systemd-helper purge platmon.service >/dev/null || true
+    deb-systemd-helper unmask platmon.service >/dev/null || true
+    # Only remove an empty directory: preserve unrelated or backup configs.
+    rmdir /etc/platmon 2>/dev/null || true
+fi
+exit 0
