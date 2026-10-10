@@ -1,5 +1,6 @@
 """The web page's script, run in Node against scripted responses (skipped where Node is missing)."""
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -52,6 +53,16 @@ def test_web_survives_errors_and_recovers(steps):
     assert steps["garbage"]["err"] == "Unexpected response (not platmon data)"
     assert steps["garbage"]["age"] == "Last good: response received 9 s ago" + LEGACY + " (not current)"
     assert steps["recovered"]["err"] == "" and steps["recovered"]["age"] == "Response received 0 s ago" + LEGACY
+
+
+def test_status_pill_and_offline_banner(steps):
+    """The age line lives in the status pill's tooltip; failures show Offline and the last good data's age."""
+    assert steps["ok"]["status"] == "Live" and steps["ok"]["err_age"] == ""
+    assert steps["503"]["status"] == "Offline"
+    assert steps["503"]["err_age"] == " Showing the last good answer, received 1 s ago."
+    assert steps["sample_503"]["err_age"] == " Showing the last good sample, 4 s old."
+    assert steps["recovered"]["status"] == "Live" and steps["recovered"]["err_age"] == ""
+    assert steps["tab_return_checking"]["status"] == "Checking"
 
 
 def test_sample_age_comes_from_the_server(steps):
@@ -121,10 +132,12 @@ def test_cpu_sampling_note(steps):
 
 def test_collection_note(steps):
     """Read failures of optional groups are named; absent ones are not; set as text, so nothing is injected."""
-    assert steps["collection_bad"]["coll"] == "Collection: temperature partial, gpu error, <b>x</b> error"
-    assert steps["collection_bad"]["err"] == ""
+    assert steps["collection_bad"]["coll"] == "temperature partial, gpu error, <b>x</b> error"
+    assert steps["collection_bad"]["err"] == "" and steps["collection_bad"]["status"] == "Partial"
+    assert steps["collection_bad_then_down"]["status"] == "Offline"
     assert steps["collection_bad_then_down"]["coll"] == steps["collection_bad"]["coll"]  # belongs to the last good data
     assert steps["collection_ok"]["coll"] == "" and steps["collection_odd"]["coll"] == ""
+    assert steps["collection_ok"]["status"] == "Live"
     assert steps["ok"]["coll"] == ""  # legacy servers: no note
 
 
@@ -135,11 +148,13 @@ def test_read_based_data_age(steps):
 
 def test_network_and_disk_rows(steps):
     net, dio = steps["counters"]["net"], steps["counters"]["dio"]
-    assert "rx 1.5 KiB/s · tx 0 B/s" in net and "errors 3/0 (rx/tx, total)" in net and "this process's network namespace" in net
+    assert "eth0</span><span>1.5 KiB/s</span><span>0 B/s</span>" in net and '<span class="t-warn">3 · 0</span>' in net
+    assert steps["counters"]["net_cap"] == "This process's network namespace · window 1.000 s · errors and drops are totals"
     assert "&#60;img src=x onerror=alert(1)&#62;" in net and "<img" not in net  # a name is text, never HTML
-    assert "rx 2.0 · tx 0.0 packets/s · window 1.000 s" in net
+    assert '<span class="muted">2.0 · 0.0</span>' in net
     assert "warming up" in net and "some_new_reason" in net  # no rate: the reason, not 0
-    assert "read 3.0 MiB/s · write 512 B/s" in dio and "reads 4.0/s · writes 0.5/s · I/O time 3.4% · window 1.000 s" in dio and "in flight 2" in dio
+    assert '<div class="tr idle">' not in net.split("eth0")[0].rsplit("</div>", 1)[-1]  # eth0 receives: not dimmed
+    assert "nvme0n1</span><span>3.0 MiB/s</span><span>512 B/s</span>" in dio and "4.0 · 0.5" in dio and "3.4%" in dio
     assert "counter went backwards" in dio and "saturat" not in dio
 
 
@@ -150,8 +165,10 @@ def test_counters_absent_or_odd_show_nothing(steps):
 
 def test_storage_from_observations(steps):
     sto = steps["ok"]["sto"]
-    assert "observed 95 s ago (not current)" in sto  # the server's age, and stale says so
-    assert "1.0G/4.0G · 3.0G free" in sto and "/mnt/&#60;b&#62;x&#60;/b&#62; (ro) +60 more" in sto and "<b>" not in sto
+    assert steps["ok"]["obs_age"]["storage"] == "observed 95 s ago (not current)"  # the server's age, and stale says so
+    assert "1.0G / 4.0G · 25%" in sto and "3.0G free" in sto and "<b>" not in sto
+    assert '/mnt/&#60;b&#62;x&#60;/b&#62;</span><span class="badge">ro</span><span class="muted">+60 more' in sto
+    assert sto.index("/mnt/") < sto.index("/data")  # by usage, unknown capacity last
     assert "/bind/" not in sto  # dozens of bind mounts: counted, not listed
     assert "capacity unknown" in sto and "0:40" in sto  # no numbers made up when statvfs gave none
     assert "nvme0n1p2" in sto and "not mounted" in sto
@@ -165,34 +182,40 @@ def test_observations_404_stops_asking(steps):
 
 def test_wifi_from_observations(steps):
     wifi = steps["ok"]["wifi"]
-    assert "observed 2 s ago" in wifi and "-64 dBm" in wifi and "link quality 46" in wifi
+    assert steps["ok"]["obs_age"]["wifi"] == "observed 2 s ago" and "-64 dBm" in wifi and "link quality 46" in wifi
     assert "wlan1</span><span>not connected" in wifi  # no last signal, no 0
+    assert wifi.count('class="bar"') == 1  # only a dBm signal gets a bar
     assert "signal 70 (unit not reported)" in wifi and "&#60;i&#62;x&#60;/i&#62;" in wifi and "<i>" not in wifi
     assert steps["read_based_age"]["wifi"] == ""  # cleared after the server stopped answering it (404)
 
 
 def test_probe_from_observations(steps):
     probe = steps["ok"]["probe"]
-    assert "192.0.2.1:443</span><span>12.3 ms · failed 1/10" in probe
-    assert "[2001:db8::1]:22</span><span>timeout · failed 3/3" in probe and "0.0 ms" not in probe
+    assert '192.0.2.1:443</span><span>12.3 ms</span><span><span class="t-warn">1/10' in probe
+    assert "[2001:db8::1]:22</span><span>timeout</span>" in probe and "0.0 ms" not in probe
     assert steps["read_based_age"]["probe"] == ""
+
+
+def line(hist, label):
+    """The drawn line (not the area fill) of the chart labelled label."""
+    return re.search('class="line" d="([^"]*)"', hist.split(label + "</span>")[1]).group(1)
 
 
 def test_history_graphs(steps):
     hist = steps["ok"]["hist"]
-    assert "last 10 min" in hist and "RAM used</span><span>2.0G" in hist and "<svg" in hist
+    assert "RAM used</span><span>2.0G" in hist and "<svg" in hist and "1.0G – 2.0G" in hist
     assert "eth0 rx</span><span>no value" in hist  # the latest point is a gap: said so, not 0
     assert "&#60;b&#62; tx" in hist and "<b>" not in hist
-    assert "CPU0" in hist and "cpu/0" not in hist and "unknown" not in hist  # only the series the page knows how to label
-    eth0 = hist.split("eth0 rx")[1].split("</svg>")[0]
+    assert "CPU0" in hist and ">cpu/0" not in hist and "unknown" not in hist  # only the series the page knows how to label
+    eth0 = line(hist, "eth0 rx")
     assert eth0.count("M") == 1 and "L" not in eth0  # one point between two gaps: no line drawn across them
     assert steps["read_based_age"]["hist"] == "" and steps["read_based_age"]["hist_fetches"] == 2  # 404: stopped
 
 
 def test_pressure_rows(steps):
     psi = steps["pressure"]["psi"]
-    assert "avg10 · share of time stalled" in psi and "some 1.3%" in psi and "some 3.0% · full 0.5%" in psi
-    assert "cpu</span><span>some 1.3%</span>" in psi  # no full for the CPU: undefined at the system level
+    assert "io</span><span>3.0%</span><span><span class=\"muted\">0.5%" in psi
+    assert "cpu</span><span>1.3%</span><span><span class=\"muted\">—" in psi  # no full for the CPU: undefined at the system level
     assert steps["counters_absent"]["psi"] == ""
 
 
@@ -202,8 +225,8 @@ def test_history_uses_elapsed_spacing_and_low_frequency_units(steps):
     assert "wlan0 signal</span><span>-64.0 dBm" in hist
     assert "FS 8:1 used</span><span>1.0G" in hist
     assert "latest point 2 s ago" in hist
-    probe = hist.split("TCP 127.0.0.1:80")[1].split("</svg>")[0]
-    assert "M0.0,26.0L20.0,14.0L200.0,2.0" in probe  # irregular 1 s then 9 s interval
+    assert line(hist, "TCP 127.0.0.1:80") == "M0.0,26.0L20.0,14.0L200.0,2.0"  # irregular 1 s then 9 s interval
+    assert "1.0 ms – 3.0 ms" in hist  # the chart's range
 
 
 def test_optional_polling_is_bounded():

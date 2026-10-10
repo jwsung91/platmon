@@ -7,12 +7,14 @@ import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .cli import render
+from .cli import VERSION, render
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 BRAND_ASSETS = {
     "/assets/brand/platmon-logo-light.svg": "platmon-logo-light.svg",
     "/assets/brand/platmon-logo-dark.svg": "platmon-logo-dark.svg",
+    "/assets/brand/platmon-icon-light.svg": "platmon-icon-light.svg",
+    "/assets/brand/platmon-icon-dark.svg": "platmon-icon-dark.svg",
     "/assets/brand/favicon.svg": "favicon.svg",
 }
 LIVE = ("/api/stats", "/api/status", "/api/observations", "/api/history", "/text")
@@ -80,8 +82,8 @@ def make_handler(sampler, web=True, observations=None, history=None):
                 else:  # same screen as the platmon command: watch -n1 curl -s host:9797/text
                     body, ctype = (render(stats, observed()) + "\n").encode(), "text/plain; charset=utf-8"
             elif web and self.path in ("/", "/index.html"):
-                with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
-                    body, ctype = f.read(), "text/html; charset=utf-8"
+                with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:  # the footer shows this version
+                    body, ctype = f.read().replace(b"@VERSION@", VERSION.encode()), "text/html; charset=utf-8"
             elif web and self.path in BRAND_ASSETS:
                 with open(os.path.join(WEB_DIR, "assets", "brand", BRAND_ASSETS[self.path]), "rb") as f:
                     body, ctype = f.read(), "image/svg+xml"
