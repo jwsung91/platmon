@@ -278,7 +278,8 @@ def render(s, obs=None):
 # Live terminal screen (interactive terminals only). Same data, wording and levels as the web page; no
 # requests beyond render()'s: the sparklines are the last SPARK_POINTS /api/stats answers kept here.
 
-LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (80, 90)}  # web page defaults
+# The web page's defaults; use_levels() replaces them with the server's [thresholds] (/api/status "levels").
+LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (80, 90), "temperature": None}
 TEMP_LIMITS = {"Jetson Orin": (85, 95), "Raspberry Pi": (75, 80)}  # below the boards' throttling points
 SPARK_POINTS = 24
 WIDE = 100  # columns from which everything is on one screen; below, the overview and a few rows
@@ -286,7 +287,16 @@ ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 
 
 def temp_limits(s):
-    return TEMP_LIMITS.get(s.get("platform"), (80, 90))
+    return LIMITS["temperature"] or TEMP_LIMITS.get(s.get("platform"), (80, 90))
+
+
+def use_levels(levels):
+    """Takes the server's levels ({name: [warning, critical]}, temperature may be null); anything else in
+    them, or a server without them (None), keeps the defaults."""
+    for name, value in (levels if isinstance(levels, dict) else {}).items():
+        if name in LIMITS and (value is None and name == "temperature" or isinstance(value, list) and len(value) == 2
+                               and all(isinstance(v, (int, float)) for v in value) and value[0] < value[1]):
+            LIMITS[name] = tuple(value) if value else None
 
 
 def level(v, limits):
@@ -376,6 +386,14 @@ def metrics(s):
 def hottest_first(s):
     return sorted(((k, v) for k, v in (s.get("temperature") or {}).items() if isinstance(v, (int, float))),
                   key=lambda kv: -kv[1])
+
+
+def busiest_first(interfaces):
+    """Interfaces by traffic (rx + tx), those without rates last; otherwise in the server's order."""
+    def traffic(i):
+        r = i.get("rates")
+        return -(r["rx_bytes_per_s"] + r["tx_bytes_per_s"]) if r else 1
+    return sorted(interfaces, key=traffic)
 
 
 def filesystems(obs):
@@ -485,7 +503,7 @@ def screen(s, obs, width, height, st, status, history):
     body.append("")
 
     net = s.get("network") if isinstance(s.get("network"), dict) else {}
-    ifaces = net.get("interfaces") if isinstance(net.get("interfaces"), list) else []
+    ifaces = busiest_first(net.get("interfaces") if isinstance(net.get("interfaces"), list) else [])
     if not wide:
         ifaces = [i for i in ifaces if i["name"] != "lo"]
     shown = ifaces[:MAX_ROWS if wide else 2]
@@ -652,10 +670,24 @@ def interactive():
             and os.environ.get("TERM", "") not in ("", "dumb"))
 
 
+def make_style(env, encoding):
+    """NO_COLOR: no colors. ASCII glyphs without UTF-8, or with PLATMON_ASCII=1 for terminals that draw
+    block and line characters two columns wide (East Asian ambiguous width)."""
+    return Style(color=not env.get("NO_COLOR"),
+                 utf8=(encoding or "").lower().replace("-", "") == "utf8" and env.get("PLATMON_ASCII") != "1")
+
+
+def data_age(s, got, now):
+    """Seconds since the data was read: the server's data_age_ms when it reports one, plus the time since
+    the answer arrived (as on the web page); older servers: only the time since the answer."""
+    sample = s.get("sample") if isinstance(s.get("sample"), dict) else {}
+    age = sample.get("data_age_ms")
+    return (age / 1000 if isinstance(age, (int, float)) and age >= 0 else 0) + now - got
+
+
 def live(addr, interval, fetch, first):
     """The live view on an interactive terminal: one request per interval as before, nothing in between."""
-    st = Style(color=not os.environ.get("NO_COLOR"),
-               utf8=(sys.stdout.encoding or "").lower().replace("-", "") == "utf8")
+    st = make_style(os.environ, sys.stdout.encoding)
     history = {}
 
     def remember(s):
@@ -673,7 +705,8 @@ def live(addr, interval, fetch, first):
         while True:
             cols, rows = shutil.get_terminal_size()
             state = "offline" if error else "partial" if collection_note(s) else "live"
-            status = {"state": state, "age": time.monotonic() - got, "error": error, "addr": addr, "interval": interval}
+            status = {"state": state, "age": data_age(s, got, time.monotonic()), "error": error, "addr": addr,
+                      "interval": interval}
             term.draw(screen(s, obs, cols - 1, rows, st, status, history))  # cols - 1: never wraps the last column
             event = term.wait(deadline - time.monotonic())
             if event == "resize":
@@ -710,7 +743,8 @@ def explain(addr, e):
 def main(argv=None):
     p = argparse.ArgumentParser(prog="platmon", description="Live view of a platmon service (this device by default).",
                                 epilog="The service runs in the background: scripts/systemd/install.sh or "
-                                       "scripts/docker/start.sh in the platmon repo. NO_COLOR=1 turns colors off.")
+                                       "scripts/docker/start.sh in the platmon repo. NO_COLOR=1 turns colors off; "
+                                       "PLATMON_ASCII=1 draws with ASCII only.")
     p.add_argument("host", nargs="?", default="localhost", help=f"host[:port], default localhost:{PORT}")
     p.add_argument("interval", nargs="?", type=float, default=1.0, help="seconds between updates, default 1")
     p.add_argument("--once", action="store_true", help="print one snapshot without clearing the screen, then exit")
@@ -754,6 +788,11 @@ def main(argv=None):
         return
     try:
         if interactive():
+            try:  # the server's [thresholds]; read once, a restart is needed to change them anyway
+                with urllib.request.urlopen(f"http://{addr}/api/status", timeout=5) as r:
+                    use_levels(json.load(r).get("levels"))
+            except (OSError, ValueError, AttributeError):  # an older server or none: the defaults
+                pass
             live(addr, a.interval, fetch, first)
             return
         out = render(*first)  # not a terminal (a pipe, a log, Windows): the plain screen as before

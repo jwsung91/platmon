@@ -4,7 +4,9 @@ from collections import deque
 
 import pytest
 
-from frontends.cli import ANSI, Style, attention, fit, render, screen, vlen
+from frontends import cli
+from frontends.cli import (ANSI, LIMITS, Style, attention, busiest_first, data_age, fit, make_style, render, screen,
+                           use_levels, vlen)
 from test_cli import FULL
 
 HOT = dict(FULL, cpu=[{"id": 0, "usage": 12.5, "freq": 1728000000}, {"id": 7, "usage": 91.4, "freq": 1728000000}],
@@ -57,6 +59,41 @@ def test_fit_keeps_escapes_and_resets():
     st = Style()
     cut = fit(st("abcdef", "warn") + "ghij", 4)
     assert vlen(cut) == 4 and cut.endswith("\033[0m")
+
+
+def test_server_levels_replace_the_defaults(monkeypatch):
+    """/api/status "levels" ([thresholds]) as the web page uses them; bad or missing ones keep the defaults."""
+    monkeypatch.setattr(cli, "LIMITS", dict(LIMITS))
+    use_levels({"temperature": [80, 90], "memory": [10, 20], "cpu": [90, 80], "gpu": "x", "swap": [1, 2]})
+    assert cli.LIMITS["memory"] == (10, 20) and cli.LIMITS["cpu"] == (80, 90) and cli.LIMITS["gpu"] == (80, 90)
+    assert "swap" not in cli.LIMITS
+    assert attention(HOT, None) == [("RAM", "25.0 %", "crit"), ("tj", "86.2 °C", "warn")]  # 80/90 replaces Orin's 85/95
+    use_levels({"temperature": None})
+    assert attention(HOT, None)[1] == ("tj", "86.2 °C", "warn")  # null: the board default again (85/95)
+    use_levels(None)  # an older server
+    assert cli.LIMITS["memory"] == (10, 20)
+
+
+def test_data_age_is_the_servers_plus_time_since():
+    assert data_age({"sample": {"data_age_ms": 1500}}, got=10.0, now=12.0) == 3.5
+    assert data_age({}, got=10.0, now=12.0) == 2.0  # an older server: the time since its answer
+    assert data_age({"sample": {"data_age_ms": None}}, got=10.0, now=10.5) == 0.5
+
+
+def test_busiest_interfaces_first():
+    rate = lambda name, rx, tx=0: {"name": name, "rx": {"errors": 0, "dropped": 0}, "tx": {"errors": 0, "dropped": 0},
+                                   "rates": {"rx_bytes_per_s": rx, "tx_bytes_per_s": tx,
+                                             "rx_packets_per_s": 0, "tx_packets_per_s": 0}}
+    items = [rate("br0", 0), {"name": "wlan1", "rates": None, "reason": "warmup"}, rate("eth0", 10, 5), rate("can0", 0)]
+    assert [i["name"] for i in busiest_first(items)] == ["eth0", "br0", "can0", "wlan1"]
+    narrow = plain(screen(dict(FULL, network={"interfaces": items}), None, 70, 40, Style(), LIVE, {}))
+    assert any(line.strip().startswith("eth0") for line in narrow)  # two rows on a narrow screen: the busy one shown
+
+
+def test_ascii_on_request():
+    assert make_style({}, "utf-8").full == "█"
+    assert make_style({"PLATMON_ASCII": "1"}, "utf-8").full == "#"
+    assert make_style({}, "ascii").full == "#" and make_style({"NO_COLOR": "1"}, "UTF-8").color is False
 
 
 def test_render_is_unchanged_by_the_live_view():

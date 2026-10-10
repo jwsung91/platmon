@@ -40,11 +40,17 @@ platmon runs as a background service on the device (see "Run at boot": systemd o
 it with the `platmon` command, a browser, or `curl`:
 
 ```sh
-platmon                          # this device: live view, Ctrl+C to quit
+platmon                          # this device: live view, q or Ctrl+C to quit
 platmon 192.168.55.53            # another device (host[:port], default port 9797)
 platmon 192.168.55.53 2          # update every 2 s
 platmon --once                   # one snapshot without clearing the screen (scripts, ssh, logs)
 ```
+
+On an interactive terminal (Linux, macOS) the live view fits the terminal and colors readings with the
+web page's warning and critical levels (the service's `[thresholds]`), with a Needs attention line,
+sparklines of the last 24 updates, and a banner over the last data while the service cannot be reached.
+`NO_COLOR=1` turns colors off; `PLATMON_ASCII=1` draws with ASCII only (for terminals that draw block and
+line characters two columns wide). `--once`, pipes and Windows keep the plain screen, the same as `/text`.
 
 If the service is not running, `platmon` says so and how to start it. On the device the command comes
 with the service: the Debian package puts it in `/usr/bin`, `scripts/systemd/install.sh` in `/usr/local/bin`, `scripts/docker/start.sh` in
