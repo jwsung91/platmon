@@ -28,6 +28,30 @@ configured Probe targets and history retention filled) stay as recorded below, a
 p95 above 2 ms is unchanged. Raw files: `~/platmon-gate-1.0-9617806/default-{1..4}.json` on each board
 (sha256 prefixes Orin `3db58330 863cd659 a23036ae 3bf2e287`, Pi `3f297379 207c587f f392f202 d01f2366`).
 
+### Package acceptance on the devices (2026-10-10)
+
+`platmon_1.0.0-1_all.deb`, built from the 1.0.0 release branch (head `1f97497`), installed with APT on both
+boards and run as the real systemd service, then purged. The service got a loopback test INI on port
+19797, placed before the install and kept by dpkg. An `/etc/platmon` left by an earlier source install on
+the Orin was moved aside and restored unchanged. The package's preinst refuses to install next to a
+running Docker platmon, as documented, so the Orin's Docker service was stopped for the test (about one
+minute) and the same container was started again.
+
+| check | Orin Nano (Ubuntu 22.04, Python 3.10) | Raspberry Pi 4 (Debian 13, Python 3.13) |
+| --- | --- | --- |
+| service active and enabled | pass | pass |
+| DynamicUser (not root), NoNewPrivileges | pass | pass |
+| `/api/status` ready, `/api/stats`, observations, history, web page `v1.0.0` | pass | pass |
+| `platmon --version` = `platmon 1.0.0` | pass | pass |
+| readings as the sandboxed user | 6 temperatures, 3 power rails, 2 fans, GPU, `MAXN_SUPER`, CPU frequency; PSI unavailable (kernel) | CPU temperature, PSI; no GPU/power/fans (board) |
+| `levels.temperature` | `[85.0, 95.0]` | `[75.0, 80.0]` |
+| purge: package gone, port released, prior state back | pass | pass |
+
+Both logs end in `RESULT: PASS` (`~/platmon-acceptance-1.0.0/acceptance.log` on each board). The first Orin
+attempt stopped at the preinst check before anything was installed; it left only a not-installed dpkg
+entry, which the passing run removed. The Pi had rebooted at 14:47 for an unrelated reason; its
+hand-started platmon (no autostart) was down before the test and was restarted afterwards.
+
 ## Container visibility and Pi PSI update (2026-10-09)
 
 Storage now skips file bind mounts when a valid directory on the same filesystem is available.
