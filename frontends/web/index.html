@@ -279,13 +279,11 @@ const table = (cols, head, rows, minWidth = 0) => `<div class="table"><div style
 const muted = text => `<span class="muted">${text}</span>`;
 
 // Status levels: ok below warn, warn from warn, crit from crit. Instantaneous values, no persistence.
-// The server fills them in from [thresholds] in platmon.ini; these defaults apply without it.
-// Temperature, unless set there: below the board's throttling points (Jetson Orin software throttling
-// ≈99 °C; Raspberry Pi firmware throttling from 80 °C, not exposed as a trip point), else a generic fallback.
-const LIMITS = {cpu: [80, 90], gpu: [80, 90], memory: [80, 90], filesystem: [80, 90], temperature: null};
+// The server fills them in from [thresholds] in platmon.ini, temperature with its board's default when
+// not set there (platmon.py BOARD_TEMPERATURE); these generic defaults apply only to a page not served by platmon.
+const LIMITS = {cpu: [80, 90], gpu: [80, 90], memory: [80, 90], filesystem: [80, 90], temperature: [80, 90]};
 try { Object.assign(LIMITS, JSON.parse($('levels').textContent)); } catch (e) {}  // not served by platmon
-const TEMP_LIMITS = {'Jetson Orin': [85, 95], 'Raspberry Pi': [75, 80]};
-const tempLimits = s => LIMITS.temperature || TEMP_LIMITS[s.platform] || [80, 90];
+LIMITS.temperature ||= [80, 90];
 const level = (v, [warn, crit]) => v >= crit ? 'crit' : v >= warn ? 'warn' : 'ok';
 const textLevel = lv => lv === 'ok' ? '' : ' t-' + lv;
 const pctOf = (used, total) => total ? 100 * used / total : 0;
@@ -589,9 +587,9 @@ function overviewRows(s) {
   metric('Root filesystem', gib(d.total), pctOf(d.used, d.total), '%', LIMITS.filesystem, `${gib(d.used)} used · ${gib(d.total - d.used)} free`, 'storage', '/');
   const temps = Object.entries(s.temperature).filter(([, value]) => Number.isFinite(value)).sort((a, b) => b[1] - a[1]);
   if (temps.length) {
-    metric('Temperature', temps[0][0], temps[0][1], '°C', tempLimits(s), `Hottest of ${temps.length} ${temps.length === 1 ? 'sensor' : 'sensors'}`, 'thermal', temps[0][0]);
+    metric('Temperature', temps[0][0], temps[0][1], '°C', LIMITS.temperature, `Hottest of ${temps.length} ${temps.length === 1 ? 'sensor' : 'sensors'}`, 'thermal', temps[0][0]);
     for (const [name, value] of temps.slice(1)) {  // every hot sensor, not only the hottest
-      const lv = level(value, tempLimits(s));
+      const lv = level(value, LIMITS.temperature);
       if (lv !== 'ok') alerts.push({lv, tab: 'thermal', name, value: value.toFixed(1) + ' °C'});
     }
   }
@@ -636,7 +634,7 @@ function renderResources(s) {
 function renderThermal(s) {
   const temps = Object.entries(s.temperature).sort((a, b) => b[1] - a[1]);
   $('temp').innerHTML = temps.length ? '<div class="temps">' + temps.map(([k, v]) =>
-    `<div class="temp"><span>${esc(k)}</span>${bar(v, tempLimits(s))}<span>${v.toFixed(1)} °C</span></div>`).join('') + '</div>' : '';
+    `<div class="temp"><span>${esc(k)}</span>${bar(v, LIMITS.temperature)}<span>${v.toFixed(1)} °C</span></div>`).join('') + '</div>' : '';
   const rows = Object.entries(s.power).map(([k, v]) => kv(esc(k), v.toFixed(2) + ' W')).join('') +
     s.fans.map(f => kv('Fan ' + esc(f.name), ([f.rpm !== null && f.rpm + ' rpm', f.percent !== null && f.percent + '%'].filter(Boolean).join(' · ') || 'n/a'))).join('');
   $('pwr-cap').innerHTML = s.power_mode ? `<span class="chip">MODE ${esc(s.power_mode)}</span>` : '';
