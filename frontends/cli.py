@@ -607,7 +607,9 @@ def screen(s, obs, width, height, st, status, history):
     if len(body) > room:
         hidden = len(body) - room + 1
         body = body[:room - 1] + [st(f"  +{hidden} more lines · enlarge the terminal", "muted")]
-    return [fit(line, width) for line in head + banner + body + foot]
+    # A terminal too short for the header, one line and the footer still gets only the lines it has:
+    # drawing past the last row scrolls the screen and leaves the frame in pieces.
+    return [fit(line, width) for line in (head + banner + body + foot)[:max(height, 1)]]
 
 
 class Terminal:

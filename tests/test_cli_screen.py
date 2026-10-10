@@ -18,7 +18,8 @@ def plain(lines):
     return [ANSI.sub("", line) for line in lines]
 
 
-@pytest.mark.parametrize("width,height", [(119, 40), (79, 24), (60, 20), (40, 12)])
+# the last four are shorter than the header, a line and the footer together
+@pytest.mark.parametrize("width,height", [(119, 40), (79, 24), (60, 20), (40, 12), (20, 6), (80, 5), (12, 3), (10, 1)])
 def test_fits_the_terminal(width, height):
     lines = screen(HOT, None, width, height, Style(), LIVE, {})
     assert len(lines) <= height
