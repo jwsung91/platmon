@@ -214,6 +214,18 @@ def test_detect(compatible, has_dmi, expected):
     assert detect(compatible, has_dmi) == expected
 
 
+def without_host_sensors(monkeypatch, tmp_path):
+    """Read the optional sensors from an empty tree. Tests that run collect() against fake /proc/stat and
+    fake counters otherwise pick up this host's thermal zones and hwmon chips, so one unreadable sensor
+    (an EIO fan, a denied zone) makes the service degraded and the test fail on that machine alone."""
+    import functools
+    empty = tmp_path / "no-sensors"
+    empty.mkdir(exist_ok=True)
+    monkeypatch.setattr(common, "thermal_zones", functools.partial(common.thermal_zones, root=str(empty)))
+    monkeypatch.setattr(common, "hwmon_sensors", functools.partial(common.hwmon_sensors, root=str(empty)))
+    return empty
+
+
 def fake_hwmon(root, chips):
     for i, files in enumerate(chips):
         d = root / f"hwmon{i}"

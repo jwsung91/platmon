@@ -94,8 +94,10 @@ def test_direct_collect_with_network_has_no_read_time():
 # ---------- collect_recorded with a fake network ----------
 
 @pytest.fixture
-def service(monkeypatch):
+def service(monkeypatch, tmp_path):
     """collect_recorded with fake /proc/stat and fake counters, all on one fake clock, in a fake Sampler."""
+    from test_common import without_host_sensors
+    without_host_sensors(monkeypatch, tmp_path)
     c = Clock()
     clock = lambda: c.ns  # noqa: E731 - the one clock everything uses
     h = Host(eth0=(2, (0, 0, 0, 0), (0, 0, 0, 0)))
