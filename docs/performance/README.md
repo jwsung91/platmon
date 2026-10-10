@@ -13,8 +13,8 @@ budget, then the current evidence. The release decision itself is in [release re
 
 - [history-expiry-validation.md](history-expiry-validation.md): the final validated runtime (`aac7ed7`),
   default and all-on CPU per board, history retention and memory. The default configuration has since
-  turned every feature on; that exact configuration has not been measured on the boards (see release
-  readiness).
+  turned every feature on; that configuration's 1.0.0 gate (every window <= 2.0 % on both boards) is in
+  [release readiness](../release-readiness.md#100-release-gate-2026-10-10).
 - [network-product.md](network-product.md), [disk-io-product.md](disk-io-product.md): what Network and
   Disk I/O add to the default configuration.
 - [low-frequency.md](low-frequency.md): what Storage, Wi-Fi, the TCP connect probe and history cost.

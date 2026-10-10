@@ -16,13 +16,13 @@ One collector core runs on the device as a background service with an HTTP API; 
 ## Install on a device
 
 Ubuntu/Debian-derived systems use a `.deb` package with a systemd service and the `platmon`
-command. The first version, `0.1.0`, is currently unreleased; build the package from this
-checkout, or use a fixed release's files when one is published:
+command. Download a release's files from the GitHub Releases page (verify `SHA256SUMS`), or build
+the package from this checkout:
 
 ```sh
-python3 scripts/package.py --output dist/0.1.0-1
-python3 scripts/check_package.py dist/0.1.0-1/platmon_0.1.0-1_all.deb
-sudo apt install ./dist/0.1.0-1/platmon_0.1.0-1_all.deb
+python3 scripts/package.py --output dist/1.0.0-1
+python3 scripts/check_package.py dist/1.0.0-1/platmon_1.0.0-1_all.deb
+sudo apt install ./dist/1.0.0-1/platmon_1.0.0-1_all.deb
 platmon --version
 platmon --once
 ```

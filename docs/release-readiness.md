@@ -1,5 +1,57 @@
 # Release readiness
 
+## 1.0.0 release gate (2026-10-10)
+
+The default configuration since the enablement policy (every feature on; Probe idle without targets;
+PSI on where the kernel provides it, now including the Raspberry Pi) was measured on both boards against
+the unchanged target: the whole process at most 2.0 % of one core.
+
+- Runtime: `9617806b9945dfe5acc2b3e7aceb6f75c0f211ac` (main after #59), from `git archive`, natively on a
+  loopback test port next to the boards' own services. The INI is the shipped `platmon.ini` with only
+  `[http]` bind/port changed (sha256 `a7ae2251538e…`, same on both boards).
+- Method: `benchmarks/service_cpu.py`, 4 windows per board, each 30 s warmup + 120 s measurement, one
+  client polling `/api/stats` every second. Both boards ran at the same time, 13:31–13:41 KST.
+- The 1.0.0 release commit adds the web history label fix, the version and documentation on top of this
+  runtime. Neither changes collection or `/api/stats`.
+
+| board | window 1 | window 2 | window 3 | window 4 | result |
+| --- | --- | --- | --- | --- | --- |
+| Orin Nano | 1.742 % | 1.650 % | 1.702 % | 1.867 % | every window <= 2.0 % |
+| Raspberry Pi 4 | 1.802 % | 1.579 % | 1.675 % | 1.675 % | every window <= 2.0 % |
+
+All 963 `/api/stats` requests answered 200; no collection failure was logged; every window exited
+normally (no forced kill) and released its port. RSS at the end of a window: 22.8–29.0 MiB (Orin),
+25.5–28.1 MiB (Pi). The production services on port 9797 kept answering throughout.
+
+This gate covers the default configuration only. The earlier optional all-on results above 2 % (with
+configured Probe targets and history retention filled) stay as recorded below, and Storage/Wi-Fi call
+p95 above 2 ms is unchanged. Raw files: `~/platmon-gate-1.0-9617806/default-{1..4}.json` on each board
+(sha256 prefixes Orin `3db58330 863cd659 a23036ae 3bf2e287`, Pi `3f297379 207c587f f392f202 d01f2366`).
+
+### Package acceptance on the devices (2026-10-10)
+
+`platmon_1.0.0-1_all.deb`, built from the 1.0.0 release branch (head `1f97497`), installed with APT on both
+boards and run as the real systemd service, then purged. The service got a loopback test INI on port
+19797, placed before the install and kept by dpkg. An `/etc/platmon` left by an earlier source install on
+the Orin was moved aside and restored unchanged. The package's preinst refuses to install next to a
+running Docker platmon, as documented, so the Orin's Docker service was stopped for the test (about one
+minute) and the same container was started again.
+
+| check | Orin Nano (Ubuntu 22.04, Python 3.10) | Raspberry Pi 4 (Debian 13, Python 3.13) |
+| --- | --- | --- |
+| service active and enabled | pass | pass |
+| DynamicUser (not root), NoNewPrivileges | pass | pass |
+| `/api/status` ready, `/api/stats`, observations, history, web page `v1.0.0` | pass | pass |
+| `platmon --version` = `platmon 1.0.0` | pass | pass |
+| readings as the sandboxed user | 6 temperatures, 3 power rails, 2 fans, GPU, `MAXN_SUPER`, CPU frequency; PSI unavailable (kernel) | CPU temperature, PSI; no GPU/power/fans (board) |
+| `levels.temperature` | `[85.0, 95.0]` | `[75.0, 80.0]` |
+| purge: package gone, port released, prior state back | pass | pass |
+
+Both logs end in `RESULT: PASS` (`~/platmon-acceptance-1.0.0/acceptance.log` on each board). The first Orin
+attempt stopped at the preinst check before anything was installed; it left only a not-installed dpkg
+entry, which the passing run removed. The Pi had rebooted at 14:47 for an unrelated reason; its
+hand-started platmon (no autostart) was down before the test and was restarted afterwards.
+
 ## Container visibility and Pi PSI update (2026-10-09)
 
 Storage now skips file bind mounts when a valid directory on the same filesystem is available.

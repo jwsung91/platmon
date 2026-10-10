@@ -76,6 +76,12 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   assert.equal(count('api/history'), 1);
   assert(!el('hist').innerHTML.includes('eth0'));
   assert(el('history-cap').textContent.startsWith('Last 10 min'));
+  run("latestStats = {...latestStats, sensor_meta: {'/temperature/cpu~1a': {id: 'src1:abc'}, '/power/x': {id: 'src1:def'}}}");
+  assert.equal(run("sensorName('temperature', 'src1:abc')"), 'cpu/a', 'a temperature series is labelled with its sensor name');
+  assert.equal(run("sensorName('temperature', 'src1:def')"), 'src1:def', 'only temperature pointers count; unknown ids stay as they are');
+  const label = id => run(`(([re, name]) => name(${JSON.stringify(id)}.match(re)))(HIST_LABEL.find(([re]) => re.test(${JSON.stringify(id)})))`);
+  assert.equal(label('temperature/src1:abc'), 'temp cpu/a');
+  assert.equal(label('temperature/name:board'), 'temp board');
   assert.equal(el('cpu-cap').textContent, 'mean 30.0% · 2 of 2 measured');
   el('history-series').value = 'memory/used_bytes'; el('history-series').handlers.change();
   assert(el('hist').innerHTML.includes('RAM used') && !el('hist').innerHTML.includes('CPU0'));
