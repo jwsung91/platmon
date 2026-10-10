@@ -1,6 +1,6 @@
 // View selection, bounded polling and hidden-page lifecycle with deterministic fixtures.
 const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
-const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const code = fs.readFileSync(process.argv[2], 'utf8').match(/<script id="app">([\s\S]*?)<\/script>/)[1];
 let now = 0, nextTimer = 0, focused = '', failure = false;
 const elements = {}, intervals = [], timers = new Map(), listeners = [], requests = [];
 const navigation = {};
@@ -42,16 +42,14 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   const attention = patch => run('overviewRows({...latestStats, ...' + JSON.stringify(patch) + '})');
   const full = attention({memory: {used: 7.6e9, total: 8e9, swap_total: 0}});
   assert(full.includes('Needs attention') && full.includes('<a class="pill crit" href="#resources">Memory'), 'memory 95% is critical');
-  const orin = attention({platform: 'Jetson Orin', temperature: {cpu: 90, gpu: 86, soc: 40}});
+  assert(attention({temperature: {cpu: 82}}).includes('pill warn'), 'not served by platmon: generic 80/90 °C');
+  run('LIMITS.temperature = [85, 95]');  // what the server sends for a Jetson Orin (tests/test_platmon.py)
+  const orin = attention({temperature: {cpu: 90, gpu: 86, soc: 40}});
   assert(orin.includes('href="#thermal">cpu') && orin.includes('href="#thermal">gpu') && !orin.includes('>soc'), 'every hot sensor');
-  assert(orin.includes('pill warn') && !orin.includes('pill crit'), 'Jetson Orin warns from 85 °C, critical from 95 °C');
-  assert(attention({platform: 'Raspberry Pi', temperature: {cpu: 82}}).includes('pill crit'), 'Raspberry Pi is critical from 80 °C');
-  assert(attention({platform: 'PC', temperature: {cpu: 82}}).includes('pill warn'), 'other boards warn from 80 °C');
+  assert(orin.includes('pill warn') && !orin.includes('pill crit'), 'the served temperature level applies');
   assert(attention({gpu: {usage: 75, freq: null}}).includes('href="#resources">GPU'), 'configured GPU level: warns from 70 %');
   assert(!full.includes('href="#resources">CPU'), 'unset levels keep their defaults');
-  run('LIMITS.temperature = [60, 70]');
-  assert(attention({platform: 'Jetson Orin', temperature: {cpu: 65}}).includes('pill warn'), 'a configured temperature level replaces the board default');
-  run('LIMITS.temperature = null');
+  run('LIMITS.temperature = [80, 90]');
   assert(el('overview').innerHTML.includes('eth0') && !el('overview').innerHTML.includes('999999'));
   const networkOverview = interfaces => run('overviewRows({...latestStats, network: ' + JSON.stringify({interfaces}) + '})');
   const rate = (name, rx) => ({name, rates: {rx_bytes_per_s: rx, tx_bytes_per_s: 0}});

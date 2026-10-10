@@ -280,7 +280,9 @@ def render(s, obs=None):
 
 # The web page's defaults; use_levels() replaces them with the server's [thresholds] (/api/status "levels").
 LIMITS = {"cpu": (80, 90), "gpu": (80, 90), "memory": (80, 90), "filesystem": (80, 90), "temperature": None}
-TEMP_LIMITS = {"Jetson Orin": (85, 95), "Raspberry Pi": (75, 80)}  # below the boards' throttling points
+# Servers from #57 on send the temperature level they use; this copy of platmon.py BOARD_TEMPERATURE serves
+# older ones that send none (tests/test_cli_screen.py checks that the two match).
+TEMP_LIMITS = {"Jetson Orin": (85, 95), "Raspberry Pi": (75, 80)}
 SPARK_POINTS = 24
 WIDE = 100  # columns from which everything is on one screen; below, the overview and a few rows
 ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]")

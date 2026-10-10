@@ -97,7 +97,8 @@ state. History uses memory only and retains 600 seconds by default. Probe stays 
 you configure targets and restart; no target is selected automatically.
 The [performance report](docs/performance/history-expiry-validation.md) records roughly 2% of
 one core with the supported features enabled, including windows above the 2% target. The new
-default policy does not turn those misses into passes; normal ARM PSI remains unmeasured.
+default policy does not turn those misses into passes; normal ARM PSI remains unmeasured. Which
+reports are current and which are superseded: [docs/performance](docs/performance/README.md).
 
 ### Layout
 

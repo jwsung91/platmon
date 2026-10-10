@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from platmon import DEFAULTS, levels, load_config
+from collector import BOARDS
+from platmon import BOARD_TEMPERATURE, DEFAULTS, levels, load_config
 
 SHIPPED_INI = str(Path(__file__).parent.parent / "platmon.ini")
 
@@ -99,6 +100,17 @@ def test_levels(tmp_path):
     ini.write_text("[thresholds]\nmemory = 70, 85\ntemperature = 70.5, 82\n")
     got = levels(load_config(str(ini)))
     assert got["memory"] == [70, 85] and got["temperature"] == [70.5, 82] and got["cpu"] == [80, 90]
+
+
+@pytest.mark.parametrize("platform, expected", [("Jetson Orin", [85, 95]), ("Raspberry Pi", [75, 80]),
+                                                ("Jetson Xavier", [80, 90]), ("PC", [80, 90]), ("Linux", [80, 90])])
+def test_board_temperature_when_not_configured(tmp_path, platform, expected):
+    """The server resolves the board default, so clients get one final level; a configured one wins."""
+    assert levels(load_config(), platform)["temperature"] == expected
+    ini = tmp_path / "p.ini"
+    ini.write_text("[thresholds]\ntemperature = 60, 70\n")
+    assert levels(load_config(str(ini)), platform)["temperature"] == [60, 70]
+    assert set(BOARD_TEMPERATURE) <= {name for _, name, _ in BOARDS}  # the names the collector detects
 
 
 def test_missing_file():

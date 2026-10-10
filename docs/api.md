@@ -289,7 +289,7 @@ check uses `/api/stats` for that reason).
   "collecting_for_ms": null,
   "clock": {"source": "boottime", "suspend_aware": true},
   "levels": {"cpu": [80.0, 90.0], "gpu": [80.0, 90.0], "memory": [80.0, 90.0], "filesystem": [80.0, 90.0],
-             "temperature": null}
+             "temperature": [85.0, 95.0]}
 }
 ```
 
@@ -308,9 +308,10 @@ check uses `/api/stats` for that reason).
 - `collecting_for_ms`: how long the running collection has taken so far, null between collections. A
   growing value does not mean the reads are making progress.
 - `levels`: the warning and critical levels from `[thresholds]` in `platmon.ini`, as `[warning, critical]`
-  in percent, and in °C for `temperature`; `temperature` is null when not set (clients use the board
-  default: Jetson Orin 85/95, Raspberry Pi 75/80, others 80/90). The web page and the `platmon` command
-  color readings with them. Absent from older servers: clients then use those defaults for every reading.
+  in percent, and in °C for `temperature`. When `[thresholds]` leaves `temperature` empty, it is this
+  board's default (Jetson Orin 85/95, Raspberry Pi 75/80, others 80/90). The web page and the `platmon`
+  command color readings with them. Older servers send no `levels`, or a null `temperature`: the `platmon`
+  command then uses those defaults.
 
 ## Clock
 

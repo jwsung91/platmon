@@ -74,6 +74,12 @@ def test_server_levels_replace_the_defaults(monkeypatch):
     assert cli.LIMITS["memory"] == (10, 20)
 
 
+def test_fallback_board_levels_match_the_server():
+    """The command's copy for older servers is the server's table."""
+    from platmon import BOARD_TEMPERATURE
+    assert {k: list(v) for k, v in cli.TEMP_LIMITS.items()} == BOARD_TEMPERATURE
+
+
 def test_data_age_is_the_servers_plus_time_since():
     assert data_age({"sample": {"data_age_ms": 1500}}, got=10.0, now=12.0) == 3.5
     assert data_age({}, got=10.0, now=12.0) == 2.0  # an older server: the time since its answer

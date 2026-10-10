@@ -71,13 +71,22 @@ def check(cfg):
                     raise ValueError(f"[{section}] {key} = {value} is out of range ({lo} to {hi})")
 
 
-def levels(cfg):
-    """[thresholds] as {name: [warning, critical]}, or None for an empty temperature. Raises ValueError."""
+# Temperature levels when [thresholds] leaves them empty: below the board's throttling points (Jetson Orin
+# software throttling ≈99 °C; Raspberry Pi firmware throttling from 80 °C, not exposed as a trip point),
+# else a generic fallback. The one table: the web page and /api/status get the result, and the platmon
+# command keeps a copy only for servers older than this (tests check that it matches).
+BOARD_TEMPERATURE = {"Jetson Orin": [85.0, 95.0], "Raspberry Pi": [75.0, 80.0]}
+OTHER_TEMPERATURE = [80.0, 90.0]
+
+
+def levels(cfg, platform=None):
+    """[thresholds] as {name: [warning, critical]}. An empty temperature is the board default for platform,
+    or None without a platform (when only checking the config). Raises ValueError."""
     out = {}
     for name in DEFAULTS["thresholds"]:
         text = cfg["thresholds"][name].strip()
         if name == "temperature" and not text:
-            out[name] = None
+            out[name] = list(BOARD_TEMPERATURE.get(platform, OTHER_TEMPERATURE)) if platform else None
             continue
         try:
             warn, crit = (float(v) for v in text.split(","))
@@ -171,7 +180,7 @@ def main(argv=None):
     sampler.start()
     observations.start()
     threads = [t for name, start in FRONTENDS.items()
-               if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name], observations, history, levels(cfg)))]
+               if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name], observations, history, levels(cfg, PLATFORM)))]
     if not threads:
         p.error("no frontend is running; enable one in the config or with --frontends")
     try:
