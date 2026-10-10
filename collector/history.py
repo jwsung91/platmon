@@ -13,6 +13,20 @@ from .sysfs import pointer
 MAX_SERIES = 64
 MAX_POINTS_PER_SERIES = 3602
 MAX_ID_LENGTH = 512
+MAX_DROPPED_IDS = 256  # distinct dropped ids remembered; dropped_series stops growing there
+# Which series keep a slot on a host with more identities than max_series. A reading no other series
+# shows comes first; temperature is last because boards expose dozens of nearly identical channels (one
+# per core, plus the package and its thermal zone twin), while every CPU core, interface and disk is a
+# reading of its own. An id with none of these prefixes ranks with temperature.
+PRIORITY = ("memory/", "cpu/", "network/", "disk_io/", "observation/", "temperature/")
+
+
+def priority(sid):
+    """Where sid sorts when the series limit is reached; lower keeps its place."""
+    for rank, prefix in enumerate(PRIORITY):
+        if sid.startswith(prefix):
+            return rank
+    return PRIORITY.index("temperature/")
 
 
 def points_of(stats, sensor_meta):
@@ -83,6 +97,7 @@ class History:
         self._owners = {}     # series -> core, storage, wifi, probe
         self._periods = {"core": interval}
         self._latest = {}     # fixed publication domains -> (last id, last start ns)
+        self._dropped = set()  # ids that did not fit, counted once each (bounded by MAX_DROPPED_IDS)
         self.dropped_series = 0
 
     def append(self, record):
@@ -114,15 +129,9 @@ class History:
             for sid in self._series:
                 if self._owners[sid] == owner and sid not in values:
                     values[sid] = None
-            for sid, value in values.items():
-                if len(sid) > MAX_ID_LENGTH:
-                    self.dropped_series += 1
-                    continue
+            for sid, value in self._fitting(owner, values).items():
                 series = self._series.get(sid)
                 if series is None:
-                    if len(self._series) >= self._max_series:
-                        self.dropped_series += 1
-                        continue
                     series = self._series[sid] = collections.deque(maxlen=self._maxlen)
                     self._owners[sid] = owner
                 if sid in present:
@@ -135,6 +144,26 @@ class History:
                 if number is not None and (abs(number) > 2**64 or not math.isfinite(number)):
                     number = None
                 series.append((sequence, started, number))
+
+    def _fitting(self, owner, values):
+        """The part of one publication that fits in max_series, by PRIORITY, with every id left out
+        counted once. Other publishers keep their slots; this publisher's own least important series
+        release theirs, so a core that starts measuring its CPUs need not wait for a slot to expire.
+        Called under the lock."""
+        taken = sum(1 for sid in self._series if self._owners[sid] != owner)
+        room = max(self._max_series - taken, 0)
+        ids = [sid for sid in values if len(sid) <= MAX_ID_LENGTH]
+        # Established series win ties, so two sensors of one rank never take turns dropping each other.
+        keep = set(sorted(ids, key=lambda sid: (priority(sid), sid not in self._series))[:room])
+        for sid in values:
+            if sid in keep:
+                continue
+            if len(self._dropped) < MAX_DROPPED_IDS:
+                self._dropped.add(sid)
+            if sid in self._series:  # lost its slot to a more important series of this publisher
+                del self._series[sid], self._seen[sid], self._owners[sid]
+        self.dropped_series = len(self._dropped)
+        return {sid: value for sid, value in values.items() if sid in keep}
 
     def intervals(self):
         """Per-series observation cadence, copied independently of point serialization."""
