@@ -158,5 +158,28 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   context.location.hash = '#unknown'; navigation.hashchange();
   assert.equal(el('panel-overview').hidden, false, 'unknown links fall back to Overview');
   assert.equal(requests.length, beforeNavigation, 'System and Overview navigation do not fetch');
+  // Recent history: the list stops at HIST_ROWS graphs, and the toggle draws every series of the view
+  await switchTo('resources'); await flush();
+  run(`hist = {retention_s: 600, series: Object.fromEntries(
+    Array.from({length: 20}, (_, i) => ['cpu/' + i + '/usage', [[1, 1000, i]]]))}`);
+  run('renderHistory()');
+  const drawn = () => (el('hist').innerHTML.match(/data-series=/g) || []).length;
+  assert.equal(drawn(), 12);
+  assert(el('hist').innerHTML.includes('showing first 12 of 20'));
+  assert.equal(el('history-all').hidden, false);
+  assert.equal(el('history-all').textContent, 'Show all 20');
+  el('history-all').handlers.click();
+  assert.equal(drawn(), 20, 'the toggle draws one graph per series of the view');
+  assert(!el('hist').innerHTML.includes('showing first'));
+  assert.equal(el('history-all').textContent, 'Show first 12');
+  assert.equal(el('history-all').attrs['aria-expanded'], 'true');
+  el('history-series').value = 'cpu/3/usage'; el('history-series').handlers.change();
+  assert.equal(drawn(), 1);
+  assert.equal(el('history-all').hidden, true, 'a chosen series needs no toggle');
+  el('history-series').value = ''; el('history-series').handlers.change();
+  assert.equal(drawn(), 20, 'the choice survives picking a single series and going back');
+  el('history-all').handlers.click();
+  assert.equal(drawn(), 12);
+  assert.equal(el('history-all').attrs['aria-expanded'], 'false');
   console.log('views, summaries, keyboard, shared polling, cached errors and hidden-page suspension: passed');
 })().catch(e => { console.error(e); process.exitCode = 1; });

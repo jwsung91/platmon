@@ -152,6 +152,7 @@
   .history-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; }
   .history-heading > div { display: flex; align-items: baseline; gap: 8px 12px; flex-wrap: wrap; }
   select { max-width: 100%; padding: 4px 6px; font-size: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; }
+  #history-all { padding: 4px 6px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
   #hist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
   .chart { padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; }
   .chart-head, .chart-foot { display: flex; justify-content: space-between; gap: 8px; }
@@ -259,7 +260,8 @@
   <section id="history-panel" aria-labelledby="history-title" hidden>
     <div class="history-heading"><h2 id="history-title">Recent history</h2>
       <div><span class="cap" id="history-cap"></span>
-        <label class="cap" for="history-series">Series</label><select id="history-series"><option value="">All in this view</option></select></div>
+        <label class="cap" for="history-series">Series</label><select id="history-series"><option value="">All in this view</option></select>
+        <button class="cap" id="history-all" hidden></button></div>
     </div>
     <div id="hist"></div>
   </section>
@@ -446,6 +448,8 @@ function storageRows() {
 let hist = null, histAt = 0, histAsked = -Infinity, histSupported = true, histRequest = null;
 const HIST_PREFIXES = {resources: ['cpu/', 'memory/'], network: ['network/', 'observation/wifi/', 'observation/probe/'],
   storage: ['disk_io/', 'observation/storage/'], thermal: ['temperature/']};
+const HIST_ROWS = 12;  // graphs drawn per view before the viewer asks for all of them
+let histAll = false;   // one graph per series of the view, chosen with the Show all button
 const wantsHistory = () => !!HIST_PREFIXES[activeTab];
 const historyMatches = id => (HIST_PREFIXES[activeTab] || []).some(prefix => id.startsWith(prefix));
 const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
@@ -493,7 +497,7 @@ function histRows() {
   for (const [id, points] of Object.entries(series)) {
     const rule = HIST_LABEL.find(([re]) => re.test(id));
     if (!rule || !historyMatches(id) || ($('history-series').value && $('history-series').value !== id)
-      || !Array.isArray(points) || !points.length || rows.length >= 12) continue;
+      || !Array.isArray(points) || !points.length || (!histAll && rows.length >= HIST_ROWS)) continue;
     const latest = points[points.length - 1], last = latest[2], vs = points.map(p => p[2]).filter(v => v != null);
     const lo = vs.length && histValue(id, Math.min(...vs)), hi = vs.length && histValue(id, Math.max(...vs));
     rows.push(`<div class="card chart"><div class="chart-head"><span>${esc(rule[1](id.match(rule[0])))}</span><span>${last == null ? 'no value' : histValue(id, last)}</span></div>` +
@@ -501,24 +505,34 @@ function histRows() {
       `<div class="chart-foot"><span>${!vs.length ? '' : lo === hi ? lo : lo + ' – ' + hi}</span>` +
       `<span data-history-age="${Number(latest[1])}">${historyAge(latest[1])}</span></div></div>`);
   }
-  return rows.join('') + (rows.length && !$('history-series').value
-    && Object.keys(series).filter(id => historyMatches(id) && HIST_LABEL.some(([re]) => re.test(id))).length > rows.length
-    ? `<div class="muted">showing first ${rows.length} · choose a series above to see more</div>` : '');
+  const total = histMatching().length;
+  return rows.join('') + (rows.length && !$('history-series').value && total > rows.length
+    ? `<div class="muted">showing first ${rows.length} of ${total} · Show all, or choose a series above</div>` : '');
 }
+// The series this view can draw, labelled ones only: the list, the selector and the toggle agree on it.
+const histMatching = () => Object.keys((hist && hist.series && typeof hist.series === 'object' ? hist.series : {}))
+  .filter(id => historyMatches(id) && HIST_LABEL.some(([re]) => re.test(id)));
+function histControls() {
+  const all = $('history-all'), single = !!$('history-series').value, total = histMatching().length;
+  all.hidden = single || total <= HIST_ROWS;  // nothing to reveal, or one series is already picked
+  all.textContent = histAll ? `Show first ${HIST_ROWS}` : `Show all ${total}`;
+  all.setAttribute('aria-expanded', String(histAll && !single));
+}
+const histDraw = () => { $('hist').innerHTML = histRows(); histControls(); };
 const historyAge = age => `latest point ${Math.round((age + performance.now() - histAt) / 1000)} s ago`;
 function renderHistory() {
   if (!visible()) return;
   $('history-panel').hidden = !wantsHistory() || !hist;
   if ($('history-panel').hidden) return;
   const select = $('history-series'), previous = select.value;
-  const ids = Object.keys(hist.series || {}).filter(id => historyMatches(id) && HIST_LABEL.some(([re]) => re.test(id)));
+  const ids = histMatching();
   select.innerHTML = '<option value="">All in this view</option>' + ids.map(id => {
     const rule = HIST_LABEL.find(([re]) => re.test(id));
     return `<option value="${esc(id)}">${esc(rule[1](id.match(rule[0])))}</option>`;
   }).join('');
   select.value = ids.includes(previous) ? previous : '';
   $('history-cap').textContent = `Last ${Math.round(hist.retention_s / 60)} min · each chart has its own scale · gaps = no sample`;
-  $('hist').innerHTML = histRows();
+  histDraw();
   $('history-panel').hidden = !$('hist').innerHTML;
 }
 // hover or touch: the nearest point's value and age above the chart
@@ -803,7 +817,8 @@ for (const [index, tab] of TABS.entries()) {
     $('tab-' + TABS[next]).focus();
   });
 }
-$('history-series').addEventListener('change', () => { $('hist').innerHTML = histRows(); });
+$('history-series').addEventListener('change', histDraw);
+$('history-all').addEventListener('click', () => { histAll = !histAll; histDraw(); });
 $('hist').addEventListener('pointermove', readout);
 $('hist').addEventListener('pointerleave', readout);
 document.addEventListener('visibilitychange', () => {

@@ -89,8 +89,10 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 ## Web page
 
 With history on, the Resources, Network, Storage and Temperature & power tabs show a "Recent history" panel with that topic's CPU, memory,
-temperature, network, disk or low-frequency series (at most 12, with an omission notice). The series
-selector can show any individual series, including those beyond the first 12. Each graph uses its own
+temperature, network, disk or low-frequency series (the first 12, with a notice saying how many there are).
+A "Show all" button next to the series selector draws one graph for every series of that view and turns into
+"Show first 12"; the choice lasts while the page is open and applies to every view. The series
+selector can also show any individual series, including those beyond the first 12. Each graph uses its own
 scale and shows the latest value next to it, "no value" when the latest point is a gap; a gap breaks the
 line. Horizontal position uses actual elapsed age, not equally spaced indexes. Each row says the latest
 point age, advanced with browser elapsed time between responses; these are historical values, not a fresh live reading.
