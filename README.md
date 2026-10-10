@@ -66,6 +66,14 @@ network counters: [docs/network.md](docs/network.md); disk I/O counters: [docs/d
 [docs/history.md](docs/history.md); pressure stall information: [docs/pressure.md](docs/pressure.md)). The API has no
 authentication. Run it on trusted networks only.
 
+If another machine cannot reach the service while the device itself answers (`curl -s localhost:9797/api/status`),
+the collector is running and something between the two is not. The service listens on every IPv4 address
+by default (`[http] bind = 0.0.0.0`; `ss -ltn` shows `0.0.0.0:9797`), so check, in this order: the host's
+own firewall, which usually denies incoming connections and needs the port opened for the network you
+trust (`sudo ufw allow from 192.168.1.0/24 to any port 9797 proto tcp`, adapted to your subnet); whether
+both machines are on that subnet; and client isolation on the access point or switch, which blocks the
+connection whatever the firewall says (`ping <device>` fails too). IPv6 is not served.
+
 The web page opens with an Overview of CPU, memory, available GPU, root filesystem capacity and the
 hottest temperature, each colored by level (warning from 80 %, critical from 90 %; temperatures
 from 85/95 °C on Jetson Orin, 75/80 °C on Raspberry Pi and 80/90 °C elsewhere; instantaneous values;
