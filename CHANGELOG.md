@@ -20,5 +20,6 @@ API schema versions are independent of release versions.
 - `platmon` live terminal view on interactive terminals: colored levels from the service's `[thresholds]`,
   Needs attention, core grid, tables, sparklines, header status and an offline banner; `q` quits,
   `NO_COLOR` and `PLATMON_ASCII` are honored. `--once`, pipes and `/text` are unchanged.
-- `/api/status` reports the configured `levels`.
+- `/api/status` reports the configured `levels`; an empty `[thresholds]` temperature is sent as the board's
+  default, decided once by the server.
 - Network rows on the web Overview and in `platmon` list the busiest interfaces first.
