@@ -453,9 +453,16 @@ const HIST_LABEL = [[/^cpu\/(\d+)\/usage$/, m => 'CPU' + m[1]],
   [/^observation\/wifi\/[^/]+\/\d+\/([^/]+)\/signal_dbm$/, m => `${m[1]} signal`],
   [/^observation\/probe\/([^/]+)\/connect_ms$/, m => `TCP ${m[1]}`],
   [/^memory\/used_bytes$/, () => 'RAM used'],
-  [/^temperature\/(?:name:)?(.+)$/, m => 'temp ' + m[1].slice(0, 12)],
+  [/^temperature\/name:(.+)$/, m => 'temp ' + m[1]],
+  [/^temperature\/(.+)$/, m => 'temp ' + sensorName('temperature', m[1])],
   [/^network\/[^/]+\/\d+\/([^/]+)\/(rx|tx)_bytes_per_s$/, m => `${m[1]} ${m[2]}`],
   [/^disk_io\/[^/]+\/([^/]+)\/(read|write)_bytes_per_s$/, m => `${m[1]} ${m[2]}`]];
+// History keys a sensor by its source id (docs/history.md); its name is the sensor_meta pointer with that id
+function sensorName(group, sid) {
+  const meta = latestStats && latestStats.sensor_meta && typeof latestStats.sensor_meta === 'object' ? latestStats.sensor_meta : {};
+  const ptr = Object.keys(meta).find(p => p.startsWith('/' + group + '/') && meta[p] && meta[p].id === sid);
+  return ptr ? ptr.slice(group.length + 2).replace(/~1/g, '/').replace(/~0/g, '~') : sid;
+}
 const histValue = (id, v) => id.startsWith('temperature') ? v.toFixed(1) + ' °C' : id.startsWith('cpu/') ? v.toFixed(1) + '%'
   : id.includes('/wifi/') ? v.toFixed(1) + ' dBm' : id.includes('/probe/') ? v.toFixed(1) + ' ms'
   : id.startsWith('memory') || id.includes('/storage/') ? gib(v) : perS(v);
