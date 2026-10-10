@@ -20,7 +20,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_FILES = ("platmon.py", "platmon.ini", "platmon.service", "README.md", "LICENSE",
-                "CHANGELOG.md", "pytest.ini", "test_packaging.py", "Dockerfile",
+                "CHANGELOG.md", "pytest.ini", "Dockerfile",
                 "compose.yaml", "compose.jetson.yaml", ".dockerignore", ".gitignore")
 SOURCE_DIRS = ("collector", "frontends", "scripts", "packaging", "docs", "tests", ".github")
 
