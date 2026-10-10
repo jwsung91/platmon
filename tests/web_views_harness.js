@@ -29,6 +29,8 @@ const run = text => vm.runInContext(text, context);
 const flush = async () => { for (let n = 0; n < 6; n++) await new Promise(setImmediate); };
 const count = prefix => requests.filter(url => url.startsWith(prefix)).length;
 const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush(); };
+// the Recent history buttons are delegated on their row, as the chart readout is
+const clickGroup = prefix => el('history-groups').handlers.click({target: {closest: () => ({dataset: {group: prefix}})}});
 (async () => {
   el('levels').textContent = JSON.stringify({gpu: [70, 85]});  // as the server fills it in from [thresholds]
   run(code); await flush();
@@ -83,13 +85,15 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   assert.equal(label('temperature/src1:abc'), 'temp cpu/a');
   assert.equal(label('temperature/name:board'), 'temp board');
   assert.equal(el('cpu-cap').textContent, 'mean 30.0% · 2 of 2 measured');
-  el('history-series').value = 'memory/used_bytes'; el('history-series').handlers.change();
+  clickGroup('cpu/');  // the CPU cores button off leaves the other kind of this view
   assert(el('hist').innerHTML.includes('RAM used') && !el('hist').innerHTML.includes('CPU0'));
   const graph = el('hist').innerHTML;
   stats.cpu[0].usage = 80; await run('tick()');
   assert.equal(el('overview').innerHTML, overview, 'inactive overview is not rewritten');
   now = 4000; intervals.forEach(fn => fn()); await flush();
   assert.equal(el('hist').innerHTML, graph, 'one-second timer never rebuilds graphs');
+  clickGroup('cpu/');  // and back on
+  assert(el('hist').innerHTML.includes('CPU0') && el('hist').innerHTML.includes('RAM used'));
   await switchTo('network');
   assert.equal(count('api/observations'), 1);
   assert.equal(count('api/history'), 1, 'tab switch shares the history cache and deadline');
@@ -158,28 +162,25 @@ const switchTo = async tab => { el('tab-' + tab).handlers.click(); await flush()
   context.location.hash = '#unknown'; navigation.hashchange();
   assert.equal(el('panel-overview').hidden, false, 'unknown links fall back to Overview');
   assert.equal(requests.length, beforeNavigation, 'System and Overview navigation do not fetch');
-  // Recent history: the list stops at HIST_ROWS graphs, and the toggle draws every series of the view
+  // Recent history: a button per kind of series, pressed = drawn, and every series of a kind is drawn
   await switchTo('resources'); await flush();
-  run(`hist = {retention_s: 600, series: Object.fromEntries(
-    Array.from({length: 20}, (_, i) => ['cpu/' + i + '/usage', [[1, 1000, i]]]))}`);
+  run(`hist = {retention_s: 600, series: Object.fromEntries([...Array.from({length: 20},
+    (_, i) => ['cpu/' + i + '/usage', [[1, 1000, i]]]), ['memory/used_bytes', [[1, 1000, 2e9]]]])}`);
   run('renderHistory()');
   const drawn = () => (el('hist').innerHTML.match(/data-series=/g) || []).length;
-  assert.equal(drawn(), 12);
-  assert(el('hist').innerHTML.includes('showing first 12 of 20'));
-  assert.equal(el('history-all').hidden, false);
-  assert.equal(el('history-all').textContent, 'Show all 20');
-  el('history-all').handlers.click();
-  assert.equal(drawn(), 20, 'the toggle draws one graph per series of the view');
-  assert(!el('hist').innerHTML.includes('showing first'));
-  assert.equal(el('history-all').textContent, 'Show first 12');
-  assert.equal(el('history-all').attrs['aria-expanded'], 'true');
-  el('history-series').value = 'cpu/3/usage'; el('history-series').handlers.change();
+  assert.equal(drawn(), 21, 'every series of every kind on, with no cap');
+  assert(el('history-groups').innerHTML.includes('CPU cores 20') && el('history-groups').innerHTML.includes('RAM 1'));
+  assert.equal((el('history-groups').innerHTML.match(/aria-pressed="true"/g) || []).length, 2);
+  clickGroup('cpu/');
   assert.equal(drawn(), 1);
-  assert.equal(el('history-all').hidden, true, 'a chosen series needs no toggle');
-  el('history-series').value = ''; el('history-series').handlers.change();
-  assert.equal(drawn(), 20, 'the choice survives picking a single series and going back');
-  el('history-all').handlers.click();
-  assert.equal(drawn(), 12);
-  assert.equal(el('history-all').attrs['aria-expanded'], 'false');
+  assert(el('history-groups').innerHTML.includes('data-group="cpu/" aria-pressed="false"'));
+  clickGroup('memory/');
+  assert.equal(drawn(), 0);
+  assert(el('hist').innerHTML.includes('Every group is off'), 'the panel keeps its buttons with nothing drawn');
+  assert.equal(el('history-panel').hidden, false);
+  clickGroup('cpu/'); clickGroup('memory/');
+  assert.equal(drawn(), 21);
+  await switchTo('thermal'); await flush();
+  assert.equal(el('history-groups').innerHTML, '', 'a view with one kind of series offers no buttons');
   console.log('views, summaries, keyboard, shared polling, cached errors and hidden-page suspension: passed');
 })().catch(e => { console.error(e); process.exitCode = 1; });

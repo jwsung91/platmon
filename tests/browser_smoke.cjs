@@ -84,14 +84,17 @@ const history = {retention_s: 600, series: {
       await page.screenshot({path: path.join(output, `network-${width}.png`), fullPage: true});
       const requestsBefore = counts['/api/history'];
       await page.locator('#tab-resources').click();
-      assert.equal(await page.locator('#hist svg').count(), 12);
-      assert((await page.locator('#hist').innerText()).includes('showing first 12'));
+      assert.equal(await page.locator('#hist svg').count(), 60);  // 59 cores and RAM, every series of both kinds
+      assert((await page.locator('#hist').innerText()).includes('CPU58'));
       const graph = await page.locator('#hist svg path.line').first().getAttribute('d');
       assert(graph.split('M').length > 2, 'missing buckets break paths');
-      await page.locator('#history-series').selectOption('cpu/58/usage');
+      assert.equal(await page.locator('#history-groups button').count(), 2);
+      await page.locator('#history-groups button[data-group="cpu/"]').click();
       assert.equal(await page.locator('#hist svg').count(), 1);
-      assert((await page.locator('#hist').innerText()).includes('CPU58'));
-      assert.equal(counts['/api/history'], requestsBefore, 'cached tab and series selection do not fetch');
+      assert((await page.locator('#hist').innerText()).includes('RAM used'));
+      await page.locator('#history-groups button[data-group="cpu/"]').click();
+      assert.equal(await page.locator('#hist svg').count(), 60);
+      assert.equal(counts['/api/history'], requestsBefore, 'cached tab and group buttons do not fetch');
       await page.evaluate(() => { globalThis.savedGraph = document.querySelector('#hist svg'); });
       await page.waitForTimeout(1100);
       assert(await page.evaluate(() => globalThis.savedGraph === document.querySelector('#hist svg')), 'age timer preserves SVG nodes');
