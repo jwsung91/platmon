@@ -445,10 +445,11 @@ def test_broken_cpu_reading_fails_the_collection(tmp_path, monkeypatch):
     import functools
 
     import collector
-    from test_common import stat_files
+    from test_common import stat_files, without_host_sensors
 
     bad, good = "cpu0 1 0 0 1", ["cpu0 %d 0 0 %d 0 0 0 0" % (n, n) for n in range(10, 60, 10)]
     stat_files(tmp_path, monkeypatch, [bad, good[0], good[1], bad, good[2], good[3]])
+    without_host_sensors(monkeypatch, tmp_path)
     c = Clock()
     s = fake(functools.partial(collector.collect, CpuCounters(lambda: c.ns, max_gap=5.0)), c)
 
@@ -536,8 +537,9 @@ def test_all_optional_failing_still_publishes_then_required_failure_keeps_last_g
     monkeypatch.setattr(common, "hwmon_chips", lambda r, *groups: [(f"{root}/hwmon0", "chip")])
     monkeypatch.setattr(common, "thermal_zones", lambda group=None: ({}, set()))
     freq = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
-    fail_reads(monkeypatch, {f"{root}/hwmon0/{f}": errno.EIO for f in ("temp1_input", "power1_input", "fan1_input")}
-               | {freq: errno.EACCES})
+    # the fan is denied, not EIO: an EIO fan speed is a board without a tachometer, not a failure
+    fail_reads(monkeypatch, {f"{root}/hwmon0/{f}": errno.EIO for f in ("temp1_input", "power1_input")}
+               | {f"{root}/hwmon0/fan1_input": errno.EACCES, freq: errno.EACCES})
     c = Clock()
     p = Proc(monkeypatch)
     s = fake(functools.partial(collector.collect, CpuCounters(lambda: c.ns, max_gap=5.0)), c)

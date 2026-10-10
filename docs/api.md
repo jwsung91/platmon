@@ -223,7 +223,8 @@ Read failures, most serious first: `internal_error` (an unexpected exception in 
 `permission_denied` (EACCES/EPERM), `io_error` (any other read or listing error), `disappeared` (listed in
 this collection, gone when read), `invalid_data` (empty, not text, or not a number). A directory that
 cannot be listed (a sensor class or one chip) is a failure, not "nothing found"; the other chips are kept. Absences, most specific first:
-`no_data` (there, but no current value, e.g. ENODATA from an inactive thermal zone, or no CPU rows to read
+`no_data` (there, but no current value, e.g. ENODATA from an inactive thermal zone, an EIO fan speed on a
+board that declares a fan but reports no tachometer, or no CPU rows to read
 clocks for during warmup), `not_exposed` (the device does not provide that attribute), `not_detected`
 (nothing of the kind found), `unsupported_platform` (no provider on this board, e.g. the GPU off Jetson).
 A group with nothing to try is `unavailable`, never `ok`.

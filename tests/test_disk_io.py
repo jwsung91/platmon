@@ -285,7 +285,9 @@ def test_direct_collect_without_disk_io_is_unchanged():
 
 
 @pytest.fixture
-def service(monkeypatch):
+def service(monkeypatch, tmp_path):
+    from test_common import without_host_sensors
+    without_host_sensors(monkeypatch, tmp_path)
     c = Clock()
     clock = lambda: c.ns  # noqa: E731
     h = Host(sda=disk(8, 0))

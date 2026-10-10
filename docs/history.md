@@ -65,12 +65,21 @@ point units stay unchanged; older consumers can ignore new prefixes and this met
 ## Bounds
 
 - At most `min(3602, retention / min(core interval, 1 s) + 2)` points per series and 64 series; series beyond that are not kept and
-  counted in `dropped_series`. IDs are limited to 512 characters; only finite numeric values are retained.
+  counted in `dropped_series`, once per series ID, not once per publication (at most 256 IDs are
+  remembered, after which the count stops growing). IDs are limited to 512 characters; only finite
+  numeric values are retained.
   Each publisher removes points older than its current retention cutoff when it appends. Low-frequency
   series therefore release expired points without waiting to fill the core-cadence point cap; HTTP reads
   still only copy/filter and never mutate the stored history.
   At very fast cadences, the point cap can shorten the effective retained window; retention is an upper limit. A series not seen for longer than `retention` is removed, so devices that come
   and go do not pile up.
+- Which series keep a slot when a host has more identities than the limit (a 22-core PC with 31
+  temperature channels needs 69): `memory/`, then `cpu/`, `network/`, `disk_io/`, `observation/`, and
+  `temperature/` last, because boards expose dozens of nearly identical temperature channels while every
+  core, interface and disk is a reading of its own. A series that is already kept wins a tie against a
+  new one of the same rank, so sensors never take turns dropping each other. Each publisher's slots are
+  its own: the core publisher drops its least important series instead of waiting for one to expire,
+  and the low-frequency groups keep the slots they already hold.
 - `/api/history?prefix=…&seconds=…&points=…` (all optional): series whose id starts with `prefix` (at most
   128 characters), from the last `seconds` (up to `retention`), at most `points` per series (1 to 600, default
   300; gap-preserving buckets, the newest kept). Anything else is 400. 404 when history is off.

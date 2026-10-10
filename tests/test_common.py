@@ -214,6 +214,18 @@ def test_detect(compatible, has_dmi, expected):
     assert detect(compatible, has_dmi) == expected
 
 
+def without_host_sensors(monkeypatch, tmp_path):
+    """Read the optional sensors from an empty tree. Tests that run collect() against fake /proc/stat and
+    fake counters otherwise pick up this host's thermal zones and hwmon chips, so one unreadable sensor
+    (an EIO fan, a denied zone) makes the service degraded and the test fail on that machine alone."""
+    import functools
+    empty = tmp_path / "no-sensors"
+    empty.mkdir(exist_ok=True)
+    monkeypatch.setattr(common, "thermal_zones", functools.partial(common.thermal_zones, root=str(empty)))
+    monkeypatch.setattr(common, "hwmon_sensors", functools.partial(common.hwmon_sensors, root=str(empty)))
+    return empty
+
+
 def fake_hwmon(root, chips):
     for i, files in enumerate(chips):
         d = root / f"hwmon{i}"
@@ -543,6 +555,23 @@ def test_inactive_thermal_zone_is_no_data(tmp_path, monkeypatch):
     g = sysfs.Group("temperature")
     assert thermal_zones(root=str(tmp_path), group=g)[0] == {"cpu": 51.2}
     assert g.status() == {"state": "ok", "reason": None, "issues": [], "issues_truncated": 0}
+
+
+def test_fan_speed_the_firmware_does_not_report_is_no_data(tmp_path, monkeypatch):
+    """A board that declares a fan but reports no tachometer (acpi_fan, EIO on fan1_input) has no speed to
+    read: an absent value like an inactive thermal zone, not a failure that makes the service degraded.
+    Another failure on the same attribute (no permission) stays a failure."""
+    root = fake_hwmon(tmp_path, [{"name": "acpi_fan", "fan1_input": 0}])
+    fail_reads(monkeypatch, {f"{root}/hwmon0/fan1_input": _errno.EIO})
+    g = sysfs.groups("temperature", "power", "fans")
+    assert hwmon_sensors(root=root, groups=g)[2] == [{"name": "acpi_fan fan1", "rpm": None, "percent": None}]
+    assert g["fans"].status() == {"state": "unavailable", "reason": "no_data", "issues": [], "issues_truncated": 0}
+    assert g["fans"].details == []  # no failure, so nothing for the service log either
+    fail_reads(monkeypatch, {f"{root}/hwmon0/fan1_input": _errno.EACCES})
+    g = sysfs.groups("temperature", "power", "fans")
+    hwmon_sensors(root=root, groups=g)
+    assert g["fans"].status()["state"] == "error"
+    assert g["fans"].status()["issues"] == [{"target": "hwmon0.fan1", "reason": "permission_denied"}]
 
 
 def test_unexpected_error_in_one_group_is_internal_error(monkeypatch):

@@ -66,6 +66,53 @@ def test_series_limit_counts_what_it_drops():
     h.append(record(1, S))
     series, dropped = h.view(S)
     assert len(series) == 3 and dropped == len(points_of(stats(1), {})) - 3
+    for n in range(2, 12):  # the same ids do not fit again: counted once each, never once per publication
+        h.append(record(n, n * S))
+    assert h.view(11 * S)[1] == dropped
+
+
+def busy_host(warmup=False, cpus=22, temps=31, interfaces=4):
+    """As many identities as a 22-core PC with 31 temperature channels: 64 core series, 69 with the
+    low-frequency groups below. warmup: the first snapshot, where no CPU has been measured yet."""
+    return {"cpu": [] if warmup else [{"id": i, "usage": float(i)} for i in range(cpus)],
+            "memory": {"used": 1000},
+            "temperature": {f"sensor{i}": 40.0 + i for i in range(temps)},
+            "network": {"scope": {"id": "netns1:a"}, "interfaces": [
+                {"name": f"eth{i}", "ifindex": i + 1, "rates": {"rx_bytes_per_s": 1.0, "tx_bytes_per_s": 2.0}}
+                for i in range(interfaces)]},
+            "disk_io": {"disks": [{"name": "nvme0n1", "major": 259, "minor": 0,
+                                   "rates": {"read_bytes_per_s": 3.0, "write_bytes_per_s": 4.0}}]}}
+
+
+def fs(minor):
+    return {"major": 259, "minor": minor, "device": f"nvme0n1p{minor}", "fstype": "ext4",
+            "source": f"/dev/nvme0n1p{minor}", "used_bytes": 10, "available_bytes": 20}
+
+
+def test_every_cpu_core_keeps_its_series_when_sensors_outnumber_the_limit():
+    """A 22-core PC with 31 temperature channels needs 69 series. What does not fit is the least important
+    temperature channels, not whatever happened to be published last: the CPU cores used to arrive one
+    snapshot after the temperatures (they are warming up) and lost their slots to them."""
+    h = History(retention=60, interval=1.0)
+    h.append_observation("storage", 30, {"id": 1, "started": S, "completed": S, "collector": {"state": "ok"},
+                                         "data": {"filesystems": [fs(1), fs(6)]}})
+    h.append_observation("wifi", 5, {"id": 1, "started": S, "completed": S, "collector": {"state": "ok"},
+                                     "data": {"scope": {"id": "ns:a"}, "interfaces": [
+                                         {"name": "wlan0", "ifindex": 9, "connected": True, "signal_dbm": -60}]}})
+    h.append({"sequence": 1, "started": S, "stats": busy_host(warmup=True), "sensor_meta": {}})
+    h.append({"sequence": 2, "started": 2 * S, "stats": busy_host(), "sensor_meta": {}})
+    series, dropped = h.view(2 * S)
+    assert len(series) == 64 and dropped == 5
+    assert all(f"cpu/{i}/usage" in series for i in range(22))
+    assert len([sid for sid in series if sid.startswith("temperature/")]) == 26  # 31 channels, 26 slots left
+    assert len([sid for sid in series if sid.startswith("network/")]) == 8
+    assert len([sid for sid in series if sid.startswith("disk_io/")]) == 2
+    assert len([sid for sid in series if sid.startswith("observation/")]) == 5  # the slow groups keep theirs
+    assert "memory/used_bytes" in series
+    h.append({"sequence": 3, "started": 3 * S, "stats": busy_host(), "sensor_meta": {}})
+    series, dropped = h.view(3 * S)  # a stable choice: no series takes turns with another
+    assert dropped == 5 and len(series) == 64 and all(f"cpu/{i}/usage" in series for i in range(22))
+    assert all(len(points) == 2 for sid, points in series.items() if sid.startswith("cpu/"))
 
 
 def test_view_bounds_prefix_seconds_and_points():
@@ -312,4 +359,4 @@ def test_point_and_series_limits_even_at_fastest_cadence():
                   "stats": {"cpu": [{"id": i, "usage": float(i)} for i in range(70)]}})
     assert len(h._series) == 64
     assert all(len(points) == MAX_POINTS_PER_SERIES for points in h._series.values())
-    assert h.dropped_series == 6 * (MAX_POINTS_PER_SERIES + 50)
+    assert h.dropped_series == 6  # cpu/64 .. cpu/69: counted once each, never once per publication

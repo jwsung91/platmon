@@ -122,10 +122,12 @@ class Group:
         self.values += 1
         return value
 
-    def read(self, path, target, parse=int, found=None):
+    def read(self, path, target, parse=int, found=None, io_absent=False):
         """parse(content of path), or None with the reason noted. found: what this collection discovered by
         listing (the file itself, or its device directory); if that is gone too the file disappeared,
         otherwise the attribute is just not exposed.
+        io_absent: on this attribute an I/O error means the hardware has no value to give, like ENODATA
+        from an inactive thermal zone, so it counts as no_data instead of io_error (see collector/common.py).
         With a trace, self.span is the read's (start, end) on success and None otherwise."""
         clock = self.trace.clock if self.trace else None
         self.span = None
@@ -139,7 +141,10 @@ class Group:
             gone = found is not None and not os.path.exists(found)
             return self.note(target, "disappeared" if gone else "not_exposed")
         except OSError as e:
-            return self.note(target, reason_of(e), f"{path}: {e.strerror}")
+            reason = reason_of(e)
+            if io_absent and reason == "io_error":
+                return self.note(target, "no_data")
+            return self.note(target, reason, f"{path}: {e.strerror}")
         try:
             value = parse(text)
         except ValueError:  # int("") included: an empty number is not 0
