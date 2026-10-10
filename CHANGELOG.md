@@ -4,7 +4,11 @@ Versions use MAJOR.MINOR.PATCH. The application version is defined once in
 `frontends/cli.py`; Debian packaging revisions use a separate `-N` suffix.
 API schema versions are independent of release versions.
 
-## 0.1.0 — Unreleased
+## 1.0.0 — Unreleased
+
+First release. From this version the HTTP API (its `schema_version` contracts), the `platmon.ini` keys and
+the `platmon` command's options follow MAJOR.MINOR.PATCH: a breaking change needs a new major version.
+A `v0.1.0` tag was cut while validating the packaging and never published; 1.0.0 includes everything below.
 
 - First versioned distribution of the existing platform monitor.
 - Debian package with a systemd service, standalone CLI and preserved INI configuration.

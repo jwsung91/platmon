@@ -20,12 +20,12 @@ dpkg-query -W platmon
 ```
 
 Use MAJOR.MINOR.PATCH: patch for compatible fixes, minor for compatible features,
-major for breaking changes. During 0.x development, document any breaking change in
-the changelog before release. API `schema_version` remains a separate contract; a
+major for breaking changes. From 1.0.0 this covers the HTTP API, the `platmon.ini` keys and
+the `platmon` command's options. API `schema_version` remains a separate contract; a
 release bump does not change it. Update `CHANGELOG.md` in the same change as `VERSION`.
 
-The first application version is `0.1.0`, initially unreleased. Debian package versions
-append a packaging revision: `0.1.0-1`. A packaging-only rebuild can use `-2` without
+The first release is `1.0.0` (a `v0.1.0` tag exists from packaging validation and was never
+published). Debian package versions append a packaging revision: `1.0.0-1`. A packaging-only rebuild can use `-2` without
 changing the application version. Never replace an already released version's files.
 
 ## Build
@@ -34,12 +34,12 @@ Build on Linux with Python 3.9+ and the installed `dpkg-deb` tool (dpkg 1.19+).
 No Python build dependency or root access is needed:
 
 ```sh
-python3 scripts/package.py --output dist/0.1.0-1
-python3 scripts/check_package.py dist/0.1.0-1/platmon_0.1.0-1_all.deb
-(cd dist/0.1.0-1 && sha256sum -c SHA256SUMS)
+python3 scripts/package.py --output dist/1.0.0-1
+python3 scripts/check_package.py dist/1.0.0-1/platmon_1.0.0-1_all.deb
+(cd dist/1.0.0-1 && sha256sum -c SHA256SUMS)
 ```
 
-The fresh output directory contains `.deb`, `platmon-0.1.0.tar.gz`, `BUILD.json`
+The fresh output directory contains `.deb`, `platmon-1.0.0.tar.gz`, `BUILD.json`
 (input content hashes and versions) and `SHA256SUMS`. The source archive includes
 runtime, tests, installation/build scripts and documentation, excluding caches and
 private validation artifacts. It can rebuild the package without `.git`.
@@ -53,7 +53,7 @@ Download a fixed release, verify its checksums and keep its files for rollback.
 Install the local package using APT, which checks the declared host dependencies:
 
 ```sh
-sudo apt install ./platmon_0.1.0-1_all.deb
+sudo apt install ./platmon_1.0.0-1_all.deb
 systemctl status platmon --no-pager
 platmon --version
 platmon --once
@@ -142,7 +142,7 @@ directories are never automatically deleted by subsequent updates or uninstall.
    installation migration. CI uses an isolated container for dpkg lifecycle checks;
    actual systemd sandbox/startup and ARM device readings require real-device acceptance.
 3. Merge the reviewed change into `main` using the repository's signing/hooks policy.
-   Tag the verified commit included in `main` as `v0.1.0`; use `v0.1.0-2` for packaging
+   Tag the verified commit included in `main` as `v1.0.0`; use `v1.0.0-2` for packaging
    revision 2. Confirm the intended commit and required checks before pushing the tag.
    Creating a local tag alone does not start the workflow. This document does not create a tag.
 4. The release workflow fetches `main` and rejects tags whose commit is not an ancestor
@@ -165,8 +165,8 @@ by these scripts. Releases currently use stable MAJOR.MINOR.PATCH versions only.
 To run the dpkg lifecycle check locally, use Docker and a disposable Ubuntu container:
 
 ```sh
-python3 scripts/package.py --revision 2 --output dist/0.1.0-2
-python3 scripts/check_package_install.py dist/0.1.0-1/*.deb dist/0.1.0-2/*.deb
+python3 scripts/package.py --revision 2 --output dist/1.0.0-2
+python3 scripts/check_package_install.py dist/1.0.0-1/*.deb dist/1.0.0-2/*.deb
 ```
 
 This installs test OS tools inside the container, mounts only the artifact directories
