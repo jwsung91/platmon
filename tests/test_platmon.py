@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from platmon import DEFAULTS, load_config
+from platmon import DEFAULTS, levels, load_config
 
 SHIPPED_INI = str(Path(__file__).parent.parent / "platmon.ini")
 
@@ -69,6 +69,17 @@ def test_frontends_flag_enables_exactly_those(tmp_path):
     ("[core]\ninterval = -1\n", None, "out of range"),
     ("port = 1\n", None, "cannot parse config"),  # no section header
     ("[http]\nbind = 10%\n", ["http"], None),  # % is literal, not interpolation
+    # web page levels: two numbers, warning below critical, within the scale
+    ("[thresholds]\ncpu = 80\n", None, r"\[thresholds\] cpu = '80': give two numbers"),
+    ("[thresholds]\ncpu = 80, 90, 95\n", None, "give two numbers"),
+    ("[thresholds]\nmemory = high, 90\n", None, "give two numbers"),
+    ("[thresholds]\ngpu = 90, 80\n", None, r"need 0 < warning < critical <= 100"),
+    ("[thresholds]\nfilesystem = 80, 101\n", None, "<= 100"),
+    ("[thresholds]\ncpu = nan, 90\n", None, "need 0 < warning"),
+    ("[thresholds]\ntemperature = 0, 90\n", None, r"<= 150"),
+    ("[thresholds]\ntemperature = 85, 151\n", None, r"<= 150"),
+    ("[thresholds]\nswap = 80, 90\n", None, r"\[thresholds\] unknown key\(s\): swap"),
+    ("[thresholds]\ntemperature = 70.5, 82\n", None, None),
 ])
 def test_rejects_bad_config(tmp_path, ini, frontends, error):
     path = tmp_path / "p.ini"
@@ -78,6 +89,16 @@ def test_rejects_bad_config(tmp_path, ini, frontends, error):
         return
     with pytest.raises(ValueError, match=error):
         load_config(str(path), frontends)
+
+
+def test_levels(tmp_path):
+    """Defaults: percent levels, and no temperature (the page picks the board's); the file overrides them."""
+    assert levels(load_config()) == {"cpu": [80, 90], "gpu": [80, 90], "memory": [80, 90], "filesystem": [80, 90],
+                                     "temperature": None}
+    ini = tmp_path / "p.ini"
+    ini.write_text("[thresholds]\nmemory = 70, 85\ntemperature = 70.5, 82\n")
+    got = levels(load_config(str(ini)))
+    assert got["memory"] == [70, 85] and got["temperature"] == [70.5, 82] and got["cpu"] == [80, 90]
 
 
 def test_missing_file():

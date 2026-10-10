@@ -258,7 +258,7 @@ def test_slow_groups_and_history_follow_configuration(monkeypatch, tmp_path, tex
             return self
     seen = {}
 
-    def frontend(sampler, cfg, observations, history=None):
+    def frontend(sampler, cfg, observations, history=None, levels=None):
         seen.update(observations=observations, sampler=sampler, history=history)
         raise Stop
     monkeypatch.setattr(platmon, "Sampler", lambda *a, **k: FakeSampler())

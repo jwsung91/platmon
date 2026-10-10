@@ -34,9 +34,11 @@ def history_query(history, query):
     return prefix, seconds, points
 
 
-def make_handler(sampler, web=True, observations=None, history=None):
+def make_handler(sampler, web=True, observations=None, history=None, levels=None):
     """observations: the service's collector.slow.Observations (low-frequency groups), or None.
-    history: its collector.history.History, or None (then /api/history is 404)."""
+    history: its collector.history.History, or None (then /api/history is 404).
+    levels: the web page's warning and critical levels from [thresholds], or None for the page's defaults."""
+    page_values = {b"@VERSION@": VERSION.encode(), b"@LEVELS@": json.dumps(levels or {}).encode()}
     def observed():
         return observations.view() if observations else {"schema_version": 2, "instance_id": sampler.instance_id,
                                                           "clock": dict(sampler.clock), "groups": {}}
@@ -82,8 +84,10 @@ def make_handler(sampler, web=True, observations=None, history=None):
                 else:  # same screen as the platmon command: watch -n1 curl -s host:9797/text
                     body, ctype = (render(stats, observed()) + "\n").encode(), "text/plain; charset=utf-8"
             elif web and self.path in ("/", "/index.html"):
-                with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:  # the footer shows this version
-                    body, ctype = f.read().replace(b"@VERSION@", VERSION.encode()), "text/html; charset=utf-8"
+                with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:  # the version and levels it shows
+                    body, ctype = f.read(), "text/html; charset=utf-8"
+                for mark, value in page_values.items():
+                    body = body.replace(mark, value)
             elif web and self.path in BRAND_ASSETS:
                 with open(os.path.join(WEB_DIR, "assets", "brand", BRAND_ASSETS[self.path]), "rb") as f:
                     body, ctype = f.read(), "image/svg+xml"
@@ -107,10 +111,10 @@ def make_handler(sampler, web=True, observations=None, history=None):
     return Handler
 
 
-def start(sampler, cfg, observations=None, history=None):
-    """cfg: the [http] config section (bind, port, web)."""
+def start(sampler, cfg, observations=None, history=None, levels=None):
+    """cfg: the [http] config section (bind, port, web); levels: see make_handler."""
     httpd = ThreadingHTTPServer((cfg.get("bind"), cfg.getint("port")),
-                                make_handler(sampler, cfg.getboolean("web"), observations, history))
+                                make_handler(sampler, cfg.getboolean("web"), observations, history, levels))
     print(f"platmon http on {cfg.get('bind')}:{cfg.getint('port')}", flush=True)
     t = threading.Thread(target=httpd.serve_forever, name="http", daemon=True)
     t.start()

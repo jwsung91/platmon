@@ -26,7 +26,7 @@ from collector.wifi import Wifi
 from frontends import server
 from frontends.cli import VERSION
 
-FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section); outputs that run inside the core
+FRONTENDS = {"http": server.start}  # name -> start(sampler, cfg section, ...); outputs that run inside the core
 
 DEFAULTS = {  # the type of each default is the type its config value must parse as
     "core": {"interval": 1.0},
@@ -38,6 +38,8 @@ DEFAULTS = {  # the type of each default is the type its config value must parse
     "history": {"enabled": True, "retention": 600.0},
     "pressure": {"enabled": True},
     "http": {"enabled": True, "bind": "0.0.0.0", "port": 9797, "web": True},
+    # the web page's warning and critical levels; temperature empty: the board default the page picks
+    "thresholds": {"cpu": "80, 90", "gpu": "80, 90", "memory": "80, 90", "filesystem": "80, 90", "temperature": ""},
 }
 REMOVED = {"terminal": "the terminal view is now the `platmon` command (frontends/cli.py); delete this section"}
 RANGES = {("core", "interval"): (0.1, 3600), ("storage", "interval"): (5, 3600), ("wifi", "interval"): (1, 3600), ("probe", "interval"): (1, 3600),
@@ -69,6 +71,25 @@ def check(cfg):
                     raise ValueError(f"[{section}] {key} = {value} is out of range ({lo} to {hi})")
 
 
+def levels(cfg):
+    """[thresholds] as {name: [warning, critical]}, or None for an empty temperature. Raises ValueError."""
+    out = {}
+    for name in DEFAULTS["thresholds"]:
+        text = cfg["thresholds"][name].strip()
+        if name == "temperature" and not text:
+            out[name] = None
+            continue
+        try:
+            warn, crit = (float(v) for v in text.split(","))
+        except ValueError:
+            raise ValueError(f"[thresholds] {name} = {text!r}: give two numbers, warning then critical, e.g. 80, 90")
+        top = 150 if name == "temperature" else 100  # °C, else percent
+        if not 0 < warn < crit <= top:  # also rejects nan and inf
+            raise ValueError(f"[thresholds] {name} = {text!r}: need 0 < warning < critical <= {top}")
+        out[name] = [warn, crit]
+    return out
+
+
 def load_config(path=None, frontends=None):
     """Defaults < config file < frontends (list of names; enables exactly those). Raises ValueError, also when
     the result would start nothing: scripts/systemd/install.sh relies on this to refuse before changing anything."""
@@ -81,6 +102,7 @@ def load_config(path=None, frontends=None):
     except configparser.Error as e:
         raise ValueError(f"cannot parse config {path}: {e}")
     check(cfg)
+    levels(cfg)
     probe = cfg["probe"]
     try:
         targets = parse_targets(probe.get("targets"))
@@ -149,7 +171,7 @@ def main(argv=None):
     sampler.start()
     observations.start()
     threads = [t for name, start in FRONTENDS.items()
-               if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name], observations, history))]
+               if cfg[name].getboolean("enabled") and (t := start(sampler, cfg[name], observations, history, levels(cfg)))]
     if not threads:
         p.error("no frontend is running; enable one in the config or with --frontends")
     try:

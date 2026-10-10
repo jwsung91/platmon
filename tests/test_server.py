@@ -70,6 +70,7 @@ def test_routes(web, path, expected):
             assert json.loads(body)["state"] == "ready"
         if expected == 200 and path in ("/", "/index.html"):  # the footer carries the running version
             assert f"platmon v{VERSION}".encode() in body and b"@VERSION@" not in body
+            assert b'<script type="application/json" id="levels">{}</script>' in body  # no levels: page defaults
         if path == "/text":  # the terminal view, unchanged by the metadata, no screen control codes
             assert body.decode() == render(FULL) + "\n" and b"\033[" not in body
         if path in ("/api/stats", "/api/status", "/text"):
@@ -89,6 +90,18 @@ def test_brand_assets(filename):
             assert r.status == 200
             assert r.headers["Content-Type"] == "image/svg+xml"
             assert r.read() == asset.read_bytes()
+    finally:
+        httpd.shutdown()
+
+
+def test_levels_reach_the_page():
+    """[thresholds] as the page's JSON, filled in when the page is served."""
+    levels = {"cpu": [70.0, 85.0], "temperature": None}
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(NoWait(lambda: None), True, levels=levels))
+    threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
+    try:
+        body = get(f"http://127.0.0.1:{httpd.server_address[1]}/")[2]
+        assert f'id="levels">{json.dumps(levels)}</script>'.encode() in body
     finally:
         httpd.shutdown()
 
